@@ -33,6 +33,7 @@ export interface DailyGrowthInput {
   completedFeatureCount: number;
   event: GrowthEvent | null;
   incidents: readonly IncidentSeverity[];
+  failureRate?: number;
   random: RandomSource;
 }
 
@@ -41,12 +42,16 @@ export interface DailyGrowthResult {
   featureModifier: number;
   eventModifier: number;
   incidentModifier: number;
+  availabilityModifier: number;
+  operationalModifier: number;
   totalModifier: number;
 }
 
 export class GrowthPolicy {
   static readonly FEATURE_BONUS = 0.005;
   static readonly EVENT_CHANCE = 0.02;
+  static readonly MAX_AVAILABILITY_PENALTY = 0.08;
+  static readonly MAX_OPERATIONAL_PENALTY = 0.1;
 
   static calculate(input: DailyGrowthInput): DailyGrowthResult {
     const magnitude = Math.floor(input.random.next() * 5) + 1;
@@ -55,14 +60,22 @@ export class GrowthPolicy {
     const featureModifier = input.completedFeatureCount * this.FEATURE_BONUS;
     const eventModifier = input.event?.active ? input.event.modifier : 0;
     const incidentPenalty = input.incidents.reduce((sum, severity) => sum + INCIDENT_GROWTH_PENALTY[severity], 0);
-    const incidentModifier = Math.max(-0.1, incidentPenalty);
+    const incidentModifier = Math.max(-this.MAX_OPERATIONAL_PENALTY, incidentPenalty);
+    const failureRate = Math.max(0, Math.min(1, input.failureRate ?? 0));
+    const availabilityModifier = -failureRate * this.MAX_AVAILABILITY_PENALTY;
+    const operationalModifier = Math.max(
+      -this.MAX_OPERATIONAL_PENALTY,
+      incidentModifier + availabilityModifier,
+    );
 
     return {
       baseModifier,
       featureModifier,
       eventModifier,
       incidentModifier,
-      totalModifier: baseModifier + featureModifier + eventModifier + incidentModifier,
+      availabilityModifier,
+      operationalModifier,
+      totalModifier: baseModifier + featureModifier + eventModifier + operationalModifier,
     };
   }
 
