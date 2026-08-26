@@ -43,6 +43,21 @@ describe('growth', () => {
     expect(result.incidentModifier).toBe(-0.1);
   });
 
+  it('turns failed service requests into DAU pressure without exceeding the operational penalty cap', () => {
+    const result = GrowthPolicy.calculate({
+      phase: 1,
+      completedFeatureCount: 0,
+      event: null,
+      incidents: ['CRITICAL'],
+      failureRate: 1,
+      random: new SequenceRandom([0, 0]),
+    });
+
+    expect(result.availabilityModifier).toBe(-0.08);
+    expect(result.operationalModifier).toBe(-0.1);
+    expect(result.totalModifier).toBeCloseTo(-0.09);
+  });
+
   it('rounds DAU to an integer', () => {
     expect(GrowthPolicy.nextDau(101, 0.015)).toBe(103);
   });
