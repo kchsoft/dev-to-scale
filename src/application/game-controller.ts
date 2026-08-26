@@ -25,7 +25,7 @@ import {
 } from '../core';
 
 export type LoadTone = 'stable' | 'busy' | 'critical' | 'overload' | 'incident';
-export type GameEventKind = 'requirement' | 'incident' | 'launch' | 'settlement' | 'bankrupt' | 'won';
+export type GameEventKind = 'requirement' | 'incident' | 'traffic' | 'launch' | 'settlement' | 'bankrupt' | 'won';
 
 export interface GameEventView {
   id: string;
@@ -254,6 +254,12 @@ function calendarForDay(day: number): { month: number; dayOfMonth: number; daysU
   return { month, dayOfMonth, daysUntilSettlement: 31 - dayOfMonth };
 }
 
+interface FeatureImpactPreview {
+  summary: string;
+  tone: AlertView['tone'];
+  nodeId?: string;
+}
+
 export class GameController {
   readonly engine: GameEngine;
   private readonly listeners = new Set<(view: GameView) => void>();
@@ -339,7 +345,23 @@ export class GameController {
       events.push({ id: `launch-${after.day}`, kind: 'launch', title: 'SERVICE ONLINE', message: '커뮤니티 서비스가 공개되었습니다. DAU 80에서 시작합니다.', autoPause: false });
     }
     if (after.currentFeature && after.currentFeature.id !== before.currentFeature?.id && after.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
-      events.push({ id: `req-${after.day}-${after.currentFeature.id}`, kind: 'requirement', title: 'NEW REQUIREMENT', message: `${LABELS[after.currentFeature.id] ?? after.currentFeature.id} 개발이 자동으로 시작되었습니다.`, autoPause: true });
+      const impact = this.featureImpact(after, after.currentFeature.id);
+      events.push({
+        id: `req-${after.day}-${after.currentFeature.id}`,
+        kind: 'requirement',
+        title: 'NEW REQUIREMENT',
+        message: `${LABELS[after.currentFeature.id] ?? after.currentFeature.id} 개발이 자동으로 시작되었습니다.${impact ? ` 출시 예상 · ${impact.summary}` : ''}`,
+        autoPause: true,
+      });
+    }
+    if (after.growthEvent?.type === 'VIRAL' && before.growthEvent?.type !== 'VIRAL') {
+      events.push({
+        id: `traffic-${after.day}`,
+        kind: 'traffic',
+        title: 'TRAFFIC SPIKE',
+        message: `바이럴 유입이 시작됐습니다. 약 ${after.growthEvent.remainingDays}일 동안 요청량 ×${after.growthEvent.trafficMultiplier.toFixed(1)} · DAU 성장 보너스 +${percent(after.growthEvent.growthModifier)}%p. 현재 병목을 보고 Scale / Cache / Queue를 준비하세요.`,
+        autoPause: true,
+      });
     }
     if (after.lastSettlement && after.lastSettlement.month !== before.lastSettlement?.month) {
       const settlement = after.lastSettlement;
@@ -490,6 +512,29 @@ export class GameController {
 
   private alerts(snapshot: GameSnapshot, profit: number): AlertView[] {
     const alerts: AlertView[] = [];
+
+    if (snapshot.growthEvent?.type === 'VIRAL') {
+      alerts.push({
+        id: 'viral-traffic',
+        tone: 'warning',
+        title: `Viral Traffic ×${snapshot.growthEvent.trafficMultiplier.toFixed(1)}`,
+        detail: `${snapshot.growthEvent.remainingDays}일 남음 · CPU/I/O/Queue/Storage Demand가 일시적으로 증가합니다.`,
+      });
+    }
+
+    if (snapshot.currentFeature && snapshot.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
+      const impact = this.featureImpact(snapshot, snapshot.currentFeature.id);
+      if (impact) {
+        alerts.push({
+          id: `feature-impact-${snapshot.currentFeature.id}`,
+          tone: impact.tone,
+          title: `출시 영향 · ${LABELS[snapshot.currentFeature.id] ?? snapshot.currentFeature.id}`,
+          detail: impact.summary,
+          nodeId: impact.nodeId,
+        });
+      }
+    }
+
     const ratios: Array<[string, number, string]> = [
       ['Application', snapshot.load.appRatio, 'application'],
       ['Database', snapshot.load.dbRatio, 'database'],
@@ -544,6 +589,41 @@ export class GameController {
     return alerts.slice(0, 6);
   }
 
+  private featureImpact(snapshot: GameSnapshot, featureId: string): FeatureImpactPreview | null {
+    const feature = COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES];
+    if (!feature || !snapshot.launched) return null;
+    const projected = this.engine.previewLoadWithFeature(feature);
+    const axes = [
+      { label: 'APP CPU', before: snapshot.load.appCpuRatio, after: projected.appCpuRatio, nodeId: 'application' },
+      { label: 'APP I/O', before: snapshot.load.appIoRatio, after: projected.appIoRatio, nodeId: 'application' },
+      { label: 'DB CPU', before: snapshot.load.dbCpuRatio, after: projected.dbCpuRatio, nodeId: 'database' },
+      { label: 'DB I/O', before: snapshot.load.dbIoRatio, after: projected.dbIoRatio, nodeId: 'database' },
+      { label: 'ASYNC', before: snapshot.load.asyncRatio, after: projected.asyncRatio, nodeId: 'queue' },
+      { label: 'STORAGE', before: snapshot.load.storageRatio, after: projected.storageRatio, nodeId: 'storage' },
+    ];
+    const top = [...axes].sort((left, right) => right.after - left.after)[0];
+    const changes = [...axes]
+      .sort((left, right) => (right.after - right.before) - (left.after - left.before))
+      .slice(0, 2)
+      .map((axis) => `${axis.label} ${percent(axis.before)}→${percent(axis.after)}%`);
+    const failureIncrease = projected.failureRate - snapshot.load.failureRate;
+    if (failureIncrease > 0.001) {
+      changes.push(`FAIL ${percent(snapshot.load.failureRate)}→${percent(projected.failureRate)}%`);
+    }
+    const suffix = projected.failureRate >= 0.1
+      ? ' · ⚠ 필수 요청 경로 확인 필요'
+      : top.after > 1
+        ? ` · ⚠ ${top.label} OVERLOAD 예상`
+        : top.after >= 0.9
+          ? ` · △ ${top.label} Critical 근접`
+          : ' · 현재 Capacity 안쪽';
+    return {
+      summary: `${changes.join(' · ')}${suffix}`,
+      tone: projected.failureRate >= 0.1 || top.after > 1 ? 'danger' : top.after >= 0.9 ? 'warning' : 'info',
+      nodeId: top.nodeId,
+    };
+  }
+
   private technologyOptions(snapshot: GameSnapshot): TechnologyOptionView[] {
     return (Object.keys(TECHNOLOGIES) as BuildableTechnologyId[]).map((id) => {
       const tech = TECHNOLOGIES[id];
@@ -584,7 +664,9 @@ export class GameController {
             .filter(Boolean),
         ]
       : [];
-    const after = LoadCalculator.calculate(snapshot.dau, features, clone);
+    const after = LoadCalculator.calculate(snapshot.dau, features, clone, {
+      trafficMultiplier: snapshot.growthEvent?.trafficMultiplier ?? 1,
+    });
     if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
       return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
     }
