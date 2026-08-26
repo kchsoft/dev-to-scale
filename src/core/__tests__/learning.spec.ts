@@ -18,17 +18,15 @@ describe('learning', () => {
   it('does not allow a language level-up without experience and prerequisite fundamentals', () => {
     const developer = new DeveloperProfile();
     const java = skillRef.language('JAVA');
-
-    developer.gainExperience(java, 10);
+    developer.get(java).setLevel(3);
+    developer.gainExperience(java, 45);
     developer.get(skillRef.fundamental('OS_RUNTIME')).setLevel(2);
     developer.get(skillRef.fundamental('DSA')).setLevel(2);
 
     const slot = new LearningSlot();
     expect(() => slot.start(java, developer)).toThrow(/NETWORK/i);
 
-    developer.get(skillRef.fundamental('NETWORK')).setLevel(1);
-    developer.get(skillRef.fundamental('OS_RUNTIME')).setLevel(1);
-    developer.get(skillRef.fundamental('DSA')).setLevel(1);
+    developer.get(skillRef.fundamental('NETWORK')).setLevel(2);
     expect(() => slot.start(java, developer)).not.toThrow();
   });
 
@@ -79,7 +77,7 @@ describe('learning', () => {
   it('uses fundamental prerequisites for technology learning', () => {
     const developer = new DeveloperProfile();
     const kafka = skillRef.technology('KAFKA');
-    developer.gainExperience(kafka, 10);
+    developer.gainExperience(kafka, 12);
 
     expect(() => new LearningSlot().start(kafka, developer)).toThrow(/NETWORK|OS_RUNTIME|SOFTWARE_DESIGN/i);
   });
