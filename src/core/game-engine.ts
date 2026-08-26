@@ -6,7 +6,7 @@ import { GrowthEvent, GrowthPolicy, RandomSource } from './growth';
 import { IncidentCandidate, IncidentGenerator, IncidentManager } from './incident-manager';
 import { DatabaseId, InfrastructureState, LoadCalculator, LoadSnapshot, ServerSize, TechnologyId } from './infrastructure';
 import { DeveloperProfile, FundamentalSkillId, LearningRules, LearningSlot, SkillRef, skillRef, TechnologySkillId } from './learning';
-import { CommunityFeatureId, CommunityProgression } from './progression';
+import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
 
@@ -58,7 +58,7 @@ export class GameEngine {
   private readonly incidentGenerator = new IncidentGenerator();
   private readonly monthlyLedger = new MonthlyEconomyLedger();
   private readonly completedFeatureDefinitions: FeatureDefinition[] = [];
-  private featureTask: FeatureDevelopmentTask;
+  private featureTask: FeatureDevelopmentTask | null;
   private growthEvent: GrowthEvent | null = null;
   private _day = 1;
   private _dau = 0;
@@ -135,9 +135,11 @@ export class GameEngine {
     if (builtTechnology) this.infrastructure.deployTechnology(builtTechnology);
     this.incidents.advanceResponseDay();
 
-    const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
-    this.featureTask.advanceDay({ frameworkLevel, incidentModifier: incidentDevelopmentModifier });
-    this.finishFeatureIfComplete();
+    if (this.featureTask) {
+      const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
+      this.featureTask.advanceDay({ frameworkLevel, incidentModifier: incidentDevelopmentModifier });
+      this.finishFeatureIfComplete();
+    }
     this.autoStartRequirementIfEligible();
 
     const revenueModifier = this.completedFeatureDefinitions.reduce((sum, feature) => sum + feature.revenueModifier, 0);
@@ -217,18 +219,19 @@ export class GameEngine {
   }
 
   private finishFeatureIfComplete(): void {
-    if (!this.featureTask.completed) return;
+    const task = this.featureTask;
+    if (!task?.completed) return;
 
-    if (this.featureTask.feature.id === COMMUNITY_BOOTSTRAP.id) {
+    if (task.feature.id === COMMUNITY_BOOTSTRAP.id) {
       this._launched = true;
       this._dau = 80;
-      this.featureTask = null as unknown as FeatureDevelopmentTask;
+      this.featureTask = null;
       return;
     }
 
-    this.completedFeatureDefinitions.push(this.featureTask.feature);
+    this.completedFeatureDefinitions.push(task.feature);
     this.progression.completeCurrentFeature();
-    this.featureTask = null as unknown as FeatureDevelopmentTask;
+    this.featureTask = null;
   }
 
   private autoStartRequirementIfEligible(): void {
