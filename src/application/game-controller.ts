@@ -28,6 +28,7 @@ import {
   GameView,
   InfrastructureCostView,
   LoadTone,
+  ObservabilityView,
   RequestFlowView,
   ServiceNodeView,
   SkillNodeView,
@@ -158,6 +159,7 @@ export class GameController {
     const monthlyRevenue = RevenuePolicy.monthlyRevenue(snapshot.dau, revenueModifier);
     const monthlyCost = this.engine.infrastructure.monthlyCost + RevenuePolicy.monthlyAiCost(snapshot.dau, aiActive);
     const calendar = calendarForDay(snapshot.day);
+    const service = OperationalViewProjector.project(snapshot, this.engine.developer);
 
     return {
       hud: {
@@ -176,13 +178,13 @@ export class GameController {
       },
       nodes: this.serviceNodes(snapshot),
       workSlots: this.workSlots(snapshot),
-      alerts: this.alerts(snapshot, monthlyRevenue - monthlyCost),
+      alerts: this.alerts(snapshot, monthlyRevenue - monthlyCost, service.observability),
       technologies: this.technologyOptions(snapshot),
       skills: this.skillNodes(),
       features: this.featureCards(snapshot),
       requestFlows: this.requestFlowViews(snapshot),
       infrastructureCosts: this.infrastructureCostView(),
-      service: OperationalViewProjector.project(snapshot, this.engine.developer),
+      service,
       operations: {
         currentFeature: snapshot.currentFeature,
         currentTechnologyBuild: snapshot.currentTechnologyBuild,
@@ -270,6 +272,7 @@ export class GameController {
         message: `${this.nodeLabel(incident.nodeId)}에서 장애가 발생했습니다.`,
         severity: incident.severity,
         nodeId: incident.nodeId,
+        diagnosis: OperationalViewProjector.diagnosisText(incident.nodeId, after, this.engine.developer),
         autoPause,
       });
     }
@@ -407,7 +410,7 @@ export class GameController {
     ];
   }
 
-  private alerts(snapshot: GameSnapshot, profit: number): AlertView[] {
+  private alerts(snapshot: GameSnapshot, profit: number, observability: ObservabilityView): AlertView[] {
     const alerts: AlertView[] = [];
 
     if (snapshot.growthEvent?.type === 'VIRAL') {
@@ -507,7 +510,17 @@ export class GameController {
     if (alerts.length === 0) {
       alerts.push({ id: 'stable', tone: 'good', title: '서비스 안정', detail: '현재 즉시 확인할 경고가 없습니다.' });
     }
-    return alerts.slice(0, 6);
+    return alerts.slice(0, 6).map((alert) => {
+      if (!alert.id.startsWith('feature-impact-') || observability.level === 'APM') return alert;
+      return {
+        ...alert,
+        tone: 'info',
+        detail: observability.level === 'METRICS'
+          ? '새 기능이 자원 사용량을 높입니다. APM 해금 시 축별 출시 영향과 예상 병목을 확인할 수 있습니다.'
+          : '새 기능이 서비스 부하를 높일 수 있습니다. Metrics/APM을 해금하면 출시 영향을 더 정확히 볼 수 있습니다.',
+        nodeId: undefined,
+      };
+    });
   }
 
   private featureImpact(snapshot: GameSnapshot, featureId: string): FeatureImpactPreview | null {
