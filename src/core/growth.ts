@@ -5,23 +5,49 @@ export interface RandomSource {
 }
 
 export type GrowthEventType = 'VIRAL' | 'NEGATIVE_BUZZ';
+export type TrafficSpikeResponse = 'RIDE' | 'THROTTLE' | 'BURST';
+export type TrafficSpikeResponseState = 'PENDING' | TrafficSpikeResponse;
 
 export class GrowthEvent {
   private remaining = 7;
+  private responseState: TrafficSpikeResponseState = 'PENDING';
 
   constructor(readonly type: GrowthEventType) {}
 
+  get response(): TrafficSpikeResponseState { return this.responseState; }
+  get canRespond(): boolean { return this.type === 'VIRAL' && this.active && this.responseState === 'PENDING'; }
+
   get modifier(): number {
-    return this.type === 'VIRAL' ? 0.05 : -0.05;
+    if (this.type !== 'VIRAL') return -0.05;
+    // Throttling deliberately trades acquisition for stability.
+    return this.responseState === 'THROTTLE' ? 0.01 : 0.05;
   }
 
-  /** Viral attention creates more requests than DAU alone would imply. */
+  /** Incoming attention remains the same regardless of how we respond. */
   get trafficMultiplier(): number {
     return this.type === 'VIRAL' ? 1.8 : 1;
   }
 
+  /**
+   * Effective request pressure after the player's response.
+   * THROTTLE rejects/defers traffic aggressively; BURST absorbs part of the spike
+   * through temporary emergency capacity without pretending the incoming traffic vanished.
+   */
+  get loadMultiplier(): number {
+    if (this.type !== 'VIRAL') return 1;
+    if (this.responseState === 'THROTTLE') return 1.15;
+    if (this.responseState === 'BURST') return 1.35;
+    return 1.8;
+  }
+
   get remainingDays(): number { return this.remaining; }
   get active(): boolean { return this.remaining > 0; }
+
+  respond(response: TrafficSpikeResponse): void {
+    if (this.type !== 'VIRAL' || !this.active) throw new Error('No active viral traffic spike');
+    if (this.responseState !== 'PENDING') throw new Error('Traffic spike response already selected');
+    this.responseState = response;
+  }
 
   advanceDay(): void {
     this.remaining = Math.max(0, this.remaining - 1);
