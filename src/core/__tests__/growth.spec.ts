@@ -64,7 +64,39 @@ describe('growth', () => {
 
     expect(result.availabilityModifier).toBe(-0.08);
     expect(result.operationalModifier).toBe(-0.1);
-    expect(result.totalModifier).toBeCloseTo(-0.09);
+    expect(result.baseModifier).toBe(0);
+    expect(result.totalModifier).toBeCloseTo(-0.1);
+  });
+
+  it('suppresses all positive growth while an incident is active, even during a viral event', () => {
+    const result = GrowthPolicy.calculate({
+      phase: 1,
+      completedFeatureCount: 8,
+      event: new GrowthEvent('VIRAL'),
+      incidents: ['MINOR'],
+      random: new SequenceRandom([0.99, 0]),
+    });
+
+    expect(result.baseModifier).toBe(0);
+    expect(result.featureModifier).toBe(0);
+    expect(result.eventModifier).toBe(0);
+    expect(result.incidentModifier).toBe(-0.01);
+    expect(result.totalModifier).toBeLessThan(0);
+  });
+
+  it('keeps negative market movement on top of incident churn', () => {
+    const result = GrowthPolicy.calculate({
+      phase: 1,
+      completedFeatureCount: 8,
+      event: new GrowthEvent('NEGATIVE_BUZZ'),
+      incidents: ['MAJOR'],
+      random: new SequenceRandom([0, 0.99]),
+    });
+
+    expect(result.baseModifier).toBe(-0.01);
+    expect(result.featureModifier).toBe(0);
+    expect(result.eventModifier).toBe(-0.05);
+    expect(result.totalModifier).toBeLessThanOrEqual(-0.09);
   });
 
   it('drops DAU by the amount capacity exceeds 100%, capped at 30 percentage points per day', () => {
