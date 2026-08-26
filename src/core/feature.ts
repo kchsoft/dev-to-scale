@@ -103,9 +103,7 @@ export class FrameworkDefinition {
   requiredWorkFor(feature: FeatureDefinition): number {
     let modifier = this.baseWorkModifier;
     modifier *= this.complexityWorkModifiers[feature.complexity] ?? 1;
-    for (const tag of feature.tags) {
-      modifier *= this.tagWorkModifiers[tag] ?? 1;
-    }
+    for (const tag of feature.tags) modifier *= this.tagWorkModifiers[tag] ?? 1;
     return feature.baseWork * modifier;
   }
 
@@ -129,21 +127,21 @@ export class FeatureDevelopmentTask {
     readonly requiredWork: number,
   ) {}
 
-  static start(feature: FeatureDefinition, framework: FrameworkDefinition): FeatureDevelopmentTask {
-    return new FeatureDevelopmentTask(feature, framework, framework.requiredWorkFor(feature));
+  static start(
+    feature: FeatureDefinition,
+    framework: FrameworkDefinition,
+    stackWorkModifier = 1,
+  ): FeatureDevelopmentTask {
+    return new FeatureDevelopmentTask(
+      feature,
+      framework,
+      framework.requiredWorkFor(feature) * stackWorkModifier,
+    );
   }
 
-  get completedWork(): number {
-    return this._completedWork;
-  }
-
-  get progressRatio(): number {
-    return Math.min(1, this._completedWork / this.requiredWork);
-  }
-
-  get completed(): boolean {
-    return this._completedWork >= this.requiredWork;
-  }
+  get completedWork(): number { return this._completedWork; }
+  get progressRatio(): number { return Math.min(1, this._completedWork / this.requiredWork); }
+  get completed(): boolean { return this._completedWork >= this.requiredWork; }
 
   advanceDay(context: FeatureDevelopmentProgressContext): number {
     if (this.completed) return 0;
