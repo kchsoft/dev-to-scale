@@ -6,10 +6,18 @@ import { FinanceAccount, MonthlyEconomyLedger, RevenuePolicy } from './finance';
 import { GrowthEvent, GrowthPolicy, RandomSource } from './growth';
 import { IncidentGenerator, IncidentManager } from './incident-manager';
 import { IncidentTopology } from './incident-topology';
-import { InfrastructureState, LoadCalculator, LoadSnapshot, ServerSize } from './infrastructure';
+import {
+  InfrastructureState,
+  LoadCalculationContext,
+  LoadCalculator,
+  LoadSnapshot,
+  ServerSize,
+  TechnologyId,
+} from './infrastructure';
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
+import { requestNodeForIncident, RequestNodeKind, trafficHealthForSeverity } from './request-flow';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
 
 export type GameStatus = 'RUNNING' | 'BANKRUPT' | 'WON';
@@ -71,7 +79,7 @@ export class GameEngine {
     this.progression = new CommunityProgression(config.seed);
     this.finance = new FinanceAccount(config.startingCash ?? 3_000_000);
     this.featureTask = this.createFeatureTask(COMMUNITY_BOOTSTRAP);
-    this._load = LoadCalculator.calculate(0, [], this.infrastructure);
+    this._load = LoadCalculator.calculate(0, [], this.infrastructure, this.loadCalculationContext());
   }
 
   get day(): number { return this._day; }
@@ -128,8 +136,15 @@ export class GameEngine {
       technologies: this.infrastructure.deployedTechnologies,
     });
 
+    // Growth uses the previous day's observed availability. This keeps the day
+    // boundary deterministic: today's request failures influence tomorrow's DAU.
     if (this._launched) this.advanceGrowth();
-    this._load = LoadCalculator.calculate(this._dau, this.activeFeaturesForLoad(), this.infrastructure);
+    this._load = LoadCalculator.calculate(
+      this._dau,
+      this.activeFeaturesForLoad(),
+      this.infrastructure,
+      this.loadCalculationContext(),
+    );
     if (this._launched) this.maybeGenerateIncident();
 
     // Record the current day's economy before completing new work so newly
@@ -214,6 +229,7 @@ export class GameEngine {
       completedFeatureCount: this.completedFeatureDefinitions.length,
       event: this.growthEvent,
       incidents: this.incidents.severities,
+      failureRate: this._load.failureRate,
       random: this.random,
     });
     this._dau = GrowthPolicy.nextDau(this._dau, result.totalModifier);
@@ -300,6 +316,27 @@ export class GameEngine {
       this.random,
     );
     if (incident) this.incidents.add(incident);
+  }
+
+  private loadCalculationContext(): LoadCalculationContext {
+    const technologyProficiencyLevels: Partial<Record<TechnologyId, number>> = {};
+    for (const technology of this.infrastructure.deployedTechnologies) {
+      technologyProficiencyLevels[technology] = this.developer.get(skillRef.technology(technology)).level;
+    }
+
+    const nodeHealth: Partial<Record<RequestNodeKind, number>> = {};
+    for (const incident of this.incidents.incidents) {
+      const node = requestNodeForIncident(incident.nodeId);
+      if (!node) continue;
+      nodeHealth[node] = trafficHealthForSeverity(incident.severity);
+    }
+
+    return {
+      appProficiencyLevel: this.developer.get(skillRef.framework(this.config.frameworkId)).level,
+      databaseProficiencyLevel: this.developer.get(skillRef.technology(this.config.databaseId)).level,
+      technologyProficiencyLevels,
+      nodeHealth,
+    };
   }
 
   private incidentTopologyContext() {
