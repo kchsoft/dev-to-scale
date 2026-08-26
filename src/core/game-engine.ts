@@ -29,7 +29,13 @@ export interface GameSnapshot {
   dau: number;
   cash: number;
   completedFeatures: readonly string[];
-  currentFeature: null | { id: string; progress: number; requiredWork: number; elapsedDays: number };
+  currentFeature: null | {
+    id: string;
+    progress: number;
+    requiredWork: number;
+    elapsedDays: number;
+    estimatedRemainingDays: number;
+  };
   currentLearning: null | { id: string; targetLevel: number; studyDays: number };
   currentTechnologyBuild: null | { id: string; progress: number; requiredWork: number };
   load: LoadSnapshot;
@@ -90,6 +96,7 @@ export class GameEngine {
             progress: this.featureTask.completedWork,
             requiredWork: this.featureTask.requiredWork,
             elapsedDays: this.featureTask.elapsedDays,
+            estimatedRemainingDays: this.estimatedFeatureRemainingDays(this.featureTask),
           }
         : null,
       currentLearning: learningTask
@@ -217,6 +224,14 @@ export class GameEngine {
     const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
     this.featureTask.advanceDay({ frameworkLevel, incidentModifier });
     this.finishFeatureIfComplete();
+  }
+
+  private estimatedFeatureRemainingDays(task: FeatureDevelopmentTask): number {
+    const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
+    const currentDailyProgress = task.framework.productivity(frameworkLevel, task.feature.complexity)
+      * this.incidents.developmentModifier;
+    if (currentDailyProgress <= 0) return 0;
+    return Math.max(0, Math.ceil((task.requiredWork - task.completedWork) / currentDailyProgress));
   }
 
   private createFeatureTask(feature: FeatureDefinition): FeatureDevelopmentTask {
