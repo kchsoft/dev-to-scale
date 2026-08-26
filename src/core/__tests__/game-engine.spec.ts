@@ -46,6 +46,24 @@ describe('game engine orchestration', () => {
     expect(game.snapshot.currentFeature?.id).toBe(game.progression.featureOrder[0]);
   });
 
+  it('settles cash as day 30 completes and enters the next month at day 31', () => {
+    const game = new GameEngine({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 5,
+      random: new SafePositiveRandom(),
+    });
+
+    for (let day = 0; day < 29; day += 1) game.advanceDay();
+    expect(game.day).toBe(30);
+    expect(game.snapshot.lastSettlement).toBeNull();
+
+    game.advanceDay();
+    expect(game.day).toBe(31);
+    expect(game.snapshot.lastSettlement?.month).toBe(1);
+    expect(game.snapshot.lastSettlement?.cashAfter).toBe(game.snapshot.cash);
+  });
+
   it('keeps clock speed concerns outside the domain by exposing only advanceDay', () => {
     const game = new GameEngine({
       frameworkId: 'SPRING_BOOT',

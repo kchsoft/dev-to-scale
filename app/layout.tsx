@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import "./request-flow.css";
+import "./dense-ui.css";
 
 export const metadata: Metadata = {
   title: "Dev to Scale",

@@ -15,6 +15,7 @@ import {
   LanguageId,
   LearningRules,
   LoadCalculator,
+  RequestNodeKind,
   RevenuePolicy,
   ServerSize,
   SkillRef,
@@ -24,7 +25,7 @@ import {
 } from '../core';
 
 export type LoadTone = 'stable' | 'busy' | 'critical' | 'overload' | 'incident';
-export type GameEventKind = 'requirement' | 'incident' | 'launch' | 'bankrupt' | 'won';
+export type GameEventKind = 'requirement' | 'incident' | 'launch' | 'settlement' | 'bankrupt' | 'won';
 
 export interface GameEventView {
   id: string;
@@ -38,11 +39,15 @@ export interface GameEventView {
 
 export interface HudView {
   day: number;
+  month: number;
+  dayOfMonth: number;
+  daysUntilSettlement: number;
   dau: number;
   cash: number;
   monthlyRevenue: number;
   monthlyCost: number;
   monthlyProfit: number;
+  lastSettlement: GameSnapshot['lastSettlement'];
   status: GameSnapshot['status'];
   launched: boolean;
 }
@@ -115,6 +120,28 @@ export interface FeatureCardView {
   threshold: number;
   state: 'completed' | 'developing' | 'revealed' | 'hidden';
   load: { app: number; db: number; async: number; storage: number } | null;
+  route: readonly RequestNodeKind[] | null;
+}
+
+export interface RequestFlowView {
+  id: string;
+  name: string;
+  nodes: readonly {
+    node: RequestNodeKind;
+    arrivalPercent: number;
+    available: boolean;
+  }[];
+  successPercent: number;
+  failureNode: RequestNodeKind | null;
+  particleCount: number;
+  trafficUnit: number;
+}
+
+export interface InfrastructureCostView {
+  appSizeMonthlyCosts: Record<ServerSize, number>;
+  dbSizeMonthlyCosts: Record<ServerSize, number>;
+  addAppServerMonthlyCostDelta: number | null;
+  addDbReplicaMonthlyCostDelta: number | null;
 }
 
 export interface GameView {
@@ -125,6 +152,8 @@ export interface GameView {
   technologies: TechnologyOptionView[];
   skills: SkillNodeView[];
   features: FeatureCardView[];
+  requestFlows: RequestFlowView[];
+  infrastructureCosts: InfrastructureCostView;
   snapshot: GameSnapshot;
   frameworkId: FrameworkId;
   databaseId: DatabaseId;
@@ -143,7 +172,7 @@ const FRAMEWORK_LANGUAGE: Record<FrameworkId, LanguageId> = {
 };
 
 const LABELS: Record<string, string> = {
-  COMMUNITY_MVP: '커뮤니티 MVP', COMMENT: '댓글', LIKE: '좋아요', IMAGE_UPLOAD: '이미지 업로드',
+  COMMUNITY_MVP: '게시글', COMMENT: '댓글', LIKE: '좋아요', IMAGE_UPLOAD: '이미지 업로드',
   SEARCH: '검색', NOTIFICATION: '알림', AI_RECOMMENDATION: 'AI 개인화 추천', POPULAR_POSTS: '인기글',
   FOLLOW_FEED: '팔로우 피드', ADS: '광고', PREMIUM: 'Premium',
   NETWORK: 'Network', OS_RUNTIME: 'OS & Runtime', DATABASE: 'Database', DSA: 'DS&A', SECURITY: 'Security', SOFTWARE_DESIGN: 'Software Design',
@@ -166,6 +195,7 @@ const TECH_ICONS: Record<BuildableTechnologyId, string> = {
 
 const FUNDAMENTALS: FundamentalSkillId[] = ['NETWORK', 'OS_RUNTIME', 'DATABASE', 'DSA', 'SECURITY', 'SOFTWARE_DESIGN'];
 const TECHNOLOGY_SKILLS: TechnologySkillId[] = ['POSTGRESQL', 'MYSQL', 'MONGODB', 'REDIS', 'SQS', 'RABBITMQ', 'KAFKA', 'ALB', 'OBJECT_STORAGE'];
+const SERVER_SIZES: readonly ServerSize[] = [ServerSize.SMALL, ServerSize.MEDIUM, ServerSize.LARGE, ServerSize.XLARGE];
 
 function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
@@ -199,6 +229,31 @@ function cloneInfrastructure(engine: GameEngine): InfrastructureState {
   return clone;
 }
 
+function trafficUnitForDau(dau: number): number {
+  if (dau <= 100_000) return 10_000;
+  if (dau <= 1_000_000) return 100_000;
+  if (dau <= 10_000_000) return 1_000_000;
+  return 5_000_000;
+}
+
+function nodeIdForRequestNode(node: RequestNodeKind | null): string | undefined {
+  switch (node) {
+    case 'ALB': return 'ALB';
+    case 'APP': return 'application';
+    case 'DB': return 'database';
+    case 'CACHE': return 'REDIS';
+    case 'QUEUE': return 'queue';
+    case 'STORAGE': return 'storage';
+    default: return undefined;
+  }
+}
+
+function calendarForDay(day: number): { month: number; dayOfMonth: number; daysUntilSettlement: number } {
+  const month = Math.floor((day - 1) / 30) + 1;
+  const dayOfMonth = ((day - 1) % 30) + 1;
+  return { month, dayOfMonth, daysUntilSettlement: 31 - dayOfMonth };
+}
+
 export class GameController {
   readonly engine: GameEngine;
   private readonly listeners = new Set<(view: GameView) => void>();
@@ -222,15 +277,20 @@ export class GameController {
     const aiActive = snapshot.completedFeatures.includes('AI_RECOMMENDATION');
     const monthlyRevenue = RevenuePolicy.monthlyRevenue(snapshot.dau, revenueModifier);
     const monthlyCost = this.engine.infrastructure.monthlyCost + RevenuePolicy.monthlyAiCost(snapshot.dau, aiActive);
+    const calendar = calendarForDay(snapshot.day);
 
     return {
       hud: {
         day: snapshot.day,
+        month: calendar.month,
+        dayOfMonth: calendar.dayOfMonth,
+        daysUntilSettlement: calendar.daysUntilSettlement,
         dau: snapshot.dau,
         cash: snapshot.cash,
         monthlyRevenue,
         monthlyCost,
         monthlyProfit: monthlyRevenue - monthlyCost,
+        lastSettlement: snapshot.lastSettlement,
         status: snapshot.status,
         launched: snapshot.launched,
       },
@@ -240,6 +300,8 @@ export class GameController {
       technologies: this.technologyOptions(snapshot),
       skills: this.skillNodes(),
       features: this.featureCards(snapshot),
+      requestFlows: this.requestFlowViews(snapshot),
+      infrastructureCosts: this.infrastructureCostView(),
       snapshot,
       frameworkId: this.engine.config.frameworkId,
       databaseId: this.engine.config.databaseId,
@@ -279,6 +341,17 @@ export class GameController {
     if (after.currentFeature && after.currentFeature.id !== before.currentFeature?.id && after.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
       events.push({ id: `req-${after.day}-${after.currentFeature.id}`, kind: 'requirement', title: 'NEW REQUIREMENT', message: `${LABELS[after.currentFeature.id] ?? after.currentFeature.id} 개발이 자동으로 시작되었습니다.`, autoPause: true });
     }
+    if (after.lastSettlement && after.lastSettlement.month !== before.lastSettlement?.month) {
+      const settlement = after.lastSettlement;
+      const sign = settlement.profit >= 0 ? '+' : '-';
+      events.push({
+        id: `settlement-${settlement.month}`,
+        kind: 'settlement',
+        title: `M${settlement.month} SETTLEMENT`,
+        message: `월 매출 ${settlement.revenue.toLocaleString()}원 · 월 비용 ${settlement.totalCost.toLocaleString()}원 · 순변동 ${sign}${Math.abs(settlement.profit).toLocaleString()}원`,
+        autoPause: false,
+      });
+    }
     const previousIncidents = new Set(before.incidents.map((incident) => incident.id));
     for (const incident of after.incidents) {
       if (previousIncidents.has(incident.id)) continue;
@@ -306,6 +379,8 @@ export class GameController {
     const incidentByNode = new Map(snapshot.incidents.map((incident) => [incident.nodeId, incident]));
     const appIncident = incidentByNode.get(`framework:${this.engine.config.frameworkId}`);
     const dbIncident = incidentByNode.get(`database:${this.engine.config.databaseId}`);
+    const appCap = snapshot.load.appCapacity;
+    const dbCap = snapshot.load.dbCapacity;
     const nodes: ServiceNodeView[] = [
       {
         id: 'application',
@@ -314,7 +389,7 @@ export class GameController {
         icon: ICONS.application,
         loadPercent: percent(snapshot.load.appRatio),
         tone: loadTone(snapshot.load.appRatio, Boolean(appIncident)),
-        detail: `${this.engine.infrastructure.app.size} ×${this.engine.infrastructure.app.count}`,
+        detail: `${this.engine.infrastructure.app.size} ×${this.engine.infrastructure.app.count} · CAP ${Math.round(appCap)}`,
         incidentId: appIncident?.id,
         incidentSeverity: appIncident?.severity,
       },
@@ -325,7 +400,7 @@ export class GameController {
         icon: ICONS.database,
         loadPercent: percent(snapshot.load.dbRatio),
         tone: loadTone(snapshot.load.dbRatio, Boolean(dbIncident)),
-        detail: `${this.engine.infrastructure.database.size} · Replica ${this.engine.infrastructure.database.replicaCount}`,
+        detail: `${this.engine.infrastructure.database.size} · Replica ${this.engine.infrastructure.database.replicaCount} · CAP ${Math.round(dbCap)}`,
         incidentId: dbIncident?.id,
         incidentSeverity: dbIncident?.severity,
       },
@@ -348,6 +423,9 @@ export class GameController {
           : technology === 'OBJECT_STORAGE'
             ? snapshot.load.storageRatio
             : snapshot.load.asyncRatio;
+      const detail = kind === 'queue'
+        ? `ACTIVE · CAP ${Math.round(snapshot.load.asyncCapacity)}`
+        : 'ACTIVE';
       nodes.push({
         id: technology,
         kind,
@@ -355,7 +433,7 @@ export class GameController {
         icon: TECH_ICONS[technology],
         loadPercent: percent(ratio),
         tone: loadTone(ratio, Boolean(incident)),
-        detail: 'ACTIVE',
+        detail,
         incidentId: incident?.id,
         incidentSeverity: incident?.severity,
       });
@@ -368,13 +446,17 @@ export class GameController {
     const tech = snapshot.currentTechnologyBuild;
     const learning = this.engine.learning.current;
     const responding = snapshot.incidents.find((incident) => incident.remainingResponseDays !== null);
+    const featureTotal = feature ? feature.elapsedDays + feature.estimatedRemainingDays : 0;
+    const techTotal = tech ? tech.elapsedDays + tech.estimatedRemainingDays : 0;
+    const responseTotal = responding?.totalResponseDays ?? 0;
+    const responseElapsed = responding?.elapsedResponseDays ?? 0;
     return [
       {
         id: 'feature',
         label: 'FEATURE',
         title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음',
         progress: feature ? feature.progress / feature.requiredWork : null,
-        meta: feature ? '자동 개발 중' : '다음 요구사항 대기',
+        meta: feature ? `${feature.elapsedDays}/~${featureTotal}일 · 약 ${feature.estimatedRemainingDays}일 남음` : '다음 요구사항 대기',
         active: Boolean(feature),
       },
       {
@@ -382,7 +464,7 @@ export class GameController {
         label: 'TECHNOLOGY',
         title: tech ? (LABELS[tech.id] ?? tech.id) : '비어 있음',
         progress: tech ? tech.progress / tech.requiredWork : null,
-        meta: tech ? '구축 중' : '기술을 선택하세요',
+        meta: tech ? `${tech.elapsedDays}/~${techTotal}일 · 약 ${tech.estimatedRemainingDays}일 남음` : '기술을 선택하세요',
         active: Boolean(tech),
       },
       {
@@ -390,15 +472,17 @@ export class GameController {
         label: 'LEARNING',
         title: learning ? `${LABELS[learning.skill.id] ?? learning.skill.id} → Lv.${learning.targetLevel}` : '비어 있음',
         progress: learning ? learning.progress : null,
-        meta: learning ? `학습 중 · ${learning.elapsedStudyDays}/${learning.requiredStudyDays}일` : '학습을 선택하세요',
+        meta: learning ? `${learning.elapsedStudyDays}/${learning.requiredStudyDays}일 · ${Math.max(0, learning.requiredStudyDays - learning.elapsedStudyDays)}일 남음` : '학습을 선택하세요',
         active: Boolean(learning),
       },
       {
         id: 'incident',
         label: 'INCIDENT',
         title: responding ? this.nodeLabel(responding.nodeId) : '비어 있음',
-        progress: null,
-        meta: responding ? `${responding.remainingResponseDays}일 남음` : `${snapshot.incidents.length}건 미해결`,
+        progress: responding && responseTotal > 0 ? responseElapsed / responseTotal : null,
+        meta: responding
+          ? `${responseElapsed}/${responseTotal}일 · ${responding.remainingResponseDays ?? 0}일 남음`
+          : `${snapshot.incidents.length}건 미해결`,
         active: Boolean(responding),
       },
     ];
@@ -414,26 +498,42 @@ export class GameController {
     ];
     for (const [name, ratio, nodeId] of ratios) {
       if (ratio >= 0.9) {
+        const overloadPenalty = ratio > 1 ? Math.min(30, Math.round((ratio - 1) * 100)) : 0;
         alerts.push({
           id: `load-${name}`,
           tone: ratio > 1 ? 'danger' : 'warning',
           title: `${name} Load ${percent(ratio)}%`,
-          detail: ratio > 1 ? 'Overload 상태' : 'Critical 구간',
+          detail: ratio > 1
+            ? `Capacity ${Math.round((ratio - 1) * 100)}% 초과 · 다음 날 DAU 최대 -${overloadPenalty}% 압력`
+            : 'Critical 구간 · Scale 검토 필요',
           nodeId,
         });
       }
+    }
+    if (snapshot.load.failureRate > 0.001) {
+      const failed = snapshot.load.requestFlows.filter((flow) => flow.successRatio < 0.999);
+      const firstFailure = failed.find((flow) => flow.failureNode)?.failureNode ?? null;
+      alerts.push({
+        id: 'request-failure',
+        tone: 'danger',
+        title: `Request Failure ${percent(snapshot.load.failureRate)}%`,
+        detail: failed.length > 0
+          ? `${failed.slice(0, 2).map((flow) => LABELS[flow.featureId] ?? flow.featureId).join(', ')} 요청 경로 확인 필요`
+          : '요청 처리 성공률이 낮습니다.',
+        nodeId: nodeIdForRequestNode(firstFailure),
+      });
     }
     for (const incident of snapshot.incidents) {
       alerts.push({
         id: incident.id,
         tone: incident.severity === 'MINOR' ? 'warning' : 'danger',
         title: `${incident.severity} · ${this.nodeLabel(incident.nodeId)}`,
-        detail: incident.remainingResponseDays === null ? '대응 대기 중' : `복구 ${incident.remainingResponseDays}일`,
+        detail: incident.remainingResponseDays === null ? '대응 대기 중' : `복구 ${incident.elapsedResponseDays ?? 0}/${incident.totalResponseDays ?? 0}일`,
         nodeId: incident.nodeId,
       });
     }
     if (profit < 0) {
-      alerts.push({ id: 'profit', tone: 'warning', title: '월 손익 적자 예상', detail: `현재 조건 기준 ${Math.abs(profit).toLocaleString()}원 적자` });
+      alerts.push({ id: 'profit', tone: 'warning', title: '월 예상 순이익 적자', detail: `현재 조건 기준 ${Math.abs(profit).toLocaleString()}원 적자` });
     }
     if (!snapshot.launched) {
       alerts.push({ id: 'bootstrap', tone: 'info', title: 'Bootstrap 개발 중', detail: '완료되면 DAU 80으로 서비스가 공개됩니다.' });
@@ -485,6 +585,9 @@ export class GameController {
         ]
       : [];
     const after = LoadCalculator.calculate(snapshot.dau, features, clone);
+    if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
+      return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
+    }
     if (id === 'REDIS') return `DB ${percent(snapshot.load.dbRatio)}% → ${percent(after.dbRatio)}%`;
     if (id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') {
       return `App ${percent(snapshot.load.appRatio)}% → ${percent(after.appRatio)}% · Async 분리`;
@@ -573,8 +676,97 @@ export class GameController {
         threshold,
         state: completed ? 'completed' : developing ? 'developing' : revealed ? 'revealed' : 'hidden',
         load: revealed ? feature.load : null,
+        route: revealed ? feature.requestRoute.map((step) => step.node) : null,
       };
     });
+  }
+
+  private requestFlowViews(snapshot: GameSnapshot): RequestFlowView[] {
+    if (!snapshot.launched || snapshot.load.requestFlows.length === 0) return [];
+
+    const definitions = snapshot.load.requestFlows.map((flow) => {
+      const feature = flow.featureId === COMMUNITY_BOOTSTRAP.id
+        ? COMMUNITY_BOOTSTRAP
+        : COMMUNITY_FEATURES[flow.featureId as keyof typeof COMMUNITY_FEATURES];
+      const weight = feature
+        ? Math.max(1, feature.load.app + feature.load.db + feature.load.async + feature.load.storage)
+        : 1;
+      return { flow, feature, weight };
+    });
+    const totalWeight = definitions.reduce((sum, item) => sum + item.weight, 0) || 1;
+    const trafficUnit = trafficUnitForDau(snapshot.dau);
+
+    return definitions.slice(-5).map(({ flow, feature, weight }) => {
+      const estimatedTraffic = snapshot.dau * (weight / totalWeight);
+      const particleCount = snapshot.dau <= 0
+        ? 0
+        : Math.max(1, Math.min(4, Math.ceil(estimatedTraffic / trafficUnit)));
+      return {
+        id: flow.featureId,
+        name: LABELS[flow.featureId] ?? feature?.name ?? flow.featureId,
+        nodes: flow.nodes.map((node) => ({
+          node: node.node,
+          arrivalPercent: percent(node.arrivalRatio),
+          available: node.available,
+        })),
+        successPercent: percent(flow.successRatio),
+        failureNode: flow.failureNode,
+        particleCount,
+        trafficUnit,
+      };
+    });
+  }
+
+  private infrastructureCostView(): InfrastructureCostView {
+    const currentApp = this.engine.infrastructure.app;
+    const currentDb = this.engine.infrastructure.database;
+    const hasAlb = this.engine.infrastructure.hasTechnology('ALB');
+
+    const appSizeMonthlyCosts = {} as Record<ServerSize, number>;
+    const dbSizeMonthlyCosts = {} as Record<ServerSize, number>;
+    for (const size of SERVER_SIZES) {
+      appSizeMonthlyCosts[size] = new AppCluster(
+        this.engine.config.frameworkId,
+        size,
+        currentApp.count,
+        hasAlb,
+      ).monthlyCost;
+      dbSizeMonthlyCosts[size] = new DatabaseCluster(
+        this.engine.config.databaseId,
+        size,
+        currentDb.replicaCount,
+      ).monthlyCost;
+    }
+
+    let addAppServerMonthlyCostDelta: number | null = null;
+    if (hasAlb && currentApp.count < 10) {
+      const expanded = new AppCluster(
+        this.engine.config.frameworkId,
+        currentApp.size,
+        currentApp.count,
+        true,
+      );
+      expanded.addServer();
+      addAppServerMonthlyCostDelta = expanded.monthlyCost - currentApp.monthlyCost;
+    }
+
+    let addDbReplicaMonthlyCostDelta: number | null = null;
+    if (currentDb.replicaCount < 3) {
+      const expanded = new DatabaseCluster(
+        this.engine.config.databaseId,
+        currentDb.size,
+        currentDb.replicaCount,
+      );
+      expanded.addReplica();
+      addDbReplicaMonthlyCostDelta = expanded.monthlyCost - currentDb.monthlyCost;
+    }
+
+    return {
+      appSizeMonthlyCosts,
+      dbSizeMonthlyCosts,
+      addAppServerMonthlyCostDelta,
+      addDbReplicaMonthlyCostDelta,
+    };
   }
 
   private nodeLabel(nodeId: string): string {

@@ -38,6 +38,17 @@ describe('incident policy', () => {
     expect(highSkill).toBeLessThan(lowSkill);
   });
 
+  it('keeps total and remaining response days for progress UI', () => {
+    const incident = new Incident('app-1', 'framework:SPRING_BOOT', 'MAJOR', 4);
+    incident.startResponse(5, 5);
+
+    expect(incident.totalResponseDays).toBeGreaterThan(0);
+    expect(incident.remainingResponseDays).toBe(incident.totalResponseDays);
+
+    incident.advanceResponseDay();
+    expect(incident.elapsedResponseDays).toBe(1);
+  });
+
   it('removes an incident when its infrastructure node is retired', () => {
     const manager = new IncidentManager();
     const incident = new Incident('queue-1', 'technology:SQS', 'MAJOR', 2);

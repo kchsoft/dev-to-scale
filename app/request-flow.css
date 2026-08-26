@@ -1,0 +1,52 @@
+.request-flow-board {
+  margin: 0 7px 7px;
+  border: 1px solid #203647;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(9,17,24,.96), rgba(7,13,19,.98));
+  overflow: hidden;
+}
+.request-flow-board.empty { padding: 11px; color: var(--muted); }
+.request-flow-board.has-failure { border-color: #65313a; box-shadow: inset 0 0 28px rgba(255,97,109,.035); }
+.request-flow-board > header { min-height: 43px; padding: 7px 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #1c2d39; }
+.request-flow-board > header div { display: flex; flex-direction: column; gap: 3px; }
+.request-flow-board > header span, .request-flow-board.empty span { color: var(--cyan); font: 800 9px/1 ui-monospace, monospace; letter-spacing: .11em; }
+.request-flow-board > header strong, .request-flow-board.empty strong { font-size: 11px; }
+.request-flow-board > header small { color: #91a4b5; font: 700 9px/1 ui-monospace, monospace; white-space: nowrap; }
+.request-flow-list { display: grid; }
+.request-flow-row { min-height: 60px; display: grid; grid-template-columns: 138px minmax(0, 1fr); align-items: stretch; border-bottom: 1px solid #162631; }
+.request-flow-row:last-child { border-bottom: 0; }
+.request-flow-row.failed { background: linear-gradient(90deg, rgba(255,97,109,.035), transparent 58%); }
+.request-source { padding: 8px 10px; border-right: 1px solid #1c2d39; display: flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; }
+.request-source > span { color: var(--muted-2); font: 700 8px/1 ui-monospace, monospace; letter-spacing: .1em; }
+.request-source > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.request-source > small { color: var(--green); font: 700 9px/1 ui-monospace, monospace; }
+.request-flow-row.failed .request-source > small { color: var(--red); }
+.request-route { min-width: 0; padding: 7px 9px; display: flex; align-items: center; overflow-x: auto; scrollbar-width: thin; position: relative; }
+.request-hop { display: flex; align-items: center; flex: 0 0 auto; }
+.request-node { width: 74px; min-height: 40px; border: 1px solid #2a4355; border-radius: 8px; background: #0d1821; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; position: relative; z-index: 2; }
+.request-node b { color: #b9dbf6; font: 800 9px/1 ui-monospace, monospace; }
+.request-node small { color: #7890a3; font: 700 8px/1 ui-monospace, monospace; }
+.request-node.failed, .request-node.missing { border-color: #7b3641; background: #1c0e12; box-shadow: 0 0 15px rgba(255,97,109,.08); }
+.request-node.failed b, .request-node.missing b, .request-node.failed small, .request-node.missing small { color: var(--red); }
+.request-link { width: 39px; height: 12px; position: relative; flex: 0 0 39px; border-top: 1px solid #35576f; margin: 0 2px; }
+.request-link::after { content: ''; position: absolute; right: 0; top: -3px; width: 5px; height: 5px; border-right: 1px solid #4b7798; border-top: 1px solid #4b7798; transform: rotate(45deg); }
+.request-link i { position: absolute; top: -3px; left: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 9px rgba(67,217,209,.7); animation: requestTravel 1.35s linear infinite; }
+.request-flow-row.failed .request-link i { background: var(--amber); box-shadow: 0 0 8px rgba(255,180,84,.6); }
+.request-failed-mark { margin-left: 8px; padding: 4px 6px; border: 1px solid #63323a; border-radius: 5px; color: var(--red); background: #170c10; font: 800 8px/1 ui-monospace, monospace; white-space: nowrap; }
+.feature-route-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.feature-card .feature-route-tags i { background: #0c1b27; border: 1px solid #203b50; color: #8fc7f4; padding: 3px 5px; }
+@keyframes requestTravel { from { transform: translateX(0); opacity: .2; } 15% { opacity: 1; } 85% { opacity: 1; } to { transform: translateX(33px); opacity: .2; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .request-link i { animation: none; left: 50%; }
+}
+
+@media (max-width: 820px) {
+  .request-flow-board { margin: 0 6px 7px; }
+  .request-flow-board > header { align-items: flex-start; flex-direction: column; }
+  .request-flow-row { grid-template-columns: 105px minmax(0, 1fr); }
+  .request-source { padding: 7px; }
+  .request-node { width: 64px; }
+  .request-link { width: 29px; flex-basis: 29px; }
+  @keyframes requestTravel { from { transform: translateX(0); opacity: .2; } 15% { opacity: 1; } 85% { opacity: 1; } to { transform: translateX(23px); opacity: .2; } }
+}

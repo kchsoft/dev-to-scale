@@ -1,3 +1,5 @@
+import type { RequestRouteStep } from './request-flow';
+
 export type FeatureComplexity = 'SIMPLE' | 'NORMAL' | 'COMPLEX';
 export type FeatureTag =
   | 'AI'
@@ -25,9 +27,19 @@ export interface FeatureDefinitionProps {
   baseWork: number;
   complexity: FeatureComplexity;
   load: LoadWeights;
+  requestRoute?: RequestRouteStep[];
   tags?: FeatureTag[];
   growthBonus?: number;
   revenueModifier?: number;
+}
+
+function defaultRequestRoute(load: LoadWeights): RequestRouteStep[] {
+  const route: RequestRouteStep[] = [];
+  if (load.app > 0) route.push({ node: 'APP' });
+  if (load.db > 0) route.push({ node: 'DB' });
+  if (load.async > 0) route.push({ node: 'QUEUE', requirement: 'OPTIONAL' });
+  if (load.storage > 0) route.push({ node: 'STORAGE' });
+  return route;
 }
 
 export class FeatureDefinition {
@@ -36,6 +48,7 @@ export class FeatureDefinition {
   readonly baseWork: number;
   readonly complexity: FeatureComplexity;
   readonly load: LoadWeights;
+  readonly requestRoute: readonly RequestRouteStep[];
   readonly tags: ReadonlySet<FeatureTag>;
   readonly growthBonus: number;
   readonly revenueModifier: number;
@@ -46,6 +59,7 @@ export class FeatureDefinition {
     this.baseWork = props.baseWork;
     this.complexity = props.complexity;
     this.load = { ...props.load };
+    this.requestRoute = (props.requestRoute ?? defaultRequestRoute(props.load)).map((step) => ({ ...step }));
     this.tags = new Set(props.tags ?? []);
     this.growthBonus = props.growthBonus ?? 0.005;
     this.revenueModifier = props.revenueModifier ?? 0;
