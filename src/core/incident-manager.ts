@@ -16,6 +16,7 @@ export interface IncidentCandidate {
 
 export class Incident {
   private _remainingResponseDays: number | null = null;
+  private _totalResponseDays: number | null = null;
 
   constructor(
     readonly id: string,
@@ -26,15 +27,22 @@ export class Incident {
 
   get responding(): boolean { return this._remainingResponseDays !== null; }
   get remainingResponseDays(): number | null { return this._remainingResponseDays; }
+  get totalResponseDays(): number | null { return this._totalResponseDays; }
+  get elapsedResponseDays(): number | null {
+    if (this._remainingResponseDays === null || this._totalResponseDays === null) return null;
+    return Math.max(0, this._totalResponseDays - this._remainingResponseDays);
+  }
 
   startResponse(proficiencyLevel: number, fundamentalAverage: number): void {
     if (this.responding) throw new Error('Incident response already started');
-    this._remainingResponseDays = IncidentPolicy.resolutionDays({
+    const days = IncidentPolicy.resolutionDays({
       difficulty: this.difficulty,
       severity: this.severity,
       proficiencyLevel,
       fundamentalAverage,
     });
+    this._remainingResponseDays = days;
+    this._totalResponseDays = days;
   }
 
   advanceResponseDay(): boolean {
