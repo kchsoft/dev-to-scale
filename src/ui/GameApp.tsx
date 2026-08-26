@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   DatabaseId,
   FrameworkId,
+  IncidentDiagnosisPolicy,
   ObservabilityPolicy,
   ObservabilitySnapshot,
   ServerSize,
@@ -233,7 +234,7 @@ export default function GameApp() {
       </div>
 
       {selected && <NodeInspector node={selected} view={view} observability={observability} onClose={() => setSelectedNode(null)} onAction={(action) => run(action)} controller={controller} />}
-      {activeEvent && <EventOverlay event={activeEvent} onDismiss={closeActiveEvent} onRespond={() => {
+      {activeEvent && <EventOverlay event={activeEvent} view={view} observability={observability} onDismiss={closeActiveEvent} onRespond={() => {
         if (activeEvent.kind === 'incident') run(() => controller.startIncidentResponse(activeEvent.id), '장애 대응을 시작했습니다.');
         closeActiveEvent();
       }} />}
@@ -552,10 +553,25 @@ function NodeInspector({ node, view, observability, onClose, onAction, controlle
   </aside></div>;
 }
 
-function EventOverlay({ event, onDismiss, onRespond }: { event: GameEventView; onDismiss: () => void; onRespond: () => void }) {
+function EventOverlay({ event, view, observability, onDismiss, onRespond }: { event: GameEventView; view: GameView; observability: ObservabilitySnapshot; onDismiss: () => void; onRespond: () => void }) {
   const incident = event.kind === 'incident';
   const traffic = event.kind === 'traffic';
-  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><button aria-label="팝업 닫기" onClick={onDismiss} className="event-close">×</button><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : incident ? 'SYSTEM / INCIDENT' : traffic ? 'SYSTEM / TRAFFIC' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : traffic ? '🔥' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : traffic ? '인프라 확인' : '확인'}</button></footer></article></div>;
+  const diagnosis = incident && event.nodeId
+    ? IncidentDiagnosisPolicy.diagnose({
+        nodeId: event.nodeId,
+        load: view.snapshot.load,
+        techDebt: view.snapshot.techDebt.value,
+        trafficMultiplier: view.snapshot.growthEvent?.trafficMultiplier ?? 1,
+      })
+    : null;
+  const diagnosisText = diagnosis
+    ? observability.level === 'BASIC'
+      ? 'DIAGNOSIS LOCKED · METRICS에서 CPU/I/O 자원 신호를 확인할 수 있습니다.'
+      : observability.level === 'METRICS'
+        ? `SIGNAL · ${diagnosis.primarySignal} ${loadPct(diagnosis.primaryRatio)}% · APM에서 Traffic / Tech Debt / Request Failure 상관관계 분석이 해금됩니다.`
+        : `${diagnosis.likelyCause} · SIGNALS ${diagnosis.signals.join(' / ')} · OPTIONS ${diagnosis.suggestions.slice(0, 3).join(' / ')}`
+    : null;
+  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><button aria-label="팝업 닫기" onClick={onDismiss} className="event-close">×</button><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : incident ? `SYSTEM / INCIDENT / ${observability.level}` : traffic ? 'SYSTEM / TRAFFIC' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : traffic ? '🔥' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{diagnosisText && <p>{diagnosisText}</p>}{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : traffic ? '인프라 확인' : '확인'}</button></footer></article></div>;
 }
 
 function PanelTitle({ code, title, badge }: { code: string; title: string; badge: string }) {
