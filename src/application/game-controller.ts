@@ -333,6 +333,8 @@ export class GameController {
   addApplicationServer(): void { this.engine.addApplicationServer(); this.emit(); }
   scaleDatabase(size: ServerSize): void { this.engine.scaleDatabase(size); this.emit(); }
   addDatabaseReplica(): void { this.engine.addDatabaseReplica(); this.emit(); }
+  fastTrackCurrentFeature(): void { this.engine.fastTrackCurrentFeature(); this.emit(); }
+  startRefactor(): void { this.engine.startRefactor(); this.emit(); }
 
   private emit(): void {
     const view = this.getView();
@@ -472,15 +474,27 @@ export class GameController {
     const techTotal = tech ? tech.elapsedDays + tech.estimatedRemainingDays : 0;
     const responseTotal = responding?.totalResponseDays ?? 0;
     const responseElapsed = responding?.elapsedResponseDays ?? 0;
+    const refactorProgress = snapshot.techDebt.refactoring
+      ? 1 - snapshot.techDebt.remainingRefactorDays / 5
+      : null;
     return [
-      {
-        id: 'feature',
-        label: 'FEATURE',
-        title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음',
-        progress: feature ? feature.progress / feature.requiredWork : null,
-        meta: feature ? `${feature.elapsedDays}/~${featureTotal}일 · 약 ${feature.estimatedRemainingDays}일 남음` : '다음 요구사항 대기',
-        active: Boolean(feature),
-      },
+      snapshot.techDebt.refactoring
+        ? {
+            id: 'feature',
+            label: 'FEATURE',
+            title: 'REFACTORING',
+            progress: refactorProgress,
+            meta: `${snapshot.techDebt.remainingRefactorDays}일 남음 · 완료 시 Tech Debt -30`,
+            active: true,
+          }
+        : {
+            id: 'feature',
+            label: 'FEATURE',
+            title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음',
+            progress: feature ? feature.progress / feature.requiredWork : null,
+            meta: feature ? `${feature.elapsedDays}/~${featureTotal}일 · 약 ${feature.estimatedRemainingDays}일 남음` : '다음 요구사항 대기',
+            active: Boolean(feature),
+          },
       {
         id: 'technology',
         label: 'TECHNOLOGY',
@@ -519,6 +533,22 @@ export class GameController {
         tone: 'warning',
         title: `Viral Traffic ×${snapshot.growthEvent.trafficMultiplier.toFixed(1)}`,
         detail: `${snapshot.growthEvent.remainingDays}일 남음 · CPU/I/O/Queue/Storage Demand가 일시적으로 증가합니다.`,
+      });
+    }
+
+    if (snapshot.techDebt.refactoring) {
+      alerts.push({
+        id: 'tech-debt-refactor',
+        tone: 'info',
+        title: `Refactoring · ${snapshot.techDebt.remainingRefactorDays}일`,
+        detail: '기능 개발은 잠시 멈추지만 완료 시 Tech Debt가 30 감소합니다.',
+      });
+    } else if (snapshot.techDebt.value >= 20) {
+      alerts.push({
+        id: 'tech-debt',
+        tone: snapshot.techDebt.value >= 60 ? 'danger' : 'warning',
+        title: `Tech Debt ${snapshot.techDebt.value}/100`,
+        detail: `Feature 개발 효율 ${percent(snapshot.techDebt.developmentModifier)}% · 장애 위험 ×${snapshot.techDebt.incidentRiskMultiplier.toFixed(2)}`,
       });
     }
 
