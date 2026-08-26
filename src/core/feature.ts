@@ -200,6 +200,13 @@ export class FeatureDevelopmentTask {
   get progressRatio(): number { return Math.min(1, this._completedWork / this.requiredWork); }
   get completed(): boolean { return this._completedWork >= this.requiredWork; }
 
+  accelerate(work: number): number {
+    if (this.completed || work <= 0) return 0;
+    const before = this._completedWork;
+    this._completedWork = Math.min(this.requiredWork, this._completedWork + work);
+    return this._completedWork - before;
+  }
+
   advanceDay(context: FeatureDevelopmentProgressContext): number {
     if (this.completed) return 0;
     const progress = this.framework.productivity(context.frameworkLevel, this.feature.complexity)
