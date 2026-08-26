@@ -34,6 +34,7 @@ export interface DailyGrowthInput {
   event: GrowthEvent | null;
   incidents: readonly IncidentSeverity[];
   failureRate?: number;
+  maxLoadRatio?: number;
   random: RandomSource;
 }
 
@@ -44,6 +45,7 @@ export interface DailyGrowthResult {
   incidentModifier: number;
   availabilityModifier: number;
   operationalModifier: number;
+  capacityModifier: number;
   totalModifier: number;
 }
 
@@ -52,6 +54,7 @@ export class GrowthPolicy {
   static readonly EVENT_CHANCE = 0.02;
   static readonly MAX_AVAILABILITY_PENALTY = 0.08;
   static readonly MAX_OPERATIONAL_PENALTY = 0.1;
+  static readonly MAX_CAPACITY_PENALTY = 0.3;
 
   static calculate(input: DailyGrowthInput): DailyGrowthResult {
     const magnitude = Math.floor(input.random.next() * 5) + 1;
@@ -68,6 +71,10 @@ export class GrowthPolicy {
       incidentModifier + availabilityModifier,
     );
 
+    const maxLoadRatio = Math.max(0, input.maxLoadRatio ?? 0);
+    const overloadRatio = Math.max(0, maxLoadRatio - 1);
+    const capacityModifier = -Math.min(this.MAX_CAPACITY_PENALTY, overloadRatio);
+
     return {
       baseModifier,
       featureModifier,
@@ -75,7 +82,8 @@ export class GrowthPolicy {
       incidentModifier,
       availabilityModifier,
       operationalModifier,
-      totalModifier: baseModifier + featureModifier + eventModifier + operationalModifier,
+      capacityModifier,
+      totalModifier: baseModifier + featureModifier + eventModifier + operationalModifier + capacityModifier,
     };
   }
 
