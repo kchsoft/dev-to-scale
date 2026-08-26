@@ -7,7 +7,7 @@ export interface RandomSource {
 export type GrowthEventType = 'VIRAL' | 'NEGATIVE_BUZZ';
 
 export class GrowthEvent {
-  private remainingDays = 7;
+  private remaining = 7;
 
   constructor(readonly type: GrowthEventType) {}
 
@@ -15,10 +15,16 @@ export class GrowthEvent {
     return this.type === 'VIRAL' ? 0.05 : -0.05;
   }
 
-  get active(): boolean { return this.remainingDays > 0; }
+  /** Viral attention creates more requests than DAU alone would imply. */
+  get trafficMultiplier(): number {
+    return this.type === 'VIRAL' ? 1.8 : 1;
+  }
+
+  get remainingDays(): number { return this.remaining; }
+  get active(): boolean { return this.remaining > 0; }
 
   advanceDay(): void {
-    this.remainingDays = Math.max(0, this.remainingDays - 1);
+    this.remaining = Math.max(0, this.remaining - 1);
   }
 }
 
