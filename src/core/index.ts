@@ -13,4 +13,5 @@ export * from './learning';
 export * from './progression';
 export * from './random';
 export * from './request-flow';
+export * from './service-health';
 export * from './technology';
