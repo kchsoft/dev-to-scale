@@ -1,23 +1,24 @@
 import {
   AppCluster,
+  BuildableTechnologyId,
   COMMUNITY_BOOTSTRAP,
   COMMUNITY_FEATURES,
+  COMMUNITY_REQUIREMENT_THRESHOLDS,
   DatabaseCluster,
+  DatabaseId,
+  FrameworkId,
+  FundamentalSkillId,
   GameEngine,
   GameEngineConfig,
   GameSnapshot,
   InfrastructureState,
+  LanguageId,
   LearningRules,
   LoadCalculator,
   RevenuePolicy,
   ServerSize,
   SkillRef,
   TECHNOLOGIES,
-  BuildableTechnologyId,
-  FrameworkId,
-  DatabaseId,
-  FundamentalSkillId,
-  LanguageId,
   TechnologySkillId,
   skillRef,
 } from '../core';
@@ -131,7 +132,11 @@ export interface GameView {
 }
 
 const FRAMEWORK_LANGUAGE: Record<FrameworkId, LanguageId> = {
-  SPRING_BOOT: 'JAVA', NESTJS: 'TYPESCRIPT', GIN: 'GO', FASTAPI: 'PYTHON', ASPNET_CORE: 'CSHARP',
+  SPRING_BOOT: 'JAVA',
+  NESTJS: 'TYPESCRIPT',
+  GIN: 'GO',
+  FASTAPI: 'PYTHON',
+  ASPNET_CORE: 'CSHARP',
 };
 
 const LABELS: Record<string, string> = {
@@ -171,6 +176,12 @@ function loadTone(ratio: number, incident = false): LoadTone {
   return 'stable';
 }
 
+function phaseForSlot(index: number): 1 | 2 | 3 {
+  if (index < 3) return 1;
+  if (index < 6) return 2;
+  return 3;
+}
+
 function cloneInfrastructure(engine: GameEngine): InfrastructureState {
   const current = engine.infrastructure;
   const clone = new InfrastructureState(
@@ -197,7 +208,10 @@ export class GameController {
 
   getView(): GameView {
     const snapshot = this.engine.snapshot;
-    const revenueModifier = snapshot.completedFeatures.reduce((sum, id) => sum + (COMMUNITY_FEATURES[id as keyof typeof COMMUNITY_FEATURES]?.revenueModifier ?? 0), 0);
+    const revenueModifier = snapshot.completedFeatures.reduce(
+      (sum, id) => sum + (COMMUNITY_FEATURES[id as keyof typeof COMMUNITY_FEATURES]?.revenueModifier ?? 0),
+      0,
+    );
     const aiActive = snapshot.completedFeatures.includes('AI_RECOMMENDATION');
     const monthlyRevenue = RevenuePolicy.monthlyRevenue(snapshot.dau, revenueModifier);
     const monthlyCost = this.engine.infrastructure.monthlyCost + RevenuePolicy.monthlyAiCost(snapshot.dau, aiActive);
@@ -258,9 +272,9 @@ export class GameController {
     if (after.currentFeature && after.currentFeature.id !== before.currentFeature?.id && after.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
       events.push({ id: `req-${after.day}-${after.currentFeature.id}`, kind: 'requirement', title: 'NEW REQUIREMENT', message: `${LABELS[after.currentFeature.id] ?? after.currentFeature.id} 개발이 자동으로 시작되었습니다.`, autoPause: true });
     }
-    const beforeIncidentIds = new Set(before.incidents.map((incident) => incident.id));
+    const previousIncidents = new Set(before.incidents.map((incident) => incident.id));
     for (const incident of after.incidents) {
-      if (beforeIncidentIds.has(incident.id)) continue;
+      if (previousIncidents.has(incident.id)) continue;
       const autoPause = incident.severity === 'MAJOR' || incident.severity === 'CRITICAL';
       events.push({
         id: incident.id,
@@ -272,8 +286,12 @@ export class GameController {
         autoPause,
       });
     }
-    if (before.status !== after.status && after.status === 'BANKRUPT') events.push({ id: `bankrupt-${after.day}`, kind: 'bankrupt', title: 'BANKRUPT', message: '월 정산 후 현금이 음수가 되었습니다.', autoPause: true });
-    if (before.status !== after.status && after.status === 'WON') events.push({ id: `won-${after.day}`, kind: 'won', title: 'EXIT', message: '모든 기능을 완성하고 목표 월 매출을 달성했습니다.', autoPause: true });
+    if (before.status !== after.status && after.status === 'BANKRUPT') {
+      events.push({ id: `bankrupt-${after.day}`, kind: 'bankrupt', title: 'BANKRUPT', message: '월 정산 후 현금이 음수가 되었습니다.', autoPause: true });
+    }
+    if (before.status !== after.status && after.status === 'WON') {
+      events.push({ id: `won-${after.day}`, kind: 'won', title: 'EXIT', message: '모든 기능을 완성하고 목표 월 매출을 달성했습니다.', autoPause: true });
+    }
     return events;
   }
 
@@ -283,27 +301,56 @@ export class GameController {
     const dbIncident = incidentByNode.get(`database:${this.engine.config.databaseId}`);
     const nodes: ServiceNodeView[] = [
       {
-        id: 'application', kind: 'application', name: LABELS[this.engine.config.frameworkId], icon: ICONS.application,
-        loadPercent: percent(snapshot.load.appRatio), tone: loadTone(snapshot.load.appRatio, Boolean(appIncident)),
+        id: 'application',
+        kind: 'application',
+        name: LABELS[this.engine.config.frameworkId],
+        icon: ICONS.application,
+        loadPercent: percent(snapshot.load.appRatio),
+        tone: loadTone(snapshot.load.appRatio, Boolean(appIncident)),
         detail: `${this.engine.infrastructure.app.size} ×${this.engine.infrastructure.app.count}`,
-        incidentId: appIncident?.id, incidentSeverity: appIncident?.severity,
+        incidentId: appIncident?.id,
+        incidentSeverity: appIncident?.severity,
       },
       {
-        id: 'database', kind: 'database', name: LABELS[this.engine.config.databaseId], icon: ICONS.database,
-        loadPercent: percent(snapshot.load.dbRatio), tone: loadTone(snapshot.load.dbRatio, Boolean(dbIncident)),
+        id: 'database',
+        kind: 'database',
+        name: LABELS[this.engine.config.databaseId],
+        icon: ICONS.database,
+        loadPercent: percent(snapshot.load.dbRatio),
+        tone: loadTone(snapshot.load.dbRatio, Boolean(dbIncident)),
         detail: `${this.engine.infrastructure.database.size} · Replica ${this.engine.infrastructure.database.replicaCount}`,
-        incidentId: dbIncident?.id, incidentSeverity: dbIncident?.severity,
+        incidentId: dbIncident?.id,
+        incidentSeverity: dbIncident?.severity,
       },
     ];
 
     for (const technology of this.engine.infrastructure.deployedTechnologies) {
       const nodeId = `technology:${technology}`;
       const incident = incidentByNode.get(nodeId);
-      const kind: ServiceNodeView['kind'] = technology === 'REDIS' ? 'cache' : technology === 'ALB' ? 'load-balancer' : technology === 'OBJECT_STORAGE' ? 'storage' : 'queue';
-      const ratio = technology === 'REDIS' ? snapshot.load.dbRatio : technology === 'ALB' ? snapshot.load.appRatio : technology === 'OBJECT_STORAGE' ? snapshot.load.storageRatio : snapshot.load.asyncRatio;
+      const kind: ServiceNodeView['kind'] = technology === 'REDIS'
+        ? 'cache'
+        : technology === 'ALB'
+          ? 'load-balancer'
+          : technology === 'OBJECT_STORAGE'
+            ? 'storage'
+            : 'queue';
+      const ratio = technology === 'REDIS'
+        ? snapshot.load.dbRatio
+        : technology === 'ALB'
+          ? snapshot.load.appRatio
+          : technology === 'OBJECT_STORAGE'
+            ? snapshot.load.storageRatio
+            : snapshot.load.asyncRatio;
       nodes.push({
-        id: technology, kind, name: LABELS[technology], icon: TECH_ICONS[technology], loadPercent: percent(ratio),
-        tone: loadTone(ratio, Boolean(incident)), detail: 'ACTIVE', incidentId: incident?.id, incidentSeverity: incident?.severity,
+        id: technology,
+        kind,
+        name: LABELS[technology],
+        icon: TECH_ICONS[technology],
+        loadPercent: percent(ratio),
+        tone: loadTone(ratio, Boolean(incident)),
+        detail: 'ACTIVE',
+        incidentId: incident?.id,
+        incidentSeverity: incident?.severity,
       });
     }
     return nodes;
@@ -315,23 +362,78 @@ export class GameController {
     const learning = this.engine.learning.current;
     const responding = snapshot.incidents.find((incident) => incident.remainingResponseDays !== null);
     return [
-      { id: 'feature', label: 'FEATURE', title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음', progress: feature ? feature.progress / feature.requiredWork : null, meta: feature ? '자동 개발 중' : '다음 요구사항 대기', active: Boolean(feature) },
-      { id: 'technology', label: 'TECHNOLOGY', title: tech ? LABELS[tech.id] ?? tech.id : '비어 있음', progress: tech ? tech.progress / tech.requiredWork : null, meta: tech ? '구축 중' : '기술을 선택하세요', active: Boolean(tech) },
-      { id: 'learning', label: 'LEARNING', title: learning ? LABELS[learning.skill.id] ?? learning.skill.id : '비어 있음', progress: learning ? learning.progressRatio : null, meta: learning ? `Lv.${learning.targetLevel} 학습 중` : '학습을 선택하세요', active: Boolean(learning) },
-      { id: 'incident', label: 'INCIDENT', title: responding ? this.nodeLabel(responding.nodeId) : '비어 있음', progress: null, meta: responding ? `${responding.remainingResponseDays}일 남음` : `${snapshot.incidents.length}건 미해결`, active: Boolean(responding) },
+      {
+        id: 'feature',
+        label: 'FEATURE',
+        title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음',
+        progress: feature ? feature.progress / feature.requiredWork : null,
+        meta: feature ? '자동 개발 중' : '다음 요구사항 대기',
+        active: Boolean(feature),
+      },
+      {
+        id: 'technology',
+        label: 'TECHNOLOGY',
+        title: tech ? (LABELS[tech.id] ?? tech.id) : '비어 있음',
+        progress: tech ? tech.progress / tech.requiredWork : null,
+        meta: tech ? '구축 중' : '기술을 선택하세요',
+        active: Boolean(tech),
+      },
+      {
+        id: 'learning',
+        label: 'LEARNING',
+        title: learning ? (LABELS[learning.skill.id] ?? learning.skill.id) : '비어 있음',
+        progress: null,
+        meta: learning ? `Lv.${learning.targetLevel} 학습 중 · ${learning.requiredStudyDays}일` : '학습을 선택하세요',
+        active: Boolean(learning),
+      },
+      {
+        id: 'incident',
+        label: 'INCIDENT',
+        title: responding ? this.nodeLabel(responding.nodeId) : '비어 있음',
+        progress: null,
+        meta: responding ? `${responding.remainingResponseDays}일 남음` : `${snapshot.incidents.length}건 미해결`,
+        active: Boolean(responding),
+      },
     ];
   }
 
   private alerts(snapshot: GameSnapshot, profit: number): AlertView[] {
     const alerts: AlertView[] = [];
-    const ratios: Array<[string, number, string]> = [['Application', snapshot.load.appRatio, 'application'], ['Database', snapshot.load.dbRatio, 'database'], ['Async', snapshot.load.asyncRatio, 'queue'], ['Storage', snapshot.load.storageRatio, 'storage']];
+    const ratios: Array<[string, number, string]> = [
+      ['Application', snapshot.load.appRatio, 'application'],
+      ['Database', snapshot.load.dbRatio, 'database'],
+      ['Async', snapshot.load.asyncRatio, 'queue'],
+      ['Storage', snapshot.load.storageRatio, 'storage'],
+    ];
     for (const [name, ratio, nodeId] of ratios) {
-      if (ratio >= 0.9) alerts.push({ id: `load-${name}`, tone: ratio > 1 ? 'danger' : 'warning', title: `${name} Load ${percent(ratio)}%`, detail: ratio > 1 ? 'Overload 상태' : 'Critical 구간', nodeId });
+      if (ratio >= 0.9) {
+        alerts.push({
+          id: `load-${name}`,
+          tone: ratio > 1 ? 'danger' : 'warning',
+          title: `${name} Load ${percent(ratio)}%`,
+          detail: ratio > 1 ? 'Overload 상태' : 'Critical 구간',
+          nodeId,
+        });
+      }
     }
-    for (const incident of snapshot.incidents) alerts.push({ id: incident.id, tone: incident.severity === 'MINOR' ? 'warning' : 'danger', title: `${incident.severity} · ${this.nodeLabel(incident.nodeId)}`, detail: incident.remainingResponseDays === null ? '대응 대기 중' : `복구 ${incident.remainingResponseDays}일`, nodeId: incident.nodeId });
-    if (profit < 0) alerts.push({ id: 'profit', tone: 'warning', title: '월 손익 적자 예상', detail: `현재 조건 기준 ${Math.abs(profit).toLocaleString()}원 적자` });
-    if (!snapshot.launched) alerts.push({ id: 'bootstrap', tone: 'info', title: 'Bootstrap 개발 중', detail: '완료되면 DAU 80으로 서비스가 공개됩니다.' });
-    if (alerts.length === 0) alerts.push({ id: 'stable', tone: 'good', title: '서비스 안정', detail: '현재 즉시 확인할 경고가 없습니다.' });
+    for (const incident of snapshot.incidents) {
+      alerts.push({
+        id: incident.id,
+        tone: incident.severity === 'MINOR' ? 'warning' : 'danger',
+        title: `${incident.severity} · ${this.nodeLabel(incident.nodeId)}`,
+        detail: incident.remainingResponseDays === null ? '대응 대기 중' : `복구 ${incident.remainingResponseDays}일`,
+        nodeId: incident.nodeId,
+      });
+    }
+    if (profit < 0) {
+      alerts.push({ id: 'profit', tone: 'warning', title: '월 손익 적자 예상', detail: `현재 조건 기준 ${Math.abs(profit).toLocaleString()}원 적자` });
+    }
+    if (!snapshot.launched) {
+      alerts.push({ id: 'bootstrap', tone: 'info', title: 'Bootstrap 개발 중', detail: '완료되면 DAU 80으로 서비스가 공개됩니다.' });
+    }
+    if (alerts.length === 0) {
+      alerts.push({ id: 'stable', tone: 'good', title: '서비스 안정', detail: '현재 즉시 확인할 경고가 없습니다.' });
+    }
     return alerts.slice(0, 6);
   }
 
@@ -343,11 +445,21 @@ export class GameController {
       if (snapshot.currentTechnologyBuild) reason = '다른 기술을 구축 중';
       if (snapshot.cash < tech.buildCost) reason = '현금 부족';
       for (const [fundamental, level] of Object.entries(tech.prerequisites)) {
-        if (this.engine.developer.get(skillRef.fundamental(fundamental as FundamentalSkillId)).level < (level ?? 1)) reason = `${LABELS[fundamental]} Lv.${level} 필요`;
+        if (this.engine.developer.get(skillRef.fundamental(fundamental as FundamentalSkillId)).level < (level ?? 1)) {
+          reason = `${LABELS[fundamental]} Lv.${level} 필요`;
+        }
       }
       return {
-        id, name: tech.name, icon: TECH_ICONS[id], buildCost: tech.buildCost, monthlyCost: tech.monthlyCost, buildWork: tech.buildWork,
-        deployed, available: !deployed && !reason, reason, preview: this.previewTechnology(id),
+        id,
+        name: tech.name,
+        icon: TECH_ICONS[id],
+        buildCost: tech.buildCost,
+        monthlyCost: tech.monthlyCost,
+        buildWork: tech.buildWork,
+        deployed,
+        available: !deployed && !reason,
+        reason,
+        preview: this.previewTechnology(id),
       };
     });
   }
@@ -358,11 +470,18 @@ export class GameController {
     const clone = cloneInfrastructure(this.engine);
     clone.deployTechnology(id);
     const features = snapshot.launched
-      ? [COMMUNITY_BOOTSTRAP, ...snapshot.completedFeatures.map((featureId) => COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES]).filter(Boolean)]
+      ? [
+          COMMUNITY_BOOTSTRAP,
+          ...snapshot.completedFeatures
+            .map((featureId) => COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES])
+            .filter(Boolean),
+        ]
       : [];
     const after = LoadCalculator.calculate(snapshot.dau, features, clone);
     if (id === 'REDIS') return `DB ${percent(snapshot.load.dbRatio)}% → ${percent(after.dbRatio)}%`;
-    if (id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') return `App ${percent(snapshot.load.appRatio)}% → ${percent(after.appRatio)}% · Async 분리`;
+    if (id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') {
+      return `App ${percent(snapshot.load.appRatio)}% → ${percent(after.appRatio)}% · Async 분리`;
+    }
     if (id === 'OBJECT_STORAGE') return `Storage Capacity ${snapshot.load.storageCapacity} → ${after.storageCapacity}`;
     if (id === 'ALB') return 'Application 서버 Scale-out 해금';
     return '';
@@ -384,37 +503,59 @@ export class GameController {
       let cost: number | null = null;
       let canStudy = false;
       let reason: string | null = null;
-      if (proficiency.level >= 10) reason = 'MAX';
-      else {
+
+      if (proficiency.level >= 10) {
+        reason = 'MAX';
+      } else {
         const requirement = LearningRules.requirement(ref, proficiency.level);
-        targetLevel = requirement.targetLevel; requiredExperience = requirement.experienceDays; studyDays = requirement.studyDays; cost = requirement.cost;
-        if (this.engine.learning.current) reason = '다른 학습 진행 중';
-        else if (proficiency.experienceDays < requirement.experienceDays) reason = `경험 ${requirement.experienceDays - proficiency.experienceDays}일 부족`;
-        else {
+        targetLevel = requirement.targetLevel;
+        requiredExperience = requirement.experienceDays;
+        studyDays = requirement.studyDays;
+        cost = requirement.cost;
+
+        if (this.engine.learning.current) {
+          reason = '다른 학습 진행 중';
+        } else if (proficiency.experienceDays < requirement.experienceDays) {
+          reason = `경험 ${requirement.experienceDays - proficiency.experienceDays}일 부족`;
+        } else {
           const missing = requirement.prerequisites.find((item) => this.engine.developer.get(item.ref).level < item.level);
           if (missing) reason = `${LABELS[missing.ref.id]} Lv.${missing.level} 필요`;
           else if (this.engine.finance.cash < requirement.cost) reason = '현금 부족';
           else canStudy = true;
         }
       }
+
       return {
-        key: `${ref.category}:${ref.id}`, ref, name: LABELS[ref.id] ?? ref.id, icon: ICONS[ref.id] ?? '•', level: proficiency.level,
-        experienceDays: proficiency.experienceDays, targetLevel, requiredExperience, studyDays, cost, canStudy, reason, category: ref.category,
+        key: `${ref.category}:${ref.id}`,
+        ref,
+        name: LABELS[ref.id] ?? ref.id,
+        icon: ICONS[ref.id] ?? '•',
+        level: proficiency.level,
+        experienceDays: proficiency.experienceDays,
+        targetLevel,
+        requiredExperience,
+        studyDays,
+        cost,
+        canStudy,
+        reason,
+        category: ref.category,
       };
     });
   }
 
   private featureCards(snapshot: GameSnapshot): FeatureCardView[] {
-    return this.engine.progression.requirements.map((requirement) => {
-      const completed = snapshot.completedFeatures.includes(requirement.featureId);
-      const developing = snapshot.currentFeature?.id === requirement.featureId;
-      const revealed = completed || developing || snapshot.dau >= requirement.threshold;
-      const feature = COMMUNITY_FEATURES[requirement.featureId];
+    return this.engine.progression.featureOrder.map((featureId, slotIndex) => {
+      const threshold = COMMUNITY_REQUIREMENT_THRESHOLDS[slotIndex];
+      const phase = phaseForSlot(slotIndex);
+      const completed = snapshot.completedFeatures.includes(featureId);
+      const developing = snapshot.currentFeature?.id === featureId;
+      const revealed = completed || developing || snapshot.dau >= threshold;
+      const feature = COMMUNITY_FEATURES[featureId];
       return {
-        id: requirement.featureId,
-        name: revealed ? (LABELS[requirement.featureId] ?? feature.name) : '?',
-        phase: requirement.phase,
-        threshold: requirement.threshold,
+        id: featureId,
+        name: revealed ? (LABELS[featureId] ?? feature.name) : '?',
+        phase,
+        threshold,
         state: completed ? 'completed' : developing ? 'developing' : revealed ? 'revealed' : 'hidden',
         load: revealed ? feature.load : null,
       };
