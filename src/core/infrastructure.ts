@@ -210,6 +210,8 @@ export interface LoadCalculationContext {
   databaseProficiencyLevel?: number;
   technologyProficiencyLevels?: Partial<Record<TechnologyId, number>>;
   nodeHealth?: Partial<Record<RequestNodeKind, number>>;
+  /** Temporary request-volume multiplier such as a viral traffic spike. */
+  trafficMultiplier?: number;
 }
 
 export interface LoadSnapshot {
@@ -305,15 +307,16 @@ export class LoadCalculator {
 
     const cacheHealth = Math.max(0, Math.min(1, context.nodeHealth?.CACHE ?? 1));
     const redisActive = infrastructure.hasTechnology('REDIS');
+    const trafficMultiplier = Math.max(0.1, context.trafficMultiplier ?? 1);
 
     features.forEach((feature, index) => {
       const flow = requestFlows[index];
-      const appCpuBase = demand(feature.resourceLoad.app.cpu, dau, LOAD_CURVE.app);
-      const appIoBase = demand(feature.resourceLoad.app.io, dau, LOAD_CURVE.app);
-      let dbCpuBase = demand(feature.resourceLoad.db.cpu, dau, LOAD_CURVE.db);
-      let dbIoBase = demand(feature.resourceLoad.db.io, dau, LOAD_CURVE.db);
-      const asyncBase = demand(feature.load.async, dau, LOAD_CURVE.async);
-      const storageBase = demand(feature.load.storage, dau, LOAD_CURVE.storage);
+      const appCpuBase = demand(feature.resourceLoad.app.cpu, dau, LOAD_CURVE.app) * trafficMultiplier;
+      const appIoBase = demand(feature.resourceLoad.app.io, dau, LOAD_CURVE.app) * trafficMultiplier;
+      let dbCpuBase = demand(feature.resourceLoad.db.cpu, dau, LOAD_CURVE.db) * trafficMultiplier;
+      let dbIoBase = demand(feature.resourceLoad.db.io, dau, LOAD_CURVE.db) * trafficMultiplier;
+      const asyncBase = demand(feature.load.async, dau, LOAD_CURVE.async) * trafficMultiplier;
+      const storageBase = demand(feature.load.storage, dau, LOAD_CURVE.storage) * trafficMultiplier;
 
       // Redis is deliberately a targeted Read-heavy I/O solution rather than a
       // generic DB capacity upgrade. Cache incidents weaken the benefit.
