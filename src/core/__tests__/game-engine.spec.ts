@@ -64,6 +64,40 @@ describe('game engine orchestration', () => {
     expect(projected.dbCpuDemand + projected.dbIoDemand).toBeGreaterThan(before.dbCpuDemand + before.dbIoDemand);
   });
 
+  it('trades feature speed for tech debt and lets refactoring pay that debt down', () => {
+    const game = new GameEngine({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 42,
+      random: new SafePositiveRandom(),
+    });
+
+    for (let day = 0; day < 18; day += 1) game.advanceDay();
+    for (let day = 0; day < 30 && game.snapshot.currentFeature === null; day += 1) game.advanceDay();
+
+    const beforeProgress = game.snapshot.currentFeature!.progress;
+    const result = game.fastTrackCurrentFeature();
+    const fastTracked = game.snapshot;
+
+    expect(result.addedWork).toBeGreaterThan(0);
+    expect(result.addedDebt).toBeGreaterThan(0);
+    expect(fastTracked.currentFeature!.progress).toBeGreaterThan(beforeProgress);
+    expect(fastTracked.techDebt.value).toBe(result.addedDebt);
+    expect(fastTracked.techDebt.canFastTrack).toBe(false);
+
+    game.startRefactor();
+    const pausedProgress = game.snapshot.currentFeature!.progress;
+    expect(game.snapshot.techDebt.remainingRefactorDays).toBe(5);
+
+    for (let day = 0; day < 5; day += 1) {
+      game.advanceDay();
+      expect(game.snapshot.currentFeature?.progress).toBe(pausedProgress);
+    }
+
+    expect(game.snapshot.techDebt.refactoring).toBe(false);
+    expect(game.snapshot.techDebt.value).toBe(0);
+  });
+
   it('settles cash as day 30 completes and enters the next month at day 31', () => {
     const game = new GameEngine({
       frameworkId: 'SPRING_BOOT',
