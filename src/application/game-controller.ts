@@ -25,7 +25,7 @@ import {
 } from '../core';
 
 export type LoadTone = 'stable' | 'busy' | 'critical' | 'overload' | 'incident';
-export type GameEventKind = 'requirement' | 'incident' | 'launch' | 'bankrupt' | 'won';
+export type GameEventKind = 'requirement' | 'incident' | 'launch' | 'settlement' | 'bankrupt' | 'won';
 
 export interface GameEventView {
   id: string;
@@ -39,11 +39,15 @@ export interface GameEventView {
 
 export interface HudView {
   day: number;
+  month: number;
+  dayOfMonth: number;
+  daysUntilSettlement: number;
   dau: number;
   cash: number;
   monthlyRevenue: number;
   monthlyCost: number;
   monthlyProfit: number;
+  lastSettlement: GameSnapshot['lastSettlement'];
   status: GameSnapshot['status'];
   launched: boolean;
 }
@@ -133,6 +137,13 @@ export interface RequestFlowView {
   trafficUnit: number;
 }
 
+export interface InfrastructureCostView {
+  appSizeMonthlyCosts: Record<ServerSize, number>;
+  dbSizeMonthlyCosts: Record<ServerSize, number>;
+  addAppServerMonthlyCostDelta: number | null;
+  addDbReplicaMonthlyCostDelta: number | null;
+}
+
 export interface GameView {
   hud: HudView;
   nodes: ServiceNodeView[];
@@ -142,6 +153,7 @@ export interface GameView {
   skills: SkillNodeView[];
   features: FeatureCardView[];
   requestFlows: RequestFlowView[];
+  infrastructureCosts: InfrastructureCostView;
   snapshot: GameSnapshot;
   frameworkId: FrameworkId;
   databaseId: DatabaseId;
@@ -183,6 +195,7 @@ const TECH_ICONS: Record<BuildableTechnologyId, string> = {
 
 const FUNDAMENTALS: FundamentalSkillId[] = ['NETWORK', 'OS_RUNTIME', 'DATABASE', 'DSA', 'SECURITY', 'SOFTWARE_DESIGN'];
 const TECHNOLOGY_SKILLS: TechnologySkillId[] = ['POSTGRESQL', 'MYSQL', 'MONGODB', 'REDIS', 'SQS', 'RABBITMQ', 'KAFKA', 'ALB', 'OBJECT_STORAGE'];
+const SERVER_SIZES: readonly ServerSize[] = [ServerSize.SMALL, ServerSize.MEDIUM, ServerSize.LARGE, ServerSize.XLARGE];
 
 function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
@@ -235,6 +248,12 @@ function nodeIdForRequestNode(node: RequestNodeKind | null): string | undefined 
   }
 }
 
+function calendarForDay(day: number): { month: number; dayOfMonth: number; daysUntilSettlement: number } {
+  const month = Math.floor((day - 1) / 30) + 1;
+  const dayOfMonth = ((day - 1) % 30) + 1;
+  return { month, dayOfMonth, daysUntilSettlement: 31 - dayOfMonth };
+}
+
 export class GameController {
   readonly engine: GameEngine;
   private readonly listeners = new Set<(view: GameView) => void>();
@@ -258,15 +277,20 @@ export class GameController {
     const aiActive = snapshot.completedFeatures.includes('AI_RECOMMENDATION');
     const monthlyRevenue = RevenuePolicy.monthlyRevenue(snapshot.dau, revenueModifier);
     const monthlyCost = this.engine.infrastructure.monthlyCost + RevenuePolicy.monthlyAiCost(snapshot.dau, aiActive);
+    const calendar = calendarForDay(snapshot.day);
 
     return {
       hud: {
         day: snapshot.day,
+        month: calendar.month,
+        dayOfMonth: calendar.dayOfMonth,
+        daysUntilSettlement: calendar.daysUntilSettlement,
         dau: snapshot.dau,
         cash: snapshot.cash,
         monthlyRevenue,
         monthlyCost,
         monthlyProfit: monthlyRevenue - monthlyCost,
+        lastSettlement: snapshot.lastSettlement,
         status: snapshot.status,
         launched: snapshot.launched,
       },
@@ -277,6 +301,7 @@ export class GameController {
       skills: this.skillNodes(),
       features: this.featureCards(snapshot),
       requestFlows: this.requestFlowViews(snapshot),
+      infrastructureCosts: this.infrastructureCostView(),
       snapshot,
       frameworkId: this.engine.config.frameworkId,
       databaseId: this.engine.config.databaseId,
@@ -315,6 +340,17 @@ export class GameController {
     }
     if (after.currentFeature && after.currentFeature.id !== before.currentFeature?.id && after.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
       events.push({ id: `req-${after.day}-${after.currentFeature.id}`, kind: 'requirement', title: 'NEW REQUIREMENT', message: `${LABELS[after.currentFeature.id] ?? after.currentFeature.id} 개발이 자동으로 시작되었습니다.`, autoPause: true });
+    }
+    if (after.lastSettlement && after.lastSettlement.month !== before.lastSettlement?.month) {
+      const settlement = after.lastSettlement;
+      const sign = settlement.profit >= 0 ? '+' : '-';
+      events.push({
+        id: `settlement-${settlement.month}`,
+        kind: 'settlement',
+        title: `M${settlement.month} SETTLEMENT`,
+        message: `월 매출 ${settlement.revenue.toLocaleString()}원 · 월 비용 ${settlement.totalCost.toLocaleString()}원 · 순변동 ${sign}${Math.abs(settlement.profit).toLocaleString()}원`,
+        autoPause: false,
+      });
     }
     const previousIncidents = new Set(before.incidents.map((incident) => incident.id));
     for (const incident of after.incidents) {
@@ -410,13 +446,17 @@ export class GameController {
     const tech = snapshot.currentTechnologyBuild;
     const learning = this.engine.learning.current;
     const responding = snapshot.incidents.find((incident) => incident.remainingResponseDays !== null);
+    const featureTotal = feature ? feature.elapsedDays + feature.estimatedRemainingDays : 0;
+    const techTotal = tech ? tech.elapsedDays + tech.estimatedRemainingDays : 0;
+    const responseTotal = responding?.totalResponseDays ?? 0;
+    const responseElapsed = responding?.elapsedResponseDays ?? 0;
     return [
       {
         id: 'feature',
         label: 'FEATURE',
         title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음',
         progress: feature ? feature.progress / feature.requiredWork : null,
-        meta: feature ? '자동 개발 중' : '다음 요구사항 대기',
+        meta: feature ? `${feature.elapsedDays}/~${featureTotal}일 · 약 ${feature.estimatedRemainingDays}일 남음` : '다음 요구사항 대기',
         active: Boolean(feature),
       },
       {
@@ -424,7 +464,7 @@ export class GameController {
         label: 'TECHNOLOGY',
         title: tech ? (LABELS[tech.id] ?? tech.id) : '비어 있음',
         progress: tech ? tech.progress / tech.requiredWork : null,
-        meta: tech ? '구축 중' : '기술을 선택하세요',
+        meta: tech ? `${tech.elapsedDays}/~${techTotal}일 · 약 ${tech.estimatedRemainingDays}일 남음` : '기술을 선택하세요',
         active: Boolean(tech),
       },
       {
@@ -432,15 +472,17 @@ export class GameController {
         label: 'LEARNING',
         title: learning ? `${LABELS[learning.skill.id] ?? learning.skill.id} → Lv.${learning.targetLevel}` : '비어 있음',
         progress: learning ? learning.progress : null,
-        meta: learning ? `학습 중 · ${learning.elapsedStudyDays}/${learning.requiredStudyDays}일` : '학습을 선택하세요',
+        meta: learning ? `${learning.elapsedStudyDays}/${learning.requiredStudyDays}일 · ${Math.max(0, learning.requiredStudyDays - learning.elapsedStudyDays)}일 남음` : '학습을 선택하세요',
         active: Boolean(learning),
       },
       {
         id: 'incident',
         label: 'INCIDENT',
         title: responding ? this.nodeLabel(responding.nodeId) : '비어 있음',
-        progress: null,
-        meta: responding ? `${responding.remainingResponseDays}일 남음` : `${snapshot.incidents.length}건 미해결`,
+        progress: responding && responseTotal > 0 ? responseElapsed / responseTotal : null,
+        meta: responding
+          ? `${responseElapsed}/${responseTotal}일 · ${responding.remainingResponseDays ?? 0}일 남음`
+          : `${snapshot.incidents.length}건 미해결`,
         active: Boolean(responding),
       },
     ];
@@ -456,11 +498,14 @@ export class GameController {
     ];
     for (const [name, ratio, nodeId] of ratios) {
       if (ratio >= 0.9) {
+        const overloadPenalty = ratio > 1 ? Math.min(30, Math.round((ratio - 1) * 100)) : 0;
         alerts.push({
           id: `load-${name}`,
           tone: ratio > 1 ? 'danger' : 'warning',
           title: `${name} Load ${percent(ratio)}%`,
-          detail: ratio > 1 ? 'Overload 상태' : 'Critical 구간',
+          detail: ratio > 1
+            ? `Capacity ${Math.round((ratio - 1) * 100)}% 초과 · 다음 날 DAU 최대 -${overloadPenalty}% 압력`
+            : 'Critical 구간 · Scale 검토 필요',
           nodeId,
         });
       }
@@ -483,12 +528,12 @@ export class GameController {
         id: incident.id,
         tone: incident.severity === 'MINOR' ? 'warning' : 'danger',
         title: `${incident.severity} · ${this.nodeLabel(incident.nodeId)}`,
-        detail: incident.remainingResponseDays === null ? '대응 대기 중' : `복구 ${incident.remainingResponseDays}일`,
+        detail: incident.remainingResponseDays === null ? '대응 대기 중' : `복구 ${incident.elapsedResponseDays ?? 0}/${incident.totalResponseDays ?? 0}일`,
         nodeId: incident.nodeId,
       });
     }
     if (profit < 0) {
-      alerts.push({ id: 'profit', tone: 'warning', title: '월 손익 적자 예상', detail: `현재 조건 기준 ${Math.abs(profit).toLocaleString()}원 적자` });
+      alerts.push({ id: 'profit', tone: 'warning', title: '월 예상 순이익 적자', detail: `현재 조건 기준 ${Math.abs(profit).toLocaleString()}원 적자` });
     }
     if (!snapshot.launched) {
       alerts.push({ id: 'bootstrap', tone: 'info', title: 'Bootstrap 개발 중', detail: '완료되면 DAU 80으로 서비스가 공개됩니다.' });
@@ -670,6 +715,58 @@ export class GameController {
         trafficUnit,
       };
     });
+  }
+
+  private infrastructureCostView(): InfrastructureCostView {
+    const currentApp = this.engine.infrastructure.app;
+    const currentDb = this.engine.infrastructure.database;
+    const hasAlb = this.engine.infrastructure.hasTechnology('ALB');
+
+    const appSizeMonthlyCosts = {} as Record<ServerSize, number>;
+    const dbSizeMonthlyCosts = {} as Record<ServerSize, number>;
+    for (const size of SERVER_SIZES) {
+      appSizeMonthlyCosts[size] = new AppCluster(
+        this.engine.config.frameworkId,
+        size,
+        currentApp.count,
+        hasAlb,
+      ).monthlyCost;
+      dbSizeMonthlyCosts[size] = new DatabaseCluster(
+        this.engine.config.databaseId,
+        size,
+        currentDb.replicaCount,
+      ).monthlyCost;
+    }
+
+    let addAppServerMonthlyCostDelta: number | null = null;
+    if (hasAlb && currentApp.count < 10) {
+      const expanded = new AppCluster(
+        this.engine.config.frameworkId,
+        currentApp.size,
+        currentApp.count,
+        true,
+      );
+      expanded.addServer();
+      addAppServerMonthlyCostDelta = expanded.monthlyCost - currentApp.monthlyCost;
+    }
+
+    let addDbReplicaMonthlyCostDelta: number | null = null;
+    if (currentDb.replicaCount < 3) {
+      const expanded = new DatabaseCluster(
+        this.engine.config.databaseId,
+        currentDb.size,
+        currentDb.replicaCount,
+      );
+      expanded.addReplica();
+      addDbReplicaMonthlyCostDelta = expanded.monthlyCost - currentDb.monthlyCost;
+    }
+
+    return {
+      appSizeMonthlyCosts,
+      dbSizeMonthlyCosts,
+      addAppServerMonthlyCostDelta,
+      addDbReplicaMonthlyCostDelta,
+    };
   }
 
   private nodeLabel(nodeId: string): string {
