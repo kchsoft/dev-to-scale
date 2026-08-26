@@ -11,10 +11,8 @@ import {
   GameEngine,
   GameEngineConfig,
   GameSnapshot,
-  InfrastructureState,
   LanguageId,
   LearningRules,
-  LoadCalculator,
   RequestNodeKind,
   RevenuePolicy,
   ServerSize,
@@ -218,16 +216,6 @@ function phaseForSlot(index: number): 1 | 2 | 3 {
 
 function sameSkill(left: SkillRef, right: SkillRef): boolean {
   return left.category === right.category && left.id === right.id;
-}
-
-function cloneInfrastructure(engine: GameEngine): InfrastructureState {
-  const current = engine.infrastructure;
-  const clone = new InfrastructureState(
-    new AppCluster(engine.config.frameworkId, current.app.size, current.app.count, current.hasTechnology('ALB')),
-    new DatabaseCluster(engine.config.databaseId, current.database.size, current.database.replicaCount),
-  );
-  for (const technology of current.deployedTechnologies) clone.deployTechnology(technology);
-  return clone;
 }
 
 function trafficUnitForDau(dau: number): number {
@@ -694,19 +682,7 @@ export class GameController {
   private previewTechnology(id: BuildableTechnologyId): string {
     if (this.engine.infrastructure.hasTechnology(id)) return '이미 서비스에 연결됨';
     const snapshot = this.engine.snapshot;
-    const clone = cloneInfrastructure(this.engine);
-    clone.deployTechnology(id);
-    const features = snapshot.launched
-      ? [
-          COMMUNITY_BOOTSTRAP,
-          ...snapshot.completedFeatures
-            .map((featureId) => COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES])
-            .filter(Boolean),
-        ]
-      : [];
-    const after = LoadCalculator.calculate(snapshot.dau, features, clone, {
-      trafficMultiplier: snapshot.growthEvent?.loadMultiplier ?? 1,
-    });
+    const after = this.engine.previewLoadWithTechnology(id);
     if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
       return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
     }

@@ -71,6 +71,20 @@ describe('application layer', () => {
     expect(controller.getView().technologies.find((tech) => tech.id === 'REDIS')?.available).toBe(true);
   });
 
+  it('projects a technology preview calculated with the current game context', () => {
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 15 });
+    const current = controller.engine.snapshot.load;
+    const previewLoad = vi.spyOn(controller.engine, 'previewLoadWithTechnology').mockReturnValue({
+      ...current,
+      dbRatio: current.dbRatio + 0.42,
+    });
+
+    const preview = controller.getView().technologies.find((technology) => technology.id === 'REDIS')?.preview;
+
+    expect(previewLoad).toHaveBeenCalledWith('REDIS');
+    expect(preview).toBe(`DB ${Math.round(current.dbRatio * 100)}% → ${Math.round((current.dbRatio + 0.42) * 100)}%`);
+  });
+
   it('projects the active learning target and study progress into the UI', () => {
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 5 });
     const network = skillRef.fundamental('NETWORK');

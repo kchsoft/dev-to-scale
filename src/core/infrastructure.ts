@@ -160,6 +160,15 @@ export class InfrastructureState {
     );
   }
 
+  clone(): InfrastructureState {
+    const clone = new InfrastructureState(
+      new AppCluster(this.app.frameworkId, this.app.size, this.app.count, this.hasTechnology('ALB')),
+      new DatabaseCluster(this.database.databaseId, this.database.size, this.database.replicaCount),
+    );
+    for (const technology of this.deployedTechnologies) clone.deployTechnology(technology);
+    return clone;
+  }
+
   /**
    * V1 allows one active queue implementation. The collection-shaped model is
    * intentionally retained so a future MSA topology can attach queues per service.

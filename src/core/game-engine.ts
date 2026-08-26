@@ -361,6 +361,23 @@ export class GameEngine {
     return this.calculateCurrentLoad(this.infrastructure, projectedFeatures);
   }
 
+  /**
+   * Preview a technology deployment without mutating the live infrastructure.
+   * Queue replacement also retires incidents attached to the replaced queue.
+   */
+  previewLoadWithTechnology(id: BuildableTechnologyId): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    const retired = infrastructure.deployTechnology(id);
+    const ignoredIncidentNodeIds = new Set(
+      retired.map((technology) => `technology:${technology}`),
+    );
+    return this.calculateCurrentLoad(
+      infrastructure,
+      this.activeFeaturesForLoad(),
+      ignoredIncidentNodeIds,
+    );
+  }
+
   private ensureRunning(): void {
     if (this._status !== 'RUNNING') throw new Error(`Game is ${this._status}`);
   }

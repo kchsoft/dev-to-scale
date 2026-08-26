@@ -144,6 +144,20 @@ describe('game engine orchestration', () => {
     expect(projected.dbCpuDemand + projected.dbIoDemand).toBeGreaterThan(before.dbCpuDemand + before.dbIoDemand);
   });
 
+  it('preserves proficiency and incident health when previewing a technology', () => {
+    const game = launchedGame(14);
+    game.developer.get(skillRef.technology('POSTGRESQL')).setLevel(10);
+    const incident = new Incident('preview-db-outage', 'database:POSTGRESQL', 'CRITICAL', 1);
+    game.incidents.add(incident);
+    game.scaleApplication(game.infrastructure.app.size);
+    const current = game.snapshot.load;
+
+    const preview = game.previewLoadWithTechnology('REDIS');
+
+    expect(preview.dbCapacity).toBeCloseTo(current.dbCapacity);
+    expect(preview.failureRate).toBe(current.failureRate);
+  });
+
   it('trades feature speed for tech debt and lets refactoring pay that debt down', () => {
     const game = new GameEngine({
       frameworkId: 'SPRING_BOOT',
