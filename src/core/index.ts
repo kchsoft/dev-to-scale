@@ -6,6 +6,7 @@ export * from './finance';
 export * from './game-engine';
 export * from './growth';
 export * from './incident';
+export * from './incident-diagnosis';
 export * from './incident-manager';
 export * from './incident-topology';
 export * from './infrastructure';
