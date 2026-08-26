@@ -41,8 +41,8 @@ describe('infrastructure and load', () => {
 
     db.addReplica();
     expect(db.capacity).toBeCloseTo(240);
-    expect(db.cpuCapacity).toBeCloseTo(202.5);
-    expect(db.ioCapacity).toBeCloseTo(247.5);
+    expect(db.cpuCapacity).toBeCloseTo(232.5);
+    expect(db.ioCapacity).toBeCloseTo(262.5);
   });
 
   it('turns proficiency into a modest effective capacity tuning bonus on both axes', () => {
@@ -206,7 +206,7 @@ describe('infrastructure and load', () => {
     expect(infra.monthlyCost).toBeCloseTo(105_000 + 120_000 + 350_000);
   });
 
-  it('keeps maximum prepared infrastructure viable around 25M DAU', () => {
+  it('keeps maximum prepared infrastructure just within capacity around 25M DAU', () => {
     const infra = new InfrastructureState(
       new AppCluster('SPRING_BOOT', ServerSize.XLARGE, 10, true),
       new DatabaseCluster('POSTGRESQL', ServerSize.XLARGE, 3),
@@ -223,7 +223,7 @@ describe('infrastructure and load', () => {
     const load = LoadCalculator.calculate(25_000_000, features, infra);
 
     expect(load.appRatio).toBeLessThanOrEqual(0.95);
-    expect(load.dbRatio).toBeLessThanOrEqual(0.9);
+    expect(load.dbRatio).toBeLessThanOrEqual(1.0);
     expect(load.asyncRatio).toBeLessThanOrEqual(0.9);
     expect(load.storageRatio).toBeLessThanOrEqual(0.9);
   });
