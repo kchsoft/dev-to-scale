@@ -14,4 +14,5 @@ export * from './progression';
 export * from './random';
 export * from './request-flow';
 export * from './service-health';
+export * from './tech-debt';
 export * from './technology';
