@@ -1,11 +1,12 @@
 import { COMMUNITY_BOOTSTRAP, COMMUNITY_FEATURES } from './community';
+import { DatabaseDefinition, DatabaseId } from './database';
 import { ExperienceAccrualService } from './experience';
 import { FeatureDefinition, FeatureDevelopmentTask, FrameworkDefinition, FrameworkId } from './feature';
 import { FinanceAccount, MonthlyEconomyLedger, RevenuePolicy } from './finance';
 import { GrowthEvent, GrowthPolicy, RandomSource } from './growth';
 import { IncidentGenerator, IncidentManager } from './incident-manager';
 import { IncidentTopology } from './incident-topology';
-import { DatabaseId, InfrastructureState, LoadCalculator, LoadSnapshot, ServerSize } from './infrastructure';
+import { InfrastructureState, LoadCalculator, LoadSnapshot, ServerSize } from './infrastructure';
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
@@ -63,7 +64,7 @@ export class GameEngine {
     this.infrastructure = InfrastructureState.initial(config.frameworkId, config.databaseId);
     this.progression = new CommunityProgression(config.seed);
     this.finance = new FinanceAccount(config.startingCash ?? 3_000_000);
-    this.featureTask = FeatureDevelopmentTask.start(COMMUNITY_BOOTSTRAP, FrameworkDefinition.byId(config.frameworkId));
+    this.featureTask = this.createFeatureTask(COMMUNITY_BOOTSTRAP);
     this._load = LoadCalculator.calculate(0, [], this.infrastructure);
   }
 
@@ -119,6 +120,8 @@ export class GameEngine {
     this._load = LoadCalculator.calculate(this._dau, this.activeFeaturesForLoad(), this.infrastructure);
     if (this._launched) this.maybeGenerateIncident();
 
+    // Record the current day's economy before completing new work so newly
+    // released features/technologies begin affecting the following day.
     this.recordMonthlyEconomy();
 
     const incidentDevelopmentModifier = this.incidents.developmentModifier;
@@ -206,6 +209,12 @@ export class GameEngine {
     this.finishFeatureIfComplete();
   }
 
+  private createFeatureTask(feature: FeatureDefinition): FeatureDevelopmentTask {
+    const framework = FrameworkDefinition.byId(this.config.frameworkId);
+    const database = DatabaseDefinition.byId(this.config.databaseId);
+    return FeatureDevelopmentTask.start(feature, framework, database.workModifierFor(feature));
+  }
+
   private activeFeaturesForLoad(): FeatureDefinition[] {
     return this._launched ? [COMMUNITY_BOOTSTRAP, ...this.completedFeatureDefinitions] : [];
   }
@@ -230,10 +239,7 @@ export class GameEngine {
     if (this.featureTask || !this._launched || this.progression.finished) return;
     const requirement = this.progression.tryUnlock(this._dau);
     if (!requirement) return;
-    this.featureTask = FeatureDevelopmentTask.start(
-      COMMUNITY_FEATURES[requirement.featureId],
-      FrameworkDefinition.byId(this.config.frameworkId),
-    );
+    this.featureTask = this.createFeatureTask(COMMUNITY_FEATURES[requirement.featureId]);
   }
 
   private recordMonthlyEconomy(): void {
