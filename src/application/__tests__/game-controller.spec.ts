@@ -62,7 +62,7 @@ describe('application layer', () => {
     expect(view.skills.find((skill) => skill.key === 'fundamental:NETWORK')?.elapsedStudyDays).toBe(1);
   });
 
-  it('keeps x1/x2 timing and visible day progress in GameClock', () => {
+  it('keeps x1=3s and x2=1.5s timing with visible day progress', () => {
     vi.useFakeTimers();
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 1 });
     const clock = new GameClock(controller);
@@ -71,7 +71,7 @@ describe('application layer', () => {
     expect(clock.dayProgress).toBe(0);
 
     clock.setSpeed(1);
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(1_500);
     expect(clock.dayProgress).toBeCloseTo(0.5, 1);
     expect(controller.getView().hud.day).toBe(1);
 
@@ -82,12 +82,12 @@ describe('application layer', () => {
     expect(controller.getView().hud.day).toBe(1);
 
     clock.setSpeed(1);
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(1_500);
     expect(controller.getView().hud.day).toBe(2);
     expect(clock.dayProgress).toBeCloseTo(0);
 
     clock.setSpeed(2);
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(1_500);
     expect(controller.getView().hud.day).toBe(3);
 
     clock.pause();
@@ -116,12 +116,12 @@ describe('application layer', () => {
     const clock = new GameClock(fakeController);
 
     clock.setSpeed(2);
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(1_500);
     expect(clock.speed).toBe(0);
 
     clock.resumeAfterAutoPause();
     expect(clock.speed).toBe(2);
-    vi.advanceTimersByTime(2_500);
+    vi.advanceTimersByTime(750);
     expect(clock.dayProgress).toBeCloseTo(0.5, 1);
     clock.dispose();
   });
