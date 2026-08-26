@@ -8,6 +8,7 @@ import {
   GameController,
   GameEventView,
   GameView,
+  RequestFlowView,
   ServiceNodeView,
   SkillNodeView,
   TechnologyOptionView,
@@ -32,6 +33,10 @@ const SIZE_LABEL: Record<ServerSize, string> = { SMALL: 'S', MEDIUM: 'M', LARGE:
 
 const CATEGORY_LABEL: Record<SkillRef['category'], string> = {
   fundamental: 'FUNDAMENTALS', language: 'LANGUAGE', framework: 'FRAMEWORK', technology: 'TECHNOLOGY',
+};
+
+const REQUEST_NODE_LABEL: Record<string, string> = {
+  ALB: 'ALB', APP: 'APP', DB: 'DB', CACHE: 'REDIS', QUEUE: 'MQ', STORAGE: 'STORAGE', AI: 'AI',
 };
 
 function money(value: number): string {
@@ -264,6 +269,7 @@ function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id
       <section className="service-map panel-shell">
         <PanelTitle code="LIVE ARCHITECTURE" title="Service Map" badge="AUTO LAYOUT" />
         <ArchitectureGraph view={view} onNode={onNode} />
+        <RequestFlowBoard flows={view.requestFlows} failureRate={view.snapshot.load.failureRate} />
         <div className="load-strip">
           <LoadMini label="APP" value={view.snapshot.load.appRatio} />
           <LoadMini label="DB" value={view.snapshot.load.dbRatio} />
@@ -277,6 +283,47 @@ function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id
         <div className="alert-list">{view.alerts.map((alert) => <AlertCard key={alert.id} alert={alert} onClick={() => alert.nodeId && onNode(alert.nodeId.replace('technology:', '').replace('framework:', 'application').replace('database:', 'database'))} />)}</div>
       </aside>
     </div>
+  );
+}
+
+function RequestFlowBoard({ flows, failureRate }: { flows: RequestFlowView[]; failureRate: number }) {
+  if (flows.length === 0) {
+    return <section className="request-flow-board empty"><div><span>LIVE REQUEST FLOW</span><strong>서비스 공개 후 요청이 흐릅니다.</strong></div></section>;
+  }
+
+  const trafficUnit = flows[0].trafficUnit;
+  return (
+    <section className={`request-flow-board ${failureRate > 0 ? 'has-failure' : ''}`}>
+      <header>
+        <div><span>LIVE REQUEST FLOW</span><strong>기능 요청이 실제 인프라를 통과하는 경로</strong></div>
+        <small>● ≈ {number(trafficUnit)} requests · FAIL {Math.round(failureRate * 100)}%</small>
+      </header>
+      <div className="request-flow-list">
+        {flows.map((flow) => (
+          <div className={`request-flow-row ${flow.failureNode ? 'failed' : ''}`} key={flow.id}>
+            <div className="request-source"><span>FEATURE</span><strong>{flow.name}</strong><small>{flow.successPercent}% success</small></div>
+            <div className="request-route">
+              {flow.nodes.map((node, nodeIndex) => (
+                <div className="request-hop" key={`${flow.id}-${node.node}-${nodeIndex}`}>
+                  {nodeIndex > 0 && (
+                    <div className="request-link">
+                      {Array.from({ length: flow.particleCount }).map((_, particleIndex) => (
+                        <i key={particleIndex} style={{ animationDelay: `${particleIndex * -.34}s` }} />
+                      ))}
+                    </div>
+                  )}
+                  <div className={`request-node ${node.available ? '' : 'missing'} ${flow.failureNode === node.node ? 'failed' : ''}`}>
+                    <b>{REQUEST_NODE_LABEL[node.node] ?? node.node}</b>
+                    <small>{node.available ? `${node.arrivalPercent}% IN` : 'MISSING'}</small>
+                  </div>
+                </div>
+              ))}
+              {flow.failureNode && <span className="request-failed-mark">× REQUEST FAILED</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -386,9 +433,9 @@ function FeatureBoard({ view }: { view: GameView }) {
   const current = view.snapshot.currentFeature;
   return (
     <section className="page-panel">
-      <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="Phase 안의 기능 순서는 Seed에 따라 달라집니다. 해금되기 전에는 무엇이 나올지 알 수 없습니다." />
+      <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="기능 카드의 APP / DB / MQ / STORAGE 태그는 실제 요청이 지나가는 서버 경로를 뜻합니다." />
       <div className="phase-board">{([1, 2, 3] as const).map((phase) => <div className="phase-lane" key={phase}><header><span>PHASE {phase}</span><strong>{phase === 1 ? 'EARLY' : phase === 2 ? 'GROWTH' : 'SCALE'}</strong></header><div>
-        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <small>개발 {current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일</small>}{feature.load && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}</article>)}
+        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <small>개발 {current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일</small>}{feature.route && <div className="feature-route-tags">{feature.route.map((node, nodeIndex) => <i key={`${node}-${nodeIndex}`}>{REQUEST_NODE_LABEL[node] ?? node}</i>)}</div>}{feature.load && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}</article>)}
       </div></div>)}</div>
     </section>
   );
