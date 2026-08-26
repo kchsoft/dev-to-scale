@@ -74,6 +74,15 @@ export class IncidentManager {
     this.active.set(incident.id, incident);
   }
 
+  removeForNode(nodeId: string): Incident | null {
+    const incident = this.incidents.find((candidate) => candidate.nodeId === nodeId);
+    if (!incident) return null;
+
+    this.active.delete(incident.id);
+    if (this.responseIncidentId === incident.id) this.responseIncidentId = null;
+    return incident;
+  }
+
   startResponse(incidentId: string, proficiencyLevel: number, fundamentalAverage: number): Incident {
     if (this.responseIncidentId) throw new Error('An incident response is already in progress');
     const incident = this.active.get(incidentId);
