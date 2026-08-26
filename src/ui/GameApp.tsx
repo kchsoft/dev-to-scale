@@ -59,6 +59,7 @@ export default function GameApp() {
   const [controller, setController] = useState<GameController | null>(null);
   const [view, setView] = useState<GameView | null>(null);
   const [speed, setSpeedState] = useState<GameSpeed>(0);
+  const [dayProgress, setDayProgress] = useState(0);
   const [tab, setTab] = useState<'service' | 'features' | 'technology' | 'learning' | 'report'>('service');
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [events, setEvents] = useState<GameEventView[]>([]);
@@ -73,10 +74,12 @@ export default function GameApp() {
       if (blocking.length) setEvents((current) => [...current, ...blocking]);
     });
     const unsubscribeClock = clock.subscribe(setSpeedState);
+    const unsubscribeProgress = clock.subscribeProgress(setDayProgress);
     clockRef.current = clock;
     return () => {
       unsubscribe();
       unsubscribeClock();
+      unsubscribeProgress();
       clock.dispose();
       clockRef.current = null;
     };
@@ -92,6 +95,7 @@ export default function GameApp() {
     const next = new GameController({ frameworkId, databaseId, seed: Math.floor(Date.now() % 2_147_483_647) });
     setController(next);
     setView(next.getView());
+    setDayProgress(0);
     setTab('service');
   };
 
@@ -102,6 +106,7 @@ export default function GameApp() {
     setEvents([]);
     setSelectedNode(null);
     setSpeedState(0);
+    setDayProgress(0);
   };
 
   const run = (action: () => void, success?: string) => {
@@ -111,6 +116,12 @@ export default function GameApp() {
     } catch (error) {
       setToast(error instanceof Error ? error.message : '처리할 수 없습니다.');
     }
+  };
+
+  const closeActiveEvent = () => {
+    const hasMoreBlockingEvents = events.length > 1;
+    setEvents((current) => current.slice(1));
+    if (!hasMoreBlockingEvents) clockRef.current?.resumeAfterAutoPause();
   };
 
   if (!controller || !view) {
@@ -169,7 +180,7 @@ export default function GameApp() {
 
   return (
     <main className="game-screen">
-      <Hud view={view} speed={speed} onSpeed={(next) => clockRef.current?.setSpeed(next)} onStep={() => clockRef.current?.advanceOneDay()} />
+      <Hud view={view} speed={speed} dayProgress={dayProgress} onSpeed={(next) => clockRef.current?.setSpeed(next)} onStep={() => clockRef.current?.advanceOneDay()} />
 
       <div className="main-shell">
         <nav className="side-nav">
@@ -192,19 +203,20 @@ export default function GameApp() {
       </div>
 
       {selected && <NodeInspector node={selected} view={view} onClose={() => setSelectedNode(null)} onAction={(action) => run(action)} controller={controller} />}
-      {activeEvent && <EventOverlay event={activeEvent} onDismiss={() => setEvents((current) => current.slice(1))} onRespond={() => {
+      {activeEvent && <EventOverlay event={activeEvent} onDismiss={closeActiveEvent} onRespond={() => {
         if (activeEvent.kind === 'incident') run(() => controller.startIncidentResponse(activeEvent.id), '장애 대응을 시작했습니다.');
-        setEvents((current) => current.slice(1));
+        closeActiveEvent();
       }} />}
       {toast && <div className="toast">{toast}</div>}
     </main>
   );
 }
 
-function Hud({ view, speed, onSpeed, onStep }: { view: GameView; speed: GameSpeed; onSpeed: (speed: GameSpeed) => void; onStep: () => void }) {
+function Hud({ view, speed, dayProgress, onSpeed, onStep }: { view: GameView; speed: GameSpeed; dayProgress: number; onSpeed: (speed: GameSpeed) => void; onStep: () => void }) {
   const metrics = [
     ['DAY', `#${view.hud.day}`], ['DAU', number(view.hud.dau)], ['CASH', money(view.hud.cash)], ['MRR · EST', money(view.hud.monthlyRevenue)], ['COST · EST', money(view.hud.monthlyCost)],
   ];
+  const progressPercent = Math.max(0, Math.min(100, dayProgress * 100));
   return (
     <header className="hud">
       <div className="hud-status"><span className={`status-dot ${view.hud.status.toLowerCase()}`} /><div><strong>{view.hud.launched ? 'SERVICE ONLINE' : 'BUILDING MVP'}</strong><small>{view.hud.status}</small></div></div>
@@ -216,22 +228,35 @@ function Hud({ view, speed, onSpeed, onStep }: { view: GameView; speed: GameSpee
         <button className={speed === 2 ? 'active' : ''} onClick={() => onSpeed(2)}>▶▶ <small>x2</small></button>
         <button title="하루 진행" onClick={onStep}>+1D</button>
       </div>
+      <div
+        aria-label={`Day ${view.hud.day} progress ${Math.round(progressPercent)} percent`}
+        title={speed === 0 ? `Day ${view.hud.day} · PAUSED` : `Day ${view.hud.day} → ${view.hud.day + 1}`}
+        style={{ position: 'absolute', left: 12, right: 12, bottom: 2, height: 5, borderRadius: 999, overflow: 'hidden', background: '#13202b', boxShadow: 'inset 0 0 0 1px rgba(72, 102, 126, .26)' }}
+      >
+        <span style={{ display: 'block', width: `${progressPercent}%`, height: '100%', borderRadius: 999, background: speed === 0 ? '#4a5d6d' : 'linear-gradient(90deg, #3d9cff, #43d9d1)', boxShadow: speed === 0 ? 'none' : '0 0 12px rgba(67, 217, 209, .62)', transition: 'width 100ms linear, background 160ms ease' }} />
+      </div>
     </header>
   );
 }
 
 function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id: string) => void; onTab: (tab: 'technology' | 'learning' | 'service' | 'features' | 'report') => void }) {
+  const featureTiming = view.snapshot.currentFeature;
   return (
     <div className="dashboard-layout">
       <aside className="work-rail panel-shell">
         <PanelTitle code="WORK QUEUE" title="진행 작업" badge="4 SLOTS" />
         <div className="work-slot-list">
-          {view.workSlots.map((slot) => (
-            <button key={slot.id} onClick={() => slot.id === 'technology' ? onTab('technology') : slot.id === 'learning' ? onTab('learning') : undefined} className={`work-slot ${slot.active ? 'active' : 'empty'}`}>
-              <div><span>{slot.label}</span><b>{slot.active ? '●' : '+'}</b></div><strong>{slot.title}</strong><small>{slot.meta}</small>
-              {slot.progress !== null && <div className="progress-track"><i style={{ width: `${pct(slot.progress)}%` }} /></div>}
-            </button>
-          ))}
+          {view.workSlots.map((slot) => {
+            const meta = slot.id === 'feature' && featureTiming
+              ? `${featureTiming.elapsedDays} / ~${featureTiming.elapsedDays + featureTiming.estimatedRemainingDays}일 · 약 ${featureTiming.estimatedRemainingDays}일 남음`
+              : slot.meta;
+            return (
+              <button key={slot.id} onClick={() => slot.id === 'technology' ? onTab('technology') : slot.id === 'learning' ? onTab('learning') : undefined} className={`work-slot ${slot.active ? 'active' : 'empty'}`}>
+                <div><span>{slot.label}</span><b>{slot.active ? '●' : '+'}</b></div><strong>{slot.title}</strong><small>{meta}</small>
+                {slot.progress !== null && <div className="progress-track"><i style={{ width: `${pct(slot.progress)}%` }} /></div>}
+              </button>
+            );
+          })}
         </div>
         <div className="runway-box"><span>RUNWAY SIGNAL</span><strong className={view.hud.monthlyProfit >= 0 ? 'ok' : 'warn'}>{view.hud.monthlyProfit >= 0 ? 'PROFITABLE' : 'BURNING CASH'}</strong><small>{view.hud.monthlyProfit >= 0 ? '현재 예상 손익이 양수입니다.' : `${money(Math.abs(view.hud.monthlyProfit))} / month`}</small></div>
       </aside>
@@ -337,10 +362,17 @@ function LearningPanel({ view, onStudy }: { view: GameView; onStudy: (skill: Ski
         {categories.map((category) => (
           <div className={`skill-lane ${category}`} key={category}><div className="skill-lane-title"><span>{CATEGORY_LABEL[category]}</span><i /></div><div className="skill-node-grid">
             {view.skills.filter((skill) => skill.category === category).map((skill) => (
-              <button key={skill.key} className={`skill-node ${skill.canStudy ? 'ready' : ''}`} disabled={!skill.canStudy} onClick={() => onStudy(skill)}>
-                <span className="skill-icon">{skill.icon}</span><div><strong>{skill.name}</strong><em>Lv.{skill.level}</em></div>
-                <div className="skill-exp"><i><b style={{ width: `${skill.requiredExperience ? Math.min(100, Math.round(skill.experienceDays / skill.requiredExperience * 100)) : 100}%` }} /></i><small>{skill.requiredExperience ? `${skill.experienceDays}/${skill.requiredExperience}d` : 'MAX'}</small></div>
-                <footer>{skill.canStudy ? <><b>STUDY</b><span>{skill.studyDays}d · {money(skill.cost ?? 0)}</span></> : <span>{skill.reason ?? 'LOCKED'}</span>}</footer>
+              <button
+                key={skill.key}
+                className={`skill-node ${skill.canStudy ? 'ready' : ''} ${skill.studying ? 'studying' : ''}`}
+                disabled={!skill.canStudy}
+                onClick={() => onStudy(skill)}
+                style={skill.studying ? { opacity: 1, borderColor: 'var(--cyan)', boxShadow: 'inset 0 0 0 1px rgba(67,217,209,.2), 0 0 20px rgba(67,217,209,.08)' } : undefined}
+              >
+                <span className="skill-icon">{skill.icon}</span><div><strong>{skill.name}</strong><em>Lv.{skill.level}{skill.studying && skill.targetLevel ? ` → ${skill.targetLevel}` : ''}</em></div>
+                <div className="skill-exp"><i><b style={{ width: `${skill.requiredExperience ? Math.min(100, Math.round(skill.experienceDays / skill.requiredExperience * 100)) : 100}%` }} /></i><small>{skill.requiredExperience ? `${skill.experienceDays}/${skill.requiredExperience}d EXP` : 'MAX'}</small></div>
+                {skill.studying && <div style={{ width: '100%', marginTop: 8 }}><div className="progress-track" style={{ marginTop: 0 }}><i style={{ width: `${pct(skill.studyProgress)}%` }} /></div><small style={{ display: 'block', marginTop: 5, color: 'var(--cyan)', fontSize: 9 }}>STUDYING · {skill.elapsedStudyDays}/{skill.studyDays}일 · {pct(skill.studyProgress)}%</small></div>}
+                <footer>{skill.studying ? <><b>STUDYING</b><span>{skill.elapsedStudyDays}/{skill.studyDays}d</span></> : skill.canStudy ? <><b>STUDY</b><span>{skill.studyDays}d · {money(skill.cost ?? 0)}</span></> : <span>{skill.reason ?? 'LOCKED'}</span>}</footer>
               </button>
             ))}
           </div></div>
@@ -351,11 +383,12 @@ function LearningPanel({ view, onStudy }: { view: GameView; onStudy: (skill: Ski
 }
 
 function FeatureBoard({ view }: { view: GameView }) {
+  const current = view.snapshot.currentFeature;
   return (
     <section className="page-panel">
       <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="Phase 안의 기능 순서는 Seed에 따라 달라집니다. 해금되기 전에는 무엇이 나올지 알 수 없습니다." />
       <div className="phase-board">{([1, 2, 3] as const).map((phase) => <div className="phase-lane" key={phase}><header><span>PHASE {phase}</span><strong>{phase === 1 ? 'EARLY' : phase === 2 ? 'GROWTH' : 'SCALE'}</strong></header><div>
-        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.load && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}</article>)}
+        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <small>개발 {current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일</small>}{feature.load && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}</article>)}
       </div></div>)}</div>
     </section>
   );
@@ -380,7 +413,7 @@ function NodeInspector({ node, view, onClose, onAction, controller }: { node: Se
 
 function EventOverlay({ event, onDismiss, onRespond }: { event: GameEventView; onDismiss: () => void; onRespond: () => void }) {
   const incident = event.kind === 'incident';
-  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : event.kind === 'incident' ? 'SYSTEM / INCIDENT' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : '확인'}</button></footer></article></div>;
+  return <div className="event-overlay"><article className={`event-card ${event.kind}`} style={{ position: 'relative' }}><button aria-label="팝업 닫기" onClick={onDismiss} style={{ position: 'absolute', top: 12, right: 12, width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line)', background: '#0a1118', color: 'var(--muted)', cursor: 'pointer', zIndex: 2 }}>×</button><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : event.kind === 'incident' ? 'SYSTEM / INCIDENT' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : '확인'}</button></footer></article></div>;
 }
 
 function PanelTitle({ code, title, badge }: { code: string; title: string; badge: string }) {
