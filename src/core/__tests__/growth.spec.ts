@@ -27,8 +27,46 @@ describe('growth', () => {
   });
 
   it('applies 7-day viral and negative buzz modifiers', () => {
-    expect(new GrowthEvent('VIRAL').modifier).toBe(0.05);
-    expect(new GrowthEvent('NEGATIVE_BUZZ').modifier).toBe(-0.05);
+    const viral = new GrowthEvent('VIRAL');
+    const negative = new GrowthEvent('NEGATIVE_BUZZ');
+
+    expect(viral.modifier).toBe(0.05);
+    expect(viral.trafficMultiplier).toBe(1.8);
+    expect(viral.loadMultiplier).toBe(1.8);
+    expect(viral.response).toBe('PENDING');
+    expect(viral.remainingDays).toBe(7);
+    expect(negative.modifier).toBe(-0.05);
+    expect(negative.trafficMultiplier).toBe(1);
+    expect(negative.loadMultiplier).toBe(1);
+
+    viral.advanceDay();
+    expect(viral.remainingDays).toBe(6);
+  });
+
+  it('makes viral response choices trade growth, load pressure and cost semantics', () => {
+    const ride = new GrowthEvent('VIRAL');
+    ride.respond('RIDE');
+    expect(ride.loadMultiplier).toBe(1.8);
+    expect(ride.modifier).toBe(0.05);
+
+    const throttle = new GrowthEvent('VIRAL');
+    throttle.respond('THROTTLE');
+    expect(throttle.trafficMultiplier).toBe(1.8);
+    expect(throttle.loadMultiplier).toBe(1.15);
+    expect(throttle.modifier).toBe(0.01);
+
+    const burst = new GrowthEvent('VIRAL');
+    burst.respond('BURST');
+    expect(burst.trafficMultiplier).toBe(1.8);
+    expect(burst.loadMultiplier).toBe(1.35);
+    expect(burst.modifier).toBe(0.05);
+  });
+
+  it('allows only one response to a viral traffic spike', () => {
+    const viral = new GrowthEvent('VIRAL');
+    viral.respond('THROTTLE');
+    expect(() => viral.respond('BURST')).toThrow('already selected');
+    expect(() => new GrowthEvent('NEGATIVE_BUZZ').respond('RIDE')).toThrow('No active viral traffic spike');
   });
 
   it('caps stacked incident growth penalties at -10 percentage points', () => {
@@ -55,7 +93,39 @@ describe('growth', () => {
 
     expect(result.availabilityModifier).toBe(-0.08);
     expect(result.operationalModifier).toBe(-0.1);
-    expect(result.totalModifier).toBeCloseTo(-0.09);
+    expect(result.baseModifier).toBe(0);
+    expect(result.totalModifier).toBeCloseTo(-0.1);
+  });
+
+  it('suppresses all positive growth while an incident is active, even during a viral event', () => {
+    const result = GrowthPolicy.calculate({
+      phase: 1,
+      completedFeatureCount: 8,
+      event: new GrowthEvent('VIRAL'),
+      incidents: ['MINOR'],
+      random: new SequenceRandom([0.99, 0]),
+    });
+
+    expect(result.baseModifier).toBe(0);
+    expect(result.featureModifier).toBe(0);
+    expect(result.eventModifier).toBe(0);
+    expect(result.incidentModifier).toBe(-0.01);
+    expect(result.totalModifier).toBeLessThan(0);
+  });
+
+  it('keeps negative market movement on top of incident churn', () => {
+    const result = GrowthPolicy.calculate({
+      phase: 1,
+      completedFeatureCount: 8,
+      event: new GrowthEvent('NEGATIVE_BUZZ'),
+      incidents: ['MAJOR'],
+      random: new SequenceRandom([0, 0.99]),
+    });
+
+    expect(result.baseModifier).toBe(-0.01);
+    expect(result.featureModifier).toBe(0);
+    expect(result.eventModifier).toBe(-0.05);
+    expect(result.totalModifier).toBeLessThanOrEqual(-0.09);
   });
 
   it('drops DAU by the amount capacity exceeds 100%, capped at 30 percentage points per day', () => {

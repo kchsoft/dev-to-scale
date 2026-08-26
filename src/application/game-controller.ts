@@ -21,11 +21,12 @@ import {
   SkillRef,
   TECHNOLOGIES,
   TechnologySkillId,
+  TrafficSpikeResponse,
   skillRef,
 } from '../core';
 
 export type LoadTone = 'stable' | 'busy' | 'critical' | 'overload' | 'incident';
-export type GameEventKind = 'requirement' | 'incident' | 'launch' | 'settlement' | 'bankrupt' | 'won';
+export type GameEventKind = 'requirement' | 'incident' | 'traffic' | 'launch' | 'settlement' | 'bankrupt' | 'won';
 
 export interface GameEventView {
   id: string;
@@ -254,6 +255,12 @@ function calendarForDay(day: number): { month: number; dayOfMonth: number; daysU
   return { month, dayOfMonth, daysUntilSettlement: 31 - dayOfMonth };
 }
 
+interface FeatureImpactPreview {
+  summary: string;
+  tone: AlertView['tone'];
+  nodeId?: string;
+}
+
 export class GameController {
   readonly engine: GameEngine;
   private readonly listeners = new Set<(view: GameView) => void>();
@@ -327,6 +334,9 @@ export class GameController {
   addApplicationServer(): void { this.engine.addApplicationServer(); this.emit(); }
   scaleDatabase(size: ServerSize): void { this.engine.scaleDatabase(size); this.emit(); }
   addDatabaseReplica(): void { this.engine.addDatabaseReplica(); this.emit(); }
+  fastTrackCurrentFeature(): void { this.engine.fastTrackCurrentFeature(); this.emit(); }
+  startRefactor(): void { this.engine.startRefactor(); this.emit(); }
+  respondTrafficSpike(response: TrafficSpikeResponse): void { this.engine.respondToTrafficSpike(response); this.emit(); }
 
   private emit(): void {
     const view = this.getView();
@@ -339,7 +349,23 @@ export class GameController {
       events.push({ id: `launch-${after.day}`, kind: 'launch', title: 'SERVICE ONLINE', message: '커뮤니티 서비스가 공개되었습니다. DAU 80에서 시작합니다.', autoPause: false });
     }
     if (after.currentFeature && after.currentFeature.id !== before.currentFeature?.id && after.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
-      events.push({ id: `req-${after.day}-${after.currentFeature.id}`, kind: 'requirement', title: 'NEW REQUIREMENT', message: `${LABELS[after.currentFeature.id] ?? after.currentFeature.id} 개발이 자동으로 시작되었습니다.`, autoPause: true });
+      const impact = this.featureImpact(after, after.currentFeature.id);
+      events.push({
+        id: `req-${after.day}-${after.currentFeature.id}`,
+        kind: 'requirement',
+        title: 'NEW REQUIREMENT',
+        message: `${LABELS[after.currentFeature.id] ?? after.currentFeature.id} 개발이 자동으로 시작되었습니다.${impact ? ` 출시 예상 · ${impact.summary}` : ''}`,
+        autoPause: true,
+      });
+    }
+    if (after.growthEvent?.type === 'VIRAL' && before.growthEvent?.type !== 'VIRAL') {
+      events.push({
+        id: `traffic-${after.day}`,
+        kind: 'traffic',
+        title: 'TRAFFIC SPIKE',
+        message: `바이럴 유입이 시작됐습니다. ${after.growthEvent.remainingDays}일 동안 유입 ×${after.growthEvent.trafficMultiplier.toFixed(1)}. 버티면 성장 기회를 모두 가져가지만 부하도 그대로 받고, Traffic Limit은 성장을 포기해 안정화하며, Emergency Burst는 비용을 내고 성장 기회를 유지합니다.`,
+        autoPause: true,
+      });
     }
     if (after.lastSettlement && after.lastSettlement.month !== before.lastSettlement?.month) {
       const settlement = after.lastSettlement;
@@ -450,15 +476,27 @@ export class GameController {
     const techTotal = tech ? tech.elapsedDays + tech.estimatedRemainingDays : 0;
     const responseTotal = responding?.totalResponseDays ?? 0;
     const responseElapsed = responding?.elapsedResponseDays ?? 0;
+    const refactorProgress = snapshot.techDebt.refactoring
+      ? 1 - snapshot.techDebt.remainingRefactorDays / 5
+      : null;
     return [
-      {
-        id: 'feature',
-        label: 'FEATURE',
-        title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음',
-        progress: feature ? feature.progress / feature.requiredWork : null,
-        meta: feature ? `${feature.elapsedDays}/~${featureTotal}일 · 약 ${feature.estimatedRemainingDays}일 남음` : '다음 요구사항 대기',
-        active: Boolean(feature),
-      },
+      snapshot.techDebt.refactoring
+        ? {
+            id: 'feature',
+            label: 'FEATURE',
+            title: 'REFACTORING',
+            progress: refactorProgress,
+            meta: `${snapshot.techDebt.remainingRefactorDays}일 남음 · 완료 시 Tech Debt -30`,
+            active: true,
+          }
+        : {
+            id: 'feature',
+            label: 'FEATURE',
+            title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음',
+            progress: feature ? feature.progress / feature.requiredWork : null,
+            meta: feature ? `${feature.elapsedDays}/~${featureTotal}일 · 약 ${feature.estimatedRemainingDays}일 남음` : '다음 요구사항 대기',
+            active: Boolean(feature),
+          },
       {
         id: 'technology',
         label: 'TECHNOLOGY',
@@ -490,6 +528,53 @@ export class GameController {
 
   private alerts(snapshot: GameSnapshot, profit: number): AlertView[] {
     const alerts: AlertView[] = [];
+
+    if (snapshot.growthEvent?.type === 'VIRAL') {
+      const event = snapshot.growthEvent;
+      const responseText = event.response === 'PENDING'
+        ? '대응 선택 대기'
+        : event.response === 'THROTTLE'
+          ? `TRAFFIC LIMIT · 유효 부하 ×${event.loadMultiplier.toFixed(2)} · 성장 +${percent(event.growthModifier)}%p`
+          : event.response === 'BURST'
+            ? `EMERGENCY BURST · 유효 부하 ×${event.loadMultiplier.toFixed(2)} · 성장 +${percent(event.growthModifier)}%p`
+            : `RIDE THE WAVE · 유효 부하 ×${event.loadMultiplier.toFixed(1)} · 성장 +${percent(event.growthModifier)}%p`;
+      alerts.push({
+        id: 'viral-traffic',
+        tone: event.response === 'THROTTLE' ? 'info' : 'warning',
+        title: `Viral Traffic ×${event.trafficMultiplier.toFixed(1)}`,
+        detail: `${event.remainingDays}일 남음 · ${responseText}`,
+      });
+    }
+
+    if (snapshot.techDebt.refactoring) {
+      alerts.push({
+        id: 'tech-debt-refactor',
+        tone: 'info',
+        title: `Refactoring · ${snapshot.techDebt.remainingRefactorDays}일`,
+        detail: '기능 개발은 잠시 멈추지만 완료 시 Tech Debt가 30 감소합니다.',
+      });
+    } else if (snapshot.techDebt.value >= 20) {
+      alerts.push({
+        id: 'tech-debt',
+        tone: snapshot.techDebt.value >= 60 ? 'danger' : 'warning',
+        title: `Tech Debt ${snapshot.techDebt.value}/100`,
+        detail: `Feature 개발 효율 ${percent(snapshot.techDebt.developmentModifier)}% · 장애 위험 ×${snapshot.techDebt.incidentRiskMultiplier.toFixed(2)}`,
+      });
+    }
+
+    if (snapshot.currentFeature && snapshot.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
+      const impact = this.featureImpact(snapshot, snapshot.currentFeature.id);
+      if (impact) {
+        alerts.push({
+          id: `feature-impact-${snapshot.currentFeature.id}`,
+          tone: impact.tone,
+          title: `출시 영향 · ${LABELS[snapshot.currentFeature.id] ?? snapshot.currentFeature.id}`,
+          detail: impact.summary,
+          nodeId: impact.nodeId,
+        });
+      }
+    }
+
     const ratios: Array<[string, number, string]> = [
       ['Application', snapshot.load.appRatio, 'application'],
       ['Database', snapshot.load.dbRatio, 'database'],
@@ -544,6 +629,41 @@ export class GameController {
     return alerts.slice(0, 6);
   }
 
+  private featureImpact(snapshot: GameSnapshot, featureId: string): FeatureImpactPreview | null {
+    const feature = COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES];
+    if (!feature || !snapshot.launched) return null;
+    const projected = this.engine.previewLoadWithFeature(feature);
+    const axes = [
+      { label: 'APP CPU', before: snapshot.load.appCpuRatio, after: projected.appCpuRatio, nodeId: 'application' },
+      { label: 'APP I/O', before: snapshot.load.appIoRatio, after: projected.appIoRatio, nodeId: 'application' },
+      { label: 'DB CPU', before: snapshot.load.dbCpuRatio, after: projected.dbCpuRatio, nodeId: 'database' },
+      { label: 'DB I/O', before: snapshot.load.dbIoRatio, after: projected.dbIoRatio, nodeId: 'database' },
+      { label: 'ASYNC', before: snapshot.load.asyncRatio, after: projected.asyncRatio, nodeId: 'queue' },
+      { label: 'STORAGE', before: snapshot.load.storageRatio, after: projected.storageRatio, nodeId: 'storage' },
+    ];
+    const top = [...axes].sort((left, right) => right.after - left.after)[0];
+    const changes = [...axes]
+      .sort((left, right) => (right.after - right.before) - (left.after - left.before))
+      .slice(0, 2)
+      .map((axis) => `${axis.label} ${percent(axis.before)}→${percent(axis.after)}%`);
+    const failureIncrease = projected.failureRate - snapshot.load.failureRate;
+    if (failureIncrease > 0.001) {
+      changes.push(`FAIL ${percent(snapshot.load.failureRate)}→${percent(projected.failureRate)}%`);
+    }
+    const suffix = projected.failureRate >= 0.1
+      ? ' · ⚠ 필수 요청 경로 확인 필요'
+      : top.after > 1
+        ? ` · ⚠ ${top.label} OVERLOAD 예상`
+        : top.after >= 0.9
+          ? ` · △ ${top.label} Critical 근접`
+          : ' · 현재 Capacity 안쪽';
+    return {
+      summary: `${changes.join(' · ')}${suffix}`,
+      tone: projected.failureRate >= 0.1 || top.after > 1 ? 'danger' : top.after >= 0.9 ? 'warning' : 'info',
+      nodeId: top.nodeId,
+    };
+  }
+
   private technologyOptions(snapshot: GameSnapshot): TechnologyOptionView[] {
     return (Object.keys(TECHNOLOGIES) as BuildableTechnologyId[]).map((id) => {
       const tech = TECHNOLOGIES[id];
@@ -584,7 +704,9 @@ export class GameController {
             .filter(Boolean),
         ]
       : [];
-    const after = LoadCalculator.calculate(snapshot.dau, features, clone);
+    const after = LoadCalculator.calculate(snapshot.dau, features, clone, {
+      trafficMultiplier: snapshot.growthEvent?.loadMultiplier ?? 1,
+    });
     if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
       return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
     }

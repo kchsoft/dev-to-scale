@@ -14,11 +14,26 @@ export type FeatureTag =
   | 'TRANSACTIONAL'
   | 'WRITE_HEAVY';
 
+/**
+ * Legacy traffic weights are retained because Queue / Storage are still modeled
+ * as single-axis resources in V1.5 and old custom features/tests can keep using
+ * the compact A/D/Q/S shape.
+ */
 export interface LoadWeights {
   app: number;
   db: number;
   async: number;
   storage: number;
+}
+
+export interface CpuIoLoadWeight {
+  cpu: number;
+  io: number;
+}
+
+export interface ResourceLoadWeights {
+  app: CpuIoLoadWeight;
+  db: CpuIoLoadWeight;
 }
 
 export interface FeatureDefinitionProps {
@@ -27,6 +42,14 @@ export interface FeatureDefinitionProps {
   baseWork: number;
   complexity: FeatureComplexity;
   load: LoadWeights;
+  /**
+   * CPU / I/O pressure per request. If omitted, the legacy APP/DB weight is
+   * applied equally to both axes for backwards-compatible custom features.
+   */
+  resourceLoad?: Partial<{
+    app: Partial<CpuIoLoadWeight>;
+    db: Partial<CpuIoLoadWeight>;
+  }>;
   requestRoute?: RequestRouteStep[];
   tags?: FeatureTag[];
   growthBonus?: number;
@@ -42,12 +65,26 @@ function defaultRequestRoute(load: LoadWeights): RequestRouteStep[] {
   return route;
 }
 
+function normalizeResourceLoad(load: LoadWeights, resourceLoad?: FeatureDefinitionProps['resourceLoad']): ResourceLoadWeights {
+  return {
+    app: {
+      cpu: resourceLoad?.app?.cpu ?? load.app,
+      io: resourceLoad?.app?.io ?? load.app,
+    },
+    db: {
+      cpu: resourceLoad?.db?.cpu ?? load.db,
+      io: resourceLoad?.db?.io ?? load.db,
+    },
+  };
+}
+
 export class FeatureDefinition {
   readonly id: string;
   readonly name: string;
   readonly baseWork: number;
   readonly complexity: FeatureComplexity;
   readonly load: LoadWeights;
+  readonly resourceLoad: ResourceLoadWeights;
   readonly requestRoute: readonly RequestRouteStep[];
   readonly tags: ReadonlySet<FeatureTag>;
   readonly growthBonus: number;
@@ -59,6 +96,7 @@ export class FeatureDefinition {
     this.baseWork = props.baseWork;
     this.complexity = props.complexity;
     this.load = { ...props.load };
+    this.resourceLoad = normalizeResourceLoad(props.load, props.resourceLoad);
     this.requestRoute = (props.requestRoute ?? defaultRequestRoute(props.load)).map((step) => ({ ...step }));
     this.tags = new Set(props.tags ?? []);
     this.growthBonus = props.growthBonus ?? 0.005;
@@ -77,7 +115,10 @@ const COMPLEXITY_FACTOR: Record<FeatureComplexity, number> = {
 export class FrameworkDefinition {
   private constructor(
     readonly id: FrameworkId,
+    /** Legacy aggregate modifier kept for cost previews and backwards compatibility. */
     readonly capacityModifier: number,
+    readonly cpuCapacityModifier: number,
+    readonly ioCapacityModifier: number,
     readonly costModifier: number,
     private readonly baseWorkModifier: number,
     private readonly tagWorkModifiers: Partial<Record<FeatureTag, number>> = {},
@@ -85,23 +126,23 @@ export class FrameworkDefinition {
   ) {}
 
   static springBoot(): FrameworkDefinition {
-    return new FrameworkDefinition('SPRING_BOOT', 1.1, 1.05, 1);
+    return new FrameworkDefinition('SPRING_BOOT', 1.1, 1.18, 0.96, 1.05, 1);
   }
 
   static nestJs(): FrameworkDefinition {
-    return new FrameworkDefinition('NESTJS', 1, 1.05, 0.9);
+    return new FrameworkDefinition('NESTJS', 1, 0.92, 1.18, 1.05, 0.9);
   }
 
   static gin(): FrameworkDefinition {
-    return new FrameworkDefinition('GIN', 1, 0.9, 1, {}, { COMPLEX: 1.15 });
+    return new FrameworkDefinition('GIN', 1, 1.25, 1.08, 0.9, 1, {}, { COMPLEX: 1.15 });
   }
 
   static fastApi(): FrameworkDefinition {
-    return new FrameworkDefinition('FASTAPI', 1, 1.1, 1, { AI: 0.75 });
+    return new FrameworkDefinition('FASTAPI', 1, 0.95, 1.12, 1.1, 1, { AI: 0.75 });
   }
 
   static aspNetCore(): FrameworkDefinition {
-    return new FrameworkDefinition('ASPNET_CORE', 1, 1, 1);
+    return new FrameworkDefinition('ASPNET_CORE', 1, 1.08, 1.08, 1, 1);
   }
 
   static byId(id: FrameworkId): FrameworkDefinition {
@@ -158,6 +199,13 @@ export class FeatureDevelopmentTask {
   get elapsedDays(): number { return this._elapsedDays; }
   get progressRatio(): number { return Math.min(1, this._completedWork / this.requiredWork); }
   get completed(): boolean { return this._completedWork >= this.requiredWork; }
+
+  accelerate(work: number): number {
+    if (this.completed || work <= 0) return 0;
+    const before = this._completedWork;
+    this._completedWork = Math.min(this.requiredWork, this._completedWork + work);
+    return this._completedWork - before;
+  }
 
   advanceDay(context: FeatureDevelopmentProgressContext): number {
     if (this.completed) return 0;

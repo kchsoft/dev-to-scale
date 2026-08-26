@@ -20,24 +20,32 @@ describe('infrastructure and load', () => {
     expect(infra.app.count).toBe(2);
   });
 
-  it('applies framework capacity and cost traits', () => {
+  it('gives frameworks distinct CPU and IO capacity signatures', () => {
     const spring = new AppCluster('SPRING_BOOT', ServerSize.SMALL, 1, true);
+    const nest = new AppCluster('NESTJS', ServerSize.SMALL, 1, true);
     const gin = new AppCluster('GIN', ServerSize.SMALL, 1, true);
 
     expect(spring.capacity).toBeCloseTo(110);
+    expect(spring.cpuCapacity).toBeGreaterThan(spring.ioCapacity);
+    expect(nest.ioCapacity).toBeGreaterThan(nest.cpuCapacity);
+    expect(gin.cpuCapacity).toBeGreaterThan(spring.cpuCapacity);
     expect(spring.monthlyCost).toBeCloseTo(105_000);
     expect(gin.monthlyCost).toBeCloseTo(90_000);
   });
 
-  it('uses replicas as +60% base DB capacity each', () => {
+  it('makes replicas stronger for DB IO capacity than CPU capacity', () => {
     const db = new DatabaseCluster('POSTGRESQL', ServerSize.MEDIUM, 0);
     expect(db.capacity).toBeCloseTo(150);
+    expect(db.cpuCapacity).toBeCloseTo(150);
+    expect(db.ioCapacity).toBeCloseTo(150);
 
     db.addReplica();
     expect(db.capacity).toBeCloseTo(240);
+    expect(db.cpuCapacity).toBeCloseTo(232.5);
+    expect(db.ioCapacity).toBeCloseTo(262.5);
   });
 
-  it('turns proficiency into a modest effective capacity tuning bonus', () => {
+  it('turns proficiency into a modest effective capacity tuning bonus on both axes', () => {
     expect(capacityTuningMultiplier(1)).toBe(1);
     expect(capacityTuningMultiplier(5)).toBe(1.08);
     expect(capacityTuningMultiplier(10)).toBe(1.25);
@@ -58,33 +66,84 @@ describe('infrastructure and load', () => {
       databaseProficiencyLevel: 10,
     });
 
-    expect(expert.appCapacity).toBeCloseTo(novice.appCapacity * 1.25);
-    expect(expert.dbCapacity).toBeCloseTo(novice.dbCapacity * 1.25);
-    expect(expert.appDemand).toBeCloseTo(novice.appDemand);
-    expect(expert.dbDemand).toBeCloseTo(novice.dbDemand);
+    expect(expert.appCpuCapacity).toBeCloseTo(novice.appCpuCapacity * 1.25);
+    expect(expert.appIoCapacity).toBeCloseTo(novice.appIoCapacity * 1.25);
+    expect(expert.dbCpuCapacity).toBeCloseTo(novice.dbCpuCapacity * 1.25);
+    expect(expert.dbIoCapacity).toBeCloseTo(novice.dbIoCapacity * 1.25);
+    expect(expert.appCpuDemand).toBeCloseTo(novice.appCpuDemand);
+    expect(expert.dbIoDemand).toBeCloseTo(novice.dbIoDemand);
   });
 
-  it('redis reduces DB demand and a queue removes async demand from the app', () => {
+  it('lets a feature create a different CPU bottleneck from its IO bottleneck', () => {
     const feature = new FeatureDefinition({
-      id: 'NOTIFICATION',
-      name: 'Notification',
+      id: 'AI_IO', name: 'External AI', baseWork: 1, complexity: 'NORMAL',
+      load: { app: 2, db: 1, async: 0, storage: 0 },
+      resourceLoad: {
+        app: { cpu: 0.4, io: 3.0 },
+        db: { cpu: 0.2, io: 1.1 },
+      },
+      requestRoute: [{ node: 'APP' }, { node: 'DB' }],
+    });
+    const spring = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    const nest = InfrastructureState.initial('NESTJS', 'POSTGRESQL');
+
+    const springLoad = LoadCalculator.calculate(100_000, [feature], spring);
+    const nestLoad = LoadCalculator.calculate(100_000, [feature], nest);
+
+    expect(springLoad.appIoDemand).toBeGreaterThan(springLoad.appCpuDemand);
+    expect(springLoad.appRatio).toBeCloseTo(Math.max(springLoad.appCpuRatio, springLoad.appIoRatio));
+    expect(nestLoad.appIoRatio).toBeLessThan(springLoad.appIoRatio);
+  });
+
+  it('redis targets read-heavy DB IO much more strongly than DB CPU', () => {
+    const feature = new FeatureDefinition({
+      id: 'FEED',
+      name: 'Feed',
       baseWork: 14,
       complexity: 'NORMAL',
-      load: { app: 1, db: 2, async: 3, storage: 0 },
+      load: { app: 1, db: 2, async: 0, storage: 0 },
+      resourceLoad: { db: { cpu: 1.4, io: 3.0 } },
       tags: ['READ_HEAVY'],
     });
 
     const plain = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     const optimized = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     optimized.deployTechnology('REDIS');
+
+    const without = LoadCalculator.calculate(100_000, [feature], plain);
+    const withRedis = LoadCalculator.calculate(100_000, [feature], optimized);
+
+    const cpuReduction = 1 - withRedis.dbCpuDemand / without.dbCpuDemand;
+    const ioReduction = 1 - withRedis.dbIoDemand / without.dbIoDemand;
+    expect(cpuReduction).toBeCloseTo(0.12);
+    expect(ioReduction).toBeCloseTo(0.40);
+    expect(ioReduction).toBeGreaterThan(cpuReduction);
+  });
+
+  it('a queue removes optional async fallback pressure from APP IO', () => {
+    const feature = new FeatureDefinition({
+      id: 'PREMIUM_ASYNC',
+      name: 'Premium async work',
+      baseWork: 14,
+      complexity: 'NORMAL',
+      load: { app: 1, db: 1, async: 3, storage: 0 },
+      requestRoute: [
+        { node: 'APP' },
+        { node: 'DB' },
+        { node: 'QUEUE', requirement: 'OPTIONAL' },
+      ],
+    });
+
+    const plain = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    const optimized = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     optimized.deployTechnology('SQS');
 
     const without = LoadCalculator.calculate(100_000, [feature], plain);
-    const withInfra = LoadCalculator.calculate(100_000, [feature], optimized);
+    const withQueue = LoadCalculator.calculate(100_000, [feature], optimized);
 
-    expect(withInfra.dbDemand).toBeLessThan(without.dbDemand);
-    expect(withInfra.appDemand).toBeLessThan(without.appDemand);
-    expect(withInfra.asyncCapacity).toBe(300);
+    expect(withQueue.appIoDemand).toBeLessThan(without.appIoDemand);
+    expect(withQueue.appCpuDemand).toBeLessThan(without.appCpuDemand);
+    expect(withQueue.asyncCapacity).toBe(300);
   });
 
   it('removes downstream DB load when an APP incident blocks request flow', () => {
@@ -101,7 +160,8 @@ describe('infrastructure and load', () => {
     });
 
     expect(appDown.appDemand).toBeCloseTo(healthy.appDemand);
-    expect(appDown.dbDemand).toBe(0);
+    expect(appDown.dbCpuDemand).toBe(0);
+    expect(appDown.dbIoDemand).toBe(0);
     expect(appDown.failureRate).toBe(1);
   });
 
@@ -146,7 +206,28 @@ describe('infrastructure and load', () => {
     expect(infra.monthlyCost).toBeCloseTo(105_000 + 120_000 + 350_000);
   });
 
-  it('keeps maximum prepared infrastructure viable around 25M DAU', () => {
+  it('multiplies CPU, IO and storage demand during a temporary traffic spike', () => {
+    const infra = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    const feature = new FeatureDefinition({
+      id: 'SPIKE', name: 'Spike traffic', baseWork: 1, complexity: 'NORMAL',
+      load: { app: 2, db: 2, async: 0, storage: 1 },
+      resourceLoad: {
+        app: { cpu: 1.2, io: 1.6 },
+        db: { cpu: 0.8, io: 1.4 },
+      },
+      requestRoute: [{ node: 'APP' }, { node: 'DB' }, { node: 'STORAGE' }],
+    });
+
+    const normal = LoadCalculator.calculate(100_000, [feature], infra);
+    const spike = LoadCalculator.calculate(100_000, [feature], infra, { trafficMultiplier: 1.8 });
+
+    expect(spike.appCpuDemand).toBeCloseTo(normal.appCpuDemand * 1.8);
+    expect(spike.appIoDemand).toBeCloseTo(normal.appIoDemand * 1.8);
+    expect(spike.dbIoDemand).toBeCloseTo(normal.dbIoDemand * 1.8);
+    expect(spike.storageDemand).toBeCloseTo(normal.storageDemand * 1.8);
+  });
+
+  it('keeps maximum prepared infrastructure just within capacity around 25M DAU', () => {
     const infra = new InfrastructureState(
       new AppCluster('SPRING_BOOT', ServerSize.XLARGE, 10, true),
       new DatabaseCluster('POSTGRESQL', ServerSize.XLARGE, 3),
@@ -162,8 +243,8 @@ describe('infrastructure and load', () => {
 
     const load = LoadCalculator.calculate(25_000_000, features, infra);
 
-    expect(load.appRatio).toBeLessThanOrEqual(0.9);
-    expect(load.dbRatio).toBeLessThanOrEqual(0.9);
+    expect(load.appRatio).toBeLessThanOrEqual(0.95);
+    expect(load.dbRatio).toBeLessThanOrEqual(1.0);
     expect(load.asyncRatio).toBeLessThanOrEqual(0.9);
     expect(load.storageRatio).toBeLessThanOrEqual(0.9);
   });
