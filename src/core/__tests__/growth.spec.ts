@@ -32,12 +32,41 @@ describe('growth', () => {
 
     expect(viral.modifier).toBe(0.05);
     expect(viral.trafficMultiplier).toBe(1.8);
+    expect(viral.loadMultiplier).toBe(1.8);
+    expect(viral.response).toBe('PENDING');
     expect(viral.remainingDays).toBe(7);
     expect(negative.modifier).toBe(-0.05);
     expect(negative.trafficMultiplier).toBe(1);
+    expect(negative.loadMultiplier).toBe(1);
 
     viral.advanceDay();
     expect(viral.remainingDays).toBe(6);
+  });
+
+  it('makes viral response choices trade growth, load pressure and cost semantics', () => {
+    const ride = new GrowthEvent('VIRAL');
+    ride.respond('RIDE');
+    expect(ride.loadMultiplier).toBe(1.8);
+    expect(ride.modifier).toBe(0.05);
+
+    const throttle = new GrowthEvent('VIRAL');
+    throttle.respond('THROTTLE');
+    expect(throttle.trafficMultiplier).toBe(1.8);
+    expect(throttle.loadMultiplier).toBe(1.15);
+    expect(throttle.modifier).toBe(0.01);
+
+    const burst = new GrowthEvent('VIRAL');
+    burst.respond('BURST');
+    expect(burst.trafficMultiplier).toBe(1.8);
+    expect(burst.loadMultiplier).toBe(1.35);
+    expect(burst.modifier).toBe(0.05);
+  });
+
+  it('allows only one response to a viral traffic spike', () => {
+    const viral = new GrowthEvent('VIRAL');
+    viral.respond('THROTTLE');
+    expect(() => viral.respond('BURST')).toThrow('already selected');
+    expect(() => new GrowthEvent('NEGATIVE_BUZZ').respond('RIDE')).toThrow('No active viral traffic spike');
   });
 
   it('caps stacked incident growth penalties at -10 percentage points', () => {
