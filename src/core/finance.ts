@@ -57,21 +57,38 @@ export class FinanceAccount {
   }
 }
 
-export class MonthlyDauLedger {
+export interface MonthlyEconomySnapshot {
+  averageDau: number;
+  revenue: number;
+  aiCost: number;
+}
+
+export class MonthlyEconomyLedger {
   private dauTotal = 0;
+  private revenueWeightedDauTotal = 0;
+  private aiDauTotal = 0;
   private days = 0;
 
-  recordDay(dau: number): void {
+  recordDay(dau: number, additiveRevenueModifier: number, aiFeatureActive: boolean): void {
     this.dauTotal += dau;
+    this.revenueWeightedDauTotal += dau * (1 + additiveRevenueModifier);
+    if (aiFeatureActive) this.aiDauTotal += dau;
     this.days += 1;
   }
 
-  get averageDau(): number {
-    return this.days === 0 ? 0 : this.dauTotal / this.days;
+  snapshot(): MonthlyEconomySnapshot {
+    if (this.days === 0) return { averageDau: 0, revenue: 0, aiCost: 0 };
+    return {
+      averageDau: this.dauTotal / this.days,
+      revenue: Math.round((this.revenueWeightedDauTotal / this.days) * RevenuePolicy.BASE_REVENUE_PER_AVG_DAU),
+      aiCost: Math.round((this.aiDauTotal / this.days) * RevenuePolicy.AI_COST_PER_AVG_DAU),
+    };
   }
 
   reset(): void {
     this.dauTotal = 0;
+    this.revenueWeightedDauTotal = 0;
+    this.aiDauTotal = 0;
     this.days = 0;
   }
 }
