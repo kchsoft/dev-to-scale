@@ -58,6 +58,29 @@ describe('growth', () => {
     expect(result.totalModifier).toBeCloseTo(-0.09);
   });
 
+  it('drops DAU by the amount capacity exceeds 100%, capped at 30 percentage points per day', () => {
+    const overloaded = GrowthPolicy.calculate({
+      phase: 1,
+      completedFeatureCount: 0,
+      event: null,
+      incidents: [],
+      maxLoadRatio: 1.2,
+      random: new SequenceRandom([0, 0]),
+    });
+    const severelyOverloaded = GrowthPolicy.calculate({
+      phase: 1,
+      completedFeatureCount: 0,
+      event: null,
+      incidents: [],
+      maxLoadRatio: 1.8,
+      random: new SequenceRandom([0, 0]),
+    });
+
+    expect(overloaded.capacityModifier).toBeCloseTo(-0.2);
+    expect(overloaded.totalModifier).toBeCloseTo(-0.19);
+    expect(severelyOverloaded.capacityModifier).toBe(-0.3);
+  });
+
   it('rounds DAU to an integer', () => {
     expect(GrowthPolicy.nextDau(101, 0.015)).toBe(103);
   });
