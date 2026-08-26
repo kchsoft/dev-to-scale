@@ -26,6 +26,22 @@ describe('technology build', () => {
     expect(() => slot.start('SQS', developer)).toThrow(/already/i);
   });
 
+  it('tracks elapsed days and exposes a current-speed duration estimate for progress UI', () => {
+    const developer = new DeveloperProfile();
+    developer.get(skillRef.fundamental('DATABASE')).setLevel(2);
+    developer.get(skillRef.fundamental('NETWORK')).setLevel(2);
+
+    const slot = new TechnologyBuildSlot();
+    const task = slot.start('REDIS', developer);
+
+    expect(task.elapsedDays).toBe(0);
+    expect(task.estimatedRemainingDays(1, 1)).toBe(11);
+
+    slot.advanceDay(developer, 1);
+    expect(task.elapsedDays).toBe(1);
+    expect(task.estimatedRemainingDays(1, 1)).toBe(10);
+  });
+
   it('makes a new level-1 technology slower to build than its nominal work', () => {
     const developer = new DeveloperProfile();
     developer.get(skillRef.fundamental('DATABASE')).setLevel(2);
