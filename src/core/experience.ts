@@ -1,5 +1,6 @@
+import { DatabaseId } from './database';
 import { FrameworkId } from './feature';
-import { DatabaseId, TechnologyId } from './infrastructure';
+import { TechnologyId } from './infrastructure';
 import { DeveloperProfile, FundamentalSkillId, LanguageId, skillRef, TechnologySkillId } from './learning';
 
 const FRAMEWORK_LANGUAGE: Record<FrameworkId, LanguageId> = {
@@ -15,6 +16,9 @@ const DB_TECH: Record<DatabaseId, TechnologySkillId> = {
   MYSQL: 'MYSQL',
   MONGODB: 'MONGODB',
 };
+
+const FRAMEWORK_FUNDAMENTALS: FundamentalSkillId[] = ['NETWORK', 'OS_RUNTIME', 'SOFTWARE_DESIGN', 'DSA'];
+const DATABASE_FUNDAMENTALS: FundamentalSkillId[] = ['DATABASE', 'OS_RUNTIME', 'SOFTWARE_DESIGN'];
 
 const TECHNOLOGY_FUNDAMENTALS: Record<TechnologyId, FundamentalSkillId[]> = {
   REDIS: ['DATABASE', 'NETWORK'],
@@ -39,12 +43,8 @@ export class ExperienceAccrualService {
     developer.gainExperience(skillRef.technology(DB_TECH[usage.databaseId]));
 
     const fundamentals = new Set<FundamentalSkillId>([
-      'NETWORK',
-      'OS_RUNTIME',
-      'SOFTWARE_DESIGN',
-      'DSA',
-      'SECURITY',
-      'DATABASE',
+      ...FRAMEWORK_FUNDAMENTALS,
+      ...DATABASE_FUNDAMENTALS,
     ]);
 
     for (const technology of usage.technologies) {
@@ -52,6 +52,8 @@ export class ExperienceAccrualService {
       for (const fundamental of TECHNOLOGY_FUNDAMENTALS[technology]) fundamentals.add(fundamental);
     }
 
+    // A fundamental can gain at most one experience day per game day,
+    // even when several active technologies depend on it.
     for (const fundamental of fundamentals) {
       developer.gainExperience(skillRef.fundamental(fundamental));
     }
