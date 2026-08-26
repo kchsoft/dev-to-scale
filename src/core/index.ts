@@ -10,6 +10,7 @@ export * from './incident-manager';
 export * from './incident-topology';
 export * from './infrastructure';
 export * from './learning';
+export * from './observability';
 export * from './progression';
 export * from './random';
 export * from './request-flow';
