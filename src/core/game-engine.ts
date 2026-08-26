@@ -123,7 +123,7 @@ export class GameEngine {
     this.progression = new CommunityProgression(config.seed);
     this.finance = new FinanceAccount(config.startingCash ?? 3_000_000);
     this.featureTask = this.createFeatureTask(COMMUNITY_BOOTSTRAP);
-    this._load = LoadCalculator.calculate(0, [], this.infrastructure, this.loadCalculationContext());
+    this._load = this.calculateCurrentLoad();
   }
 
   get day(): number { return this._day; }
@@ -222,12 +222,7 @@ export class GameEngine {
 
     // Growth uses the previous day's observed availability and capacity.
     if (this._launched) this.advanceGrowth();
-    this._load = LoadCalculator.calculate(
-      this._dau,
-      this.activeFeaturesForLoad(),
-      this.infrastructure,
-      this.loadCalculationContext(),
-    );
+    this.refreshLoad();
     if (this._launched) this.maybeGenerateIncident();
 
     // Record the current day's economy before completing new work so newly
@@ -238,6 +233,7 @@ export class GameEngine {
     // enters the next month at D1 with the cash change already visible.
     this.settleMonthIfEnding();
     if (this._status !== 'RUNNING') {
+      this.refreshLoad();
       this._day += 1;
       return this.snapshot;
     }
@@ -262,6 +258,7 @@ export class GameEngine {
     this.autoStartRequirementIfEligible();
 
     if (this.growthEvent?.active) this.growthEvent.advanceDay();
+    this.refreshLoad();
     this._day += 1;
     return this.snapshot;
   }
@@ -295,21 +292,25 @@ export class GameEngine {
   scaleApplication(size: ServerSize): void {
     this.ensureRunning();
     this.infrastructure.app.scaleUp(size);
+    this.refreshLoad();
   }
 
   addApplicationServer(): void {
     this.ensureRunning();
     this.infrastructure.app.addServer();
+    this.refreshLoad();
   }
 
   scaleDatabase(size: ServerSize): void {
     this.ensureRunning();
     this.infrastructure.database.scaleUp(size);
+    this.refreshLoad();
   }
 
   addDatabaseReplica(): void {
     this.ensureRunning();
     this.infrastructure.database.addReplica();
+    this.refreshLoad();
   }
 
   fastTrackCurrentFeature(): { addedWork: number; addedDebt: number } {
@@ -321,6 +322,7 @@ export class GameEngine {
     const addedDebt = this.techDebt.fastTrack(task.feature.id, task.feature.complexity);
     const addedWork = task.accelerate(task.requiredWork * 0.3);
     this.finishFeatureIfComplete();
+    this.refreshLoad();
     return { addedWork, addedDebt };
   }
 
@@ -343,12 +345,7 @@ export class GameEngine {
     if (cost > 0) this.finance.spendImmediately(cost);
 
     // The decision should be visible immediately instead of waiting for next day.
-    this._load = LoadCalculator.calculate(
-      this._dau,
-      this.activeFeaturesForLoad(),
-      this.infrastructure,
-      this.loadCalculationContext(),
-    );
+    this.refreshLoad();
     return { cost };
   }
 
@@ -361,12 +358,7 @@ export class GameEngine {
     const projectedFeatures = active.some((candidate) => candidate.id === feature.id)
       ? active
       : [...active, feature];
-    return LoadCalculator.calculate(
-      this._dau,
-      projectedFeatures,
-      this.infrastructure,
-      this.loadCalculationContext(),
-    );
+    return this.calculateCurrentLoad(this.infrastructure, projectedFeatures);
   }
 
   private ensureRunning(): void {
@@ -490,14 +482,35 @@ export class GameEngine {
     if (incident) this.incidents.add(incident);
   }
 
-  private loadCalculationContext(): LoadCalculationContext {
+  private calculateCurrentLoad(
+    infrastructure = this.infrastructure,
+    features = this.activeFeaturesForLoad(),
+    ignoredIncidentNodeIds: ReadonlySet<string> = new Set(),
+  ): LoadSnapshot {
+    return LoadCalculator.calculate(
+      this._dau,
+      features,
+      infrastructure,
+      this.loadCalculationContext(infrastructure, ignoredIncidentNodeIds),
+    );
+  }
+
+  private refreshLoad(): void {
+    this._load = this.calculateCurrentLoad();
+  }
+
+  private loadCalculationContext(
+    infrastructure = this.infrastructure,
+    ignoredIncidentNodeIds: ReadonlySet<string> = new Set(),
+  ): LoadCalculationContext {
     const technologyProficiencyLevels: Partial<Record<TechnologyId, number>> = {};
-    for (const technology of this.infrastructure.deployedTechnologies) {
+    for (const technology of infrastructure.deployedTechnologies) {
       technologyProficiencyLevels[technology] = this.developer.get(skillRef.technology(technology)).level;
     }
 
     const nodeHealth: Partial<Record<RequestNodeKind, number>> = {};
     for (const incident of this.incidents.incidents) {
+      if (ignoredIncidentNodeIds.has(incident.nodeId)) continue;
       const node = requestNodeForIncident(incident.nodeId);
       if (!node) continue;
       nodeHealth[node] = trafficHealthForSeverity(incident.severity);

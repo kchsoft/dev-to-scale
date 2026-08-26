@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { COMMUNITY_FEATURES } from '../community';
 import { GameEngine } from '../game-engine';
 import { RandomSource } from '../growth';
+import { Incident } from '../incident-manager';
+import { ServerSize } from '../infrastructure';
+import { skillRef } from '../learning';
 
 class SafePositiveRandom implements RandomSource {
   private index = 0;
@@ -14,7 +17,84 @@ class SafePositiveRandom implements RandomSource {
   }
 }
 
+class NoIncidentRandom implements RandomSource {
+  next(): number { return 0.99; }
+}
+
+function launchedGame(seed = 10, random: RandomSource = new SafePositiveRandom()): GameEngine {
+  const game = new GameEngine({
+    frameworkId: 'SPRING_BOOT',
+    databaseId: 'POSTGRESQL',
+    seed,
+    random,
+  });
+  for (let day = 0; day < 30 && !game.launched; day += 1) game.advanceDay();
+  if (!game.launched) throw new Error('Expected the community to launch within 30 days');
+  return game;
+}
+
 describe('game engine orchestration', () => {
+  it('publishes the launched service load and request flow in the launch snapshot', () => {
+    const game = launchedGame();
+    const snapshot = game.snapshot;
+
+    expect(snapshot.dau).toBe(80);
+    expect(snapshot.load.appDemand).toBeGreaterThan(0);
+    expect(snapshot.load.dbDemand).toBeGreaterThan(0);
+    expect(snapshot.load.requestFlows.map((flow) => flow.featureId)).toContain('COMMUNITY_MVP');
+  });
+
+  it('refreshes capacity and load immediately after infrastructure scaling', () => {
+    const game = launchedGame(11);
+    const smallAppCapacity = game.snapshot.load.rawAppCapacity;
+    const smallDbCapacity = game.snapshot.load.rawDbCapacity;
+
+    game.scaleApplication(ServerSize.XLARGE);
+    expect(game.snapshot.load.rawAppCapacity).toBeCloseTo(game.infrastructure.app.capacity);
+    expect(game.snapshot.load.rawAppCapacity).toBeGreaterThan(smallAppCapacity);
+
+    game.scaleDatabase(ServerSize.XLARGE);
+    expect(game.snapshot.load.rawDbCapacity).toBeCloseTo(game.infrastructure.database.capacity);
+    expect(game.snapshot.load.rawDbCapacity).toBeGreaterThan(smallDbCapacity);
+
+    const dbCapacityBeforeReplica = game.snapshot.load.rawDbCapacity;
+    game.addDatabaseReplica();
+    expect(game.snapshot.load.rawDbCapacity).toBeCloseTo(game.infrastructure.database.capacity);
+    expect(game.snapshot.load.rawDbCapacity).toBeGreaterThan(dbCapacityBeforeReplica);
+  });
+
+  it('publishes deployed queue capacity in the same snapshot that completes the build', () => {
+    const game = new GameEngine({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 12,
+      random: new SafePositiveRandom(),
+    });
+    game.developer.get(skillRef.fundamental('NETWORK')).setLevel(2);
+    game.developer.get(skillRef.fundamental('SOFTWARE_DESIGN')).setLevel(2);
+    game.startTechnologyBuild('SQS');
+
+    for (let day = 0; day < 20 && game.snapshot.currentTechnologyBuild; day += 1) game.advanceDay();
+
+    expect(game.infrastructure.hasTechnology('SQS')).toBe(true);
+    expect(game.snapshot.load.rawAsyncCapacity).toBe(game.infrastructure.asyncCapacity);
+    expect(game.snapshot.load.rawAsyncCapacity).toBeGreaterThan(0);
+  });
+
+  it('publishes a healthy request flow in the same snapshot that completes incident recovery', () => {
+    const game = launchedGame(13, new NoIncidentRandom());
+    const incident = new Incident('db-outage', 'database:POSTGRESQL', 'CRITICAL', 1);
+    game.incidents.add(incident);
+    game.scaleApplication(game.infrastructure.app.size);
+    expect(game.snapshot.load.failureRate).toBe(1);
+
+    game.startIncidentResponse(incident.id);
+    for (let day = 0; day < 10 && game.snapshot.incidents.length > 0; day += 1) game.advanceDay();
+
+    expect(game.snapshot.load.failureRate).toBe(0);
+    expect(game.snapshot.load.requestFlows[0]?.successRatio).toBe(1);
+  });
+
   it('launches the community after bootstrap work completes', () => {
     const game = new GameEngine({
       frameworkId: 'SPRING_BOOT',
