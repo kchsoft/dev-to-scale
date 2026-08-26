@@ -8,6 +8,7 @@ export class GameClock {
   private timer: ReturnType<typeof setInterval> | null = null;
   private _speed: GameSpeed = 0;
   private _dayProgress = 0;
+  private resumeSpeedAfterAutoPause: GameSpeed = 0;
   private readonly listeners = new Set<(speed: GameSpeed) => void>();
   private readonly progressListeners = new Set<(progress: number) => void>();
 
@@ -43,6 +44,12 @@ export class GameClock {
 
   pause(): void { this.setSpeed(0); }
 
+  resumeAfterAutoPause(): void {
+    const speed = this.resumeSpeedAfterAutoPause;
+    this.resumeSpeedAfterAutoPause = 0;
+    if (speed !== 0) this.setSpeed(speed);
+  }
+
   advanceOneDay(): void {
     this._dayProgress = 0;
     this.emitProgress();
@@ -73,7 +80,12 @@ export class GameClock {
   private tick(): void {
     const events = this.controller.advanceDay();
     if (events.length > 0) this.onEvents?.(events);
-    if (events.some((event) => event.autoPause)) this.pause();
+    if (events.some((event) => event.autoPause)) this.pauseForBlockingEvent();
+  }
+
+  private pauseForBlockingEvent(): void {
+    if (this._speed !== 0) this.resumeSpeedAfterAutoPause = this._speed;
+    this.pause();
   }
 
   private clearTimer(): void {
