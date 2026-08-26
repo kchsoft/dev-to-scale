@@ -211,7 +211,7 @@ export default function GameApp() {
 
         <section className="workspace">
           {tab === 'service' && <ServiceDashboard view={view} onNode={setSelectedNode} onTab={setTab} />}
-          {tab === 'features' && <FeatureBoard view={view} />}
+          {tab === 'features' && <FeatureBoard view={view} onFastTrack={() => run(() => controller.fastTrackCurrentFeature(), 'FAST TRACK · 기능 진행 +30% · Tech Debt 증가')} onRefactor={() => run(() => controller.startRefactor(), 'REFACTORING 시작 · 5일간 기능 개발 중단')} />}
           {tab === 'technology' && <TechnologyPanel view={view} onBuild={(tech) => run(() => controller.startTechnologyBuild(tech.id), `${tech.name} 구축 시작 · 즉시 ${money(tech.buildCost)} · 월 ${money(tech.monthlyCost)}`)} />}
           {tab === 'learning' && <LearningPanel view={view} onStudy={(skill) => run(() => controller.startLearning(skill.ref), `${skill.name} 학습 시작 · ${money(skill.cost ?? 0)}`)} />}
           {tab === 'report' && <ReportPanel view={view} />}
@@ -264,7 +264,7 @@ function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id
         <PanelTitle code="WORK QUEUE" title="진행 작업" badge="4 SLOTS" />
         <div className="work-slot-list">
           {view.workSlots.map((slot) => (
-            <button key={slot.id} onClick={() => slot.id === 'technology' ? onTab('technology') : slot.id === 'learning' ? onTab('learning') : undefined} className={`work-slot ${slot.active ? 'active' : 'empty'}`}>
+            <button key={slot.id} onClick={() => slot.id === 'technology' ? onTab('technology') : slot.id === 'learning' ? onTab('learning') : slot.id === 'feature' ? onTab('features') : undefined} className={`work-slot ${slot.active ? 'active' : 'empty'}`}>
               <div><span>{slot.label}</span><b>{slot.active ? '●' : '+'}</b></div><strong>{slot.title}</strong><small>{slot.meta}</small>
               {slot.progress !== null && <><div className="progress-track"><i style={{ width: `${pct(slot.progress)}%` }} /></div><em className="progress-percent">{pct(slot.progress)}%</em></>}
             </button>
@@ -454,11 +454,19 @@ function LearningPanel({ view, onStudy }: { view: GameView; onStudy: (skill: Ski
   );
 }
 
-function FeatureBoard({ view }: { view: GameView }) {
+function FeatureBoard({ view, onFastTrack, onRefactor }: { view: GameView; onFastTrack: () => void; onRefactor: () => void }) {
   const current = view.snapshot.currentFeature;
+  const debt = view.snapshot.techDebt;
   return (
     <section className="page-panel">
-      <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="기능마다 서로 다른 CPU / I/O 성향을 가지며, APP / DB / MQ / STORAGE 태그는 실제 요청 경로를 뜻합니다." />
+      <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="기능마다 서로 다른 CPU / I/O 성향을 가지며, 빠른 출시와 코드 건강성 사이의 트레이드오프도 관리합니다." />
+      {view.hud.launched && <div className="settlement-summary">
+        <span>TECH DEBT · {debt.value}/100</span>
+        <strong>{debt.refactoring ? `REFACTORING · ${debt.remainingRefactorDays}D` : `DEV EFF ${pct(debt.developmentModifier)}%`}</strong>
+        <small>Incident Risk ×{debt.incidentRiskMultiplier.toFixed(2)} · FAST TRACK은 현재 기능을 30% 당기는 대신 Debt를 쌓고, REFACTOR는 5일간 기능 개발을 멈춰 Debt -30.</small>
+        <button className="replica-add" disabled={!debt.canFastTrack || debt.refactoring} onClick={onFastTrack}>⚡ FAST TRACK · +30% PROGRESS</button>
+        <button className="replica-add" disabled={debt.value < 10 || debt.refactoring} onClick={onRefactor}>↺ REFACTOR · 5 DAYS · DEBT -30</button>
+      </div>}
       <div className="phase-board">{([1, 2, 3] as const).map((phase) => <div className="phase-lane" key={phase}><header><span>PHASE {phase}</span><strong>{phase === 1 ? 'EARLY' : phase === 2 ? 'GROWTH' : 'SCALE'}</strong></header><div>
         {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <div className="inline-progress"><div className="progress-track"><i style={{ width: `${pct(current.progress / current.requiredWork)}%` }} /></div><small>{current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일 · 약 {current.estimatedRemainingDays}일 남음</small></div>}{feature.route && <div className="feature-route-tags">{feature.route.map((node, nodeIndex) => <i key={`${node}-${nodeIndex}`}>{REQUEST_NODE_LABEL[node] ?? node}</i>)}</div>}{feature.load && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}</article>)}
       </div></div>)}</div>
@@ -493,7 +501,8 @@ function NodeInspector({ node, view, onClose, onAction, controller }: { node: Se
 
 function EventOverlay({ event, onDismiss, onRespond }: { event: GameEventView; onDismiss: () => void; onRespond: () => void }) {
   const incident = event.kind === 'incident';
-  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><button aria-label="팝업 닫기" onClick={onDismiss} className="event-close">×</button><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : event.kind === 'incident' ? 'SYSTEM / INCIDENT' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : '확인'}</button></footer></article></div>;
+  const traffic = event.kind === 'traffic';
+  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><button aria-label="팝업 닫기" onClick={onDismiss} className="event-close">×</button><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : incident ? 'SYSTEM / INCIDENT' : traffic ? 'SYSTEM / TRAFFIC' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : traffic ? '🔥' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : traffic ? '인프라 확인' : '확인'}</button></footer></article></div>;
 }
 
 function PanelTitle({ code, title, badge }: { code: string; title: string; badge: string }) {
