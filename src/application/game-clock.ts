@@ -3,6 +3,10 @@ import { GameController, GameEventView } from './game-controller';
 export type GameSpeed = 0 | 1 | 2;
 
 const PROGRESS_STEP_MS = 100;
+const DAY_DURATION_MS: Record<Exclude<GameSpeed, 0>, number> = {
+  1: 3_000,
+  2: 1_500,
+};
 
 export class GameClock {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -65,7 +69,7 @@ export class GameClock {
 
   private advanceProgress(): void {
     if (this._speed === 0) return;
-    const dayDuration = this._speed === 1 ? 10_000 : 5_000;
+    const dayDuration = DAY_DURATION_MS[this._speed];
     this._dayProgress = Math.min(1, this._dayProgress + PROGRESS_STEP_MS / dayDuration);
 
     if (this._dayProgress >= 1 - Number.EPSILON * 10) {
