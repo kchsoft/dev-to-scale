@@ -15,6 +15,7 @@ import {
   LanguageId,
   LearningRules,
   LoadCalculator,
+  RequestNodeKind,
   RevenuePolicy,
   ServerSize,
   SkillRef,
@@ -115,6 +116,21 @@ export interface FeatureCardView {
   threshold: number;
   state: 'completed' | 'developing' | 'revealed' | 'hidden';
   load: { app: number; db: number; async: number; storage: number } | null;
+  route: readonly RequestNodeKind[] | null;
+}
+
+export interface RequestFlowView {
+  id: string;
+  name: string;
+  nodes: readonly {
+    node: RequestNodeKind;
+    arrivalPercent: number;
+    available: boolean;
+  }[];
+  successPercent: number;
+  failureNode: RequestNodeKind | null;
+  particleCount: number;
+  trafficUnit: number;
 }
 
 export interface GameView {
@@ -125,6 +141,7 @@ export interface GameView {
   technologies: TechnologyOptionView[];
   skills: SkillNodeView[];
   features: FeatureCardView[];
+  requestFlows: RequestFlowView[];
   snapshot: GameSnapshot;
   frameworkId: FrameworkId;
   databaseId: DatabaseId;
@@ -143,7 +160,7 @@ const FRAMEWORK_LANGUAGE: Record<FrameworkId, LanguageId> = {
 };
 
 const LABELS: Record<string, string> = {
-  COMMUNITY_MVP: '커뮤니티 MVP', COMMENT: '댓글', LIKE: '좋아요', IMAGE_UPLOAD: '이미지 업로드',
+  COMMUNITY_MVP: '게시글', COMMENT: '댓글', LIKE: '좋아요', IMAGE_UPLOAD: '이미지 업로드',
   SEARCH: '검색', NOTIFICATION: '알림', AI_RECOMMENDATION: 'AI 개인화 추천', POPULAR_POSTS: '인기글',
   FOLLOW_FEED: '팔로우 피드', ADS: '광고', PREMIUM: 'Premium',
   NETWORK: 'Network', OS_RUNTIME: 'OS & Runtime', DATABASE: 'Database', DSA: 'DS&A', SECURITY: 'Security', SOFTWARE_DESIGN: 'Software Design',
@@ -199,6 +216,25 @@ function cloneInfrastructure(engine: GameEngine): InfrastructureState {
   return clone;
 }
 
+function trafficUnitForDau(dau: number): number {
+  if (dau <= 100_000) return 10_000;
+  if (dau <= 1_000_000) return 100_000;
+  if (dau <= 10_000_000) return 1_000_000;
+  return 5_000_000;
+}
+
+function nodeIdForRequestNode(node: RequestNodeKind | null): string | undefined {
+  switch (node) {
+    case 'ALB': return 'ALB';
+    case 'APP': return 'application';
+    case 'DB': return 'database';
+    case 'CACHE': return 'REDIS';
+    case 'QUEUE': return 'queue';
+    case 'STORAGE': return 'storage';
+    default: return undefined;
+  }
+}
+
 export class GameController {
   readonly engine: GameEngine;
   private readonly listeners = new Set<(view: GameView) => void>();
@@ -240,6 +276,7 @@ export class GameController {
       technologies: this.technologyOptions(snapshot),
       skills: this.skillNodes(),
       features: this.featureCards(snapshot),
+      requestFlows: this.requestFlowViews(snapshot),
       snapshot,
       frameworkId: this.engine.config.frameworkId,
       databaseId: this.engine.config.databaseId,
@@ -306,6 +343,8 @@ export class GameController {
     const incidentByNode = new Map(snapshot.incidents.map((incident) => [incident.nodeId, incident]));
     const appIncident = incidentByNode.get(`framework:${this.engine.config.frameworkId}`);
     const dbIncident = incidentByNode.get(`database:${this.engine.config.databaseId}`);
+    const appCap = snapshot.load.appCapacity;
+    const dbCap = snapshot.load.dbCapacity;
     const nodes: ServiceNodeView[] = [
       {
         id: 'application',
@@ -314,7 +353,7 @@ export class GameController {
         icon: ICONS.application,
         loadPercent: percent(snapshot.load.appRatio),
         tone: loadTone(snapshot.load.appRatio, Boolean(appIncident)),
-        detail: `${this.engine.infrastructure.app.size} ×${this.engine.infrastructure.app.count}`,
+        detail: `${this.engine.infrastructure.app.size} ×${this.engine.infrastructure.app.count} · CAP ${Math.round(appCap)}`,
         incidentId: appIncident?.id,
         incidentSeverity: appIncident?.severity,
       },
@@ -325,7 +364,7 @@ export class GameController {
         icon: ICONS.database,
         loadPercent: percent(snapshot.load.dbRatio),
         tone: loadTone(snapshot.load.dbRatio, Boolean(dbIncident)),
-        detail: `${this.engine.infrastructure.database.size} · Replica ${this.engine.infrastructure.database.replicaCount}`,
+        detail: `${this.engine.infrastructure.database.size} · Replica ${this.engine.infrastructure.database.replicaCount} · CAP ${Math.round(dbCap)}`,
         incidentId: dbIncident?.id,
         incidentSeverity: dbIncident?.severity,
       },
@@ -348,6 +387,9 @@ export class GameController {
           : technology === 'OBJECT_STORAGE'
             ? snapshot.load.storageRatio
             : snapshot.load.asyncRatio;
+      const detail = kind === 'queue'
+        ? `ACTIVE · CAP ${Math.round(snapshot.load.asyncCapacity)}`
+        : 'ACTIVE';
       nodes.push({
         id: technology,
         kind,
@@ -355,7 +397,7 @@ export class GameController {
         icon: TECH_ICONS[technology],
         loadPercent: percent(ratio),
         tone: loadTone(ratio, Boolean(incident)),
-        detail: 'ACTIVE',
+        detail,
         incidentId: incident?.id,
         incidentSeverity: incident?.severity,
       });
@@ -423,6 +465,19 @@ export class GameController {
         });
       }
     }
+    if (snapshot.load.failureRate > 0.001) {
+      const failed = snapshot.load.requestFlows.filter((flow) => flow.successRatio < 0.999);
+      const firstFailure = failed.find((flow) => flow.failureNode)?.failureNode ?? null;
+      alerts.push({
+        id: 'request-failure',
+        tone: 'danger',
+        title: `Request Failure ${percent(snapshot.load.failureRate)}%`,
+        detail: failed.length > 0
+          ? `${failed.slice(0, 2).map((flow) => LABELS[flow.featureId] ?? flow.featureId).join(', ')} 요청 경로 확인 필요`
+          : '요청 처리 성공률이 낮습니다.',
+        nodeId: nodeIdForRequestNode(firstFailure),
+      });
+    }
     for (const incident of snapshot.incidents) {
       alerts.push({
         id: incident.id,
@@ -485,6 +540,9 @@ export class GameController {
         ]
       : [];
     const after = LoadCalculator.calculate(snapshot.dau, features, clone);
+    if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
+      return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
+    }
     if (id === 'REDIS') return `DB ${percent(snapshot.load.dbRatio)}% → ${percent(after.dbRatio)}%`;
     if (id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') {
       return `App ${percent(snapshot.load.appRatio)}% → ${percent(after.appRatio)}% · Async 분리`;
@@ -573,6 +631,43 @@ export class GameController {
         threshold,
         state: completed ? 'completed' : developing ? 'developing' : revealed ? 'revealed' : 'hidden',
         load: revealed ? feature.load : null,
+        route: revealed ? feature.requestRoute.map((step) => step.node) : null,
+      };
+    });
+  }
+
+  private requestFlowViews(snapshot: GameSnapshot): RequestFlowView[] {
+    if (!snapshot.launched || snapshot.load.requestFlows.length === 0) return [];
+
+    const definitions = snapshot.load.requestFlows.map((flow) => {
+      const feature = flow.featureId === COMMUNITY_BOOTSTRAP.id
+        ? COMMUNITY_BOOTSTRAP
+        : COMMUNITY_FEATURES[flow.featureId as keyof typeof COMMUNITY_FEATURES];
+      const weight = feature
+        ? Math.max(1, feature.load.app + feature.load.db + feature.load.async + feature.load.storage)
+        : 1;
+      return { flow, feature, weight };
+    });
+    const totalWeight = definitions.reduce((sum, item) => sum + item.weight, 0) || 1;
+    const trafficUnit = trafficUnitForDau(snapshot.dau);
+
+    return definitions.slice(-5).map(({ flow, feature, weight }) => {
+      const estimatedTraffic = snapshot.dau * (weight / totalWeight);
+      const particleCount = snapshot.dau <= 0
+        ? 0
+        : Math.max(1, Math.min(4, Math.ceil(estimatedTraffic / trafficUnit)));
+      return {
+        id: flow.featureId,
+        name: LABELS[flow.featureId] ?? feature?.name ?? flow.featureId,
+        nodes: flow.nodes.map((node) => ({
+          node: node.node,
+          arrivalPercent: percent(node.arrivalRatio),
+          available: node.available,
+        })),
+        successPercent: percent(flow.successRatio),
+        failureNode: flow.failureNode,
+        particleCount,
+        trafficUnit,
       };
     });
   }
