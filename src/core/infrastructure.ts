@@ -131,15 +131,15 @@ export class DatabaseCluster {
     return DB_SIZE[this._size].capacity * (1 + 0.6 * this._replicaCount) * database.capacityModifier;
   }
 
-  /** Replicas help CPU pressure, but are intentionally more effective for read I/O. */
+  /** Read replicas distribute query CPU as well, but remain stronger for I/O. */
   get cpuCapacity(): number {
     const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].capacity * (1 + 0.35 * this._replicaCount) * database.capacityModifier;
+    return DB_SIZE[this._size].capacity * (1 + 0.55 * this._replicaCount) * database.capacityModifier;
   }
 
   get ioCapacity(): number {
     const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].capacity * (1 + 0.65 * this._replicaCount) * database.capacityModifier;
+    return DB_SIZE[this._size].capacity * (1 + 0.75 * this._replicaCount) * database.capacityModifier;
   }
 
   get monthlyCost(): number {
