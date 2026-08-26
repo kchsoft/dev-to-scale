@@ -65,9 +65,19 @@ export class GrowthPolicy {
   static calculate(input: DailyGrowthInput): DailyGrowthResult {
     const magnitude = Math.floor(input.random.next() * 5) + 1;
     const positive = input.random.next() < POSITIVE_PROBABILITY[input.phase];
-    const baseModifier = (positive ? magnitude : -magnitude) / 100;
-    const featureModifier = input.completedFeatureCount * this.FEATURE_BONUS;
-    const eventModifier = input.event?.active ? input.event.modifier : 0;
+    const rawBaseModifier = (positive ? magnitude : -magnitude) / 100;
+    const rawFeatureModifier = input.completedFeatureCount * this.FEATURE_BONUS;
+    const rawEventModifier = input.event?.active ? input.event.modifier : 0;
+    const incidentActive = input.incidents.length > 0;
+
+    // During an active incident the service cannot acquire net-positive DAU from
+    // organic luck, completed features or a viral growth bonus. Negative market
+    // movement still applies. Viral traffic pressure itself remains active in
+    // the load model, so an outage during a spike is especially dangerous.
+    const baseModifier = incidentActive ? Math.min(0, rawBaseModifier) : rawBaseModifier;
+    const featureModifier = incidentActive ? 0 : rawFeatureModifier;
+    const eventModifier = incidentActive ? Math.min(0, rawEventModifier) : rawEventModifier;
+
     const incidentPenalty = input.incidents.reduce((sum, severity) => sum + INCIDENT_GROWTH_PENALTY[severity], 0);
     const incidentModifier = Math.max(-this.MAX_OPERATIONAL_PENALTY, incidentPenalty);
     const failureRate = Math.max(0, Math.min(1, input.failureRate ?? 0));
