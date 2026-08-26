@@ -15,11 +15,20 @@ describe('application layer', () => {
     expect(view.hud.dayOfMonth).toBe(1);
     expect(view.hud.daysUntilSettlement).toBe(30);
     expect(view.hud.launched).toBe(false);
-    expect(view.snapshot.currentFeature?.id).toBe('COMMUNITY_MVP');
-    expect(view.snapshot.currentFeature?.elapsedDays).toBe(0);
-    expect(view.snapshot.currentFeature?.estimatedRemainingDays).toBeGreaterThan(0);
+    expect(view.operations.currentFeature?.id).toBe('COMMUNITY_MVP');
+    expect(view.operations.currentFeature?.elapsedDays).toBe(0);
+    expect(view.operations.currentFeature?.estimatedRemainingDays).toBeGreaterThan(0);
     expect(view.nodes.map((node) => node.id)).toEqual(['application', 'database']);
     expect(view.features).toHaveLength(10);
+  });
+
+  it('exposes an application-owned immutable view instead of a raw domain snapshot', () => {
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 21 });
+    const view = controller.getView();
+
+    expect(Object.hasOwn(view, 'snapshot')).toBe(false);
+    expect(view.operations.currentFeature?.id).toBe('COMMUNITY_MVP');
+    expect(view.service.visibleLoads.map((metric) => metric.label)).toEqual(['APP', 'DB', 'ASYNC', 'STORAGE']);
   });
 
   it('rolls M1 D30 into M2 D1 with a visible settlement event', () => {

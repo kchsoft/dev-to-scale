@@ -5,11 +5,9 @@ import {
   COMMUNITY_FEATURES,
   COMMUNITY_REQUIREMENT_THRESHOLDS,
   DatabaseCluster,
-  DatabaseId,
   FrameworkId,
   FundamentalSkillId,
   GameEngine,
-  GameEngineConfig,
   GameSnapshot,
   LanguageId,
   LearningRules,
@@ -22,145 +20,32 @@ import {
   TrafficSpikeResponse,
   skillRef,
 } from '../core';
+import {
+  AlertView,
+  FeatureCardView,
+  GameEventView,
+  GameStartConfig,
+  GameView,
+  InfrastructureCostView,
+  LoadTone,
+  RequestFlowView,
+  ServiceNodeView,
+  SkillNodeView,
+  TechnologyOptionView,
+} from './game-view';
+import { OperationalViewProjector } from './operational-view-projector';
 
-export type LoadTone = 'stable' | 'busy' | 'critical' | 'overload' | 'incident';
-export type GameEventKind = 'requirement' | 'incident' | 'traffic' | 'launch' | 'settlement' | 'bankrupt' | 'won';
-
-export interface GameEventView {
-  id: string;
-  kind: GameEventKind;
-  title: string;
-  message: string;
-  severity?: string;
-  nodeId?: string;
-  autoPause: boolean;
-}
-
-export interface HudView {
-  day: number;
-  month: number;
-  dayOfMonth: number;
-  daysUntilSettlement: number;
-  dau: number;
-  cash: number;
-  monthlyRevenue: number;
-  monthlyCost: number;
-  monthlyProfit: number;
-  lastSettlement: GameSnapshot['lastSettlement'];
-  status: GameSnapshot['status'];
-  launched: boolean;
-}
-
-export interface ServiceNodeView {
-  id: string;
-  kind: 'application' | 'database' | 'cache' | 'queue' | 'storage' | 'load-balancer';
-  name: string;
-  icon: string;
-  loadPercent: number;
-  tone: LoadTone;
-  detail: string;
-  incidentId?: string;
-  incidentSeverity?: string;
-}
-
-export interface WorkSlotView {
-  id: 'feature' | 'technology' | 'learning' | 'incident';
-  label: string;
-  title: string;
-  progress: number | null;
-  meta: string;
-  active: boolean;
-}
-
-export interface AlertView {
-  id: string;
-  tone: 'info' | 'warning' | 'danger' | 'good';
-  title: string;
-  detail: string;
-  nodeId?: string;
-}
-
-export interface TechnologyOptionView {
-  id: BuildableTechnologyId;
-  name: string;
-  icon: string;
-  buildCost: number;
-  monthlyCost: number;
-  buildWork: number;
-  deployed: boolean;
-  available: boolean;
-  reason: string | null;
-  preview: string;
-}
-
-export interface SkillNodeView {
-  key: string;
-  ref: SkillRef;
-  name: string;
-  icon: string;
-  level: number;
-  experienceDays: number;
-  targetLevel: number | null;
-  requiredExperience: number | null;
-  studyDays: number | null;
-  cost: number | null;
-  canStudy: boolean;
-  studying: boolean;
-  studyProgress: number | null;
-  elapsedStudyDays: number | null;
-  reason: string | null;
-  category: SkillRef['category'];
-}
-
-export interface FeatureCardView {
-  id: string;
-  name: string;
-  phase: 1 | 2 | 3;
-  threshold: number;
-  state: 'completed' | 'developing' | 'revealed' | 'hidden';
-  load: { app: number; db: number; async: number; storage: number } | null;
-  route: readonly RequestNodeKind[] | null;
-}
-
-export interface RequestFlowView {
-  id: string;
-  name: string;
-  nodes: readonly {
-    node: RequestNodeKind;
-    arrivalPercent: number;
-    available: boolean;
-  }[];
-  successPercent: number;
-  failureNode: RequestNodeKind | null;
-  particleCount: number;
-  trafficUnit: number;
-}
-
-export interface InfrastructureCostView {
-  appSizeMonthlyCosts: Record<ServerSize, number>;
-  dbSizeMonthlyCosts: Record<ServerSize, number>;
-  addAppServerMonthlyCostDelta: number | null;
-  addDbReplicaMonthlyCostDelta: number | null;
-}
-
-export interface GameView {
-  hud: HudView;
-  nodes: ServiceNodeView[];
-  workSlots: WorkSlotView[];
-  alerts: AlertView[];
-  technologies: TechnologyOptionView[];
-  skills: SkillNodeView[];
-  features: FeatureCardView[];
-  requestFlows: RequestFlowView[];
-  infrastructureCosts: InfrastructureCostView;
-  snapshot: GameSnapshot;
-  frameworkId: FrameworkId;
-  databaseId: DatabaseId;
-  appSize: ServerSize;
-  appCount: number;
-  dbSize: ServerSize;
-  dbReplicaCount: number;
-}
+export type {
+  AlertView,
+  FeatureCardView,
+  GameEventView,
+  GameView,
+  InfrastructureCostView,
+  RequestFlowView,
+  ServiceNodeView,
+  SkillNodeView,
+  TechnologyOptionView,
+} from './game-view';
 
 const FRAMEWORK_LANGUAGE: Record<FrameworkId, LanguageId> = {
   SPRING_BOOT: 'JAVA',
@@ -253,7 +138,7 @@ export class GameController {
   readonly engine: GameEngine;
   private readonly listeners = new Set<(view: GameView) => void>();
 
-  constructor(config: GameEngineConfig) {
+  constructor(config: GameStartConfig) {
     this.engine = new GameEngine(config);
   }
 
@@ -297,7 +182,15 @@ export class GameController {
       features: this.featureCards(snapshot),
       requestFlows: this.requestFlowViews(snapshot),
       infrastructureCosts: this.infrastructureCostView(),
-      snapshot,
+      service: OperationalViewProjector.project(snapshot, this.engine.developer),
+      operations: {
+        currentFeature: snapshot.currentFeature,
+        currentTechnologyBuild: snapshot.currentTechnologyBuild,
+        techDebt: snapshot.techDebt,
+        trafficSpike: snapshot.growthEvent?.type === 'VIRAL'
+          ? { burstCost: snapshot.growthEvent.burstCost }
+          : null,
+      },
       frameworkId: this.engine.config.frameworkId,
       databaseId: this.engine.config.databaseId,
       appSize: this.engine.infrastructure.app.size,
