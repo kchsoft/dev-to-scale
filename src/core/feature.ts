@@ -1,0 +1,155 @@
+export type FeatureComplexity = 'SIMPLE' | 'NORMAL' | 'COMPLEX';
+export type FeatureTag =
+  | 'AI'
+  | 'ASYNC'
+  | 'CONTENT'
+  | 'CORE'
+  | 'EVENT_HEAVY'
+  | 'MONETIZATION'
+  | 'READ_HEAVY'
+  | 'SEARCH'
+  | 'STORAGE'
+  | 'TRANSACTIONAL'
+  | 'WRITE_HEAVY';
+
+export interface LoadWeights {
+  app: number;
+  db: number;
+  async: number;
+  storage: number;
+}
+
+export interface FeatureDefinitionProps {
+  id: string;
+  name: string;
+  baseWork: number;
+  complexity: FeatureComplexity;
+  load: LoadWeights;
+  tags?: FeatureTag[];
+  growthBonus?: number;
+  revenueModifier?: number;
+}
+
+export class FeatureDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly baseWork: number;
+  readonly complexity: FeatureComplexity;
+  readonly load: LoadWeights;
+  readonly tags: ReadonlySet<FeatureTag>;
+  readonly growthBonus: number;
+  readonly revenueModifier: number;
+
+  constructor(props: FeatureDefinitionProps) {
+    this.id = props.id;
+    this.name = props.name;
+    this.baseWork = props.baseWork;
+    this.complexity = props.complexity;
+    this.load = { ...props.load };
+    this.tags = new Set(props.tags ?? []);
+    this.growthBonus = props.growthBonus ?? 0.005;
+    this.revenueModifier = props.revenueModifier ?? 0;
+  }
+}
+
+export type FrameworkId = 'SPRING_BOOT' | 'NESTJS' | 'GIN' | 'FASTAPI' | 'ASPNET_CORE';
+
+const COMPLEXITY_FACTOR: Record<FeatureComplexity, number> = {
+  SIMPLE: 0.05,
+  NORMAL: 0.08,
+  COMPLEX: 0.12,
+};
+
+export class FrameworkDefinition {
+  private constructor(
+    readonly id: FrameworkId,
+    readonly capacityModifier: number,
+    readonly costModifier: number,
+    private readonly baseWorkModifier: number,
+    private readonly tagWorkModifiers: Partial<Record<FeatureTag, number>> = {},
+    private readonly complexityWorkModifiers: Partial<Record<FeatureComplexity, number>> = {},
+  ) {}
+
+  static springBoot(): FrameworkDefinition {
+    return new FrameworkDefinition('SPRING_BOOT', 1.1, 1.05, 1);
+  }
+
+  static nestJs(): FrameworkDefinition {
+    return new FrameworkDefinition('NESTJS', 1, 1.05, 0.9);
+  }
+
+  static gin(): FrameworkDefinition {
+    return new FrameworkDefinition('GIN', 1, 0.9, 1, {}, { COMPLEX: 1.15 });
+  }
+
+  static fastApi(): FrameworkDefinition {
+    return new FrameworkDefinition('FASTAPI', 1, 1.1, 1, { AI: 0.75 });
+  }
+
+  static aspNetCore(): FrameworkDefinition {
+    return new FrameworkDefinition('ASPNET_CORE', 1, 1, 1);
+  }
+
+  static byId(id: FrameworkId): FrameworkDefinition {
+    switch (id) {
+      case 'SPRING_BOOT': return FrameworkDefinition.springBoot();
+      case 'NESTJS': return FrameworkDefinition.nestJs();
+      case 'GIN': return FrameworkDefinition.gin();
+      case 'FASTAPI': return FrameworkDefinition.fastApi();
+      case 'ASPNET_CORE': return FrameworkDefinition.aspNetCore();
+    }
+  }
+
+  requiredWorkFor(feature: FeatureDefinition): number {
+    let modifier = this.baseWorkModifier;
+    modifier *= this.complexityWorkModifiers[feature.complexity] ?? 1;
+    for (const tag of feature.tags) {
+      modifier *= this.tagWorkModifiers[tag] ?? 1;
+    }
+    return feature.baseWork * modifier;
+  }
+
+  productivity(level: number, complexity: FeatureComplexity): number {
+    const raw = 1 + (level - 5) * COMPLEXITY_FACTOR[complexity];
+    return Math.max(0.25, raw);
+  }
+}
+
+export interface FeatureDevelopmentProgressContext {
+  frameworkLevel: number;
+  incidentModifier: number;
+}
+
+export class FeatureDevelopmentTask {
+  private _completedWork = 0;
+
+  private constructor(
+    readonly feature: FeatureDefinition,
+    readonly framework: FrameworkDefinition,
+    readonly requiredWork: number,
+  ) {}
+
+  static start(feature: FeatureDefinition, framework: FrameworkDefinition): FeatureDevelopmentTask {
+    return new FeatureDevelopmentTask(feature, framework, framework.requiredWorkFor(feature));
+  }
+
+  get completedWork(): number {
+    return this._completedWork;
+  }
+
+  get progressRatio(): number {
+    return Math.min(1, this._completedWork / this.requiredWork);
+  }
+
+  get completed(): boolean {
+    return this._completedWork >= this.requiredWork;
+  }
+
+  advanceDay(context: FeatureDevelopmentProgressContext): number {
+    if (this.completed) return 0;
+    const progress = this.framework.productivity(context.frameworkLevel, this.feature.complexity)
+      * context.incidentModifier;
+    this._completedWork = Math.min(this.requiredWork, this._completedWork + progress);
+    return progress;
+  }
+}
