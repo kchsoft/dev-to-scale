@@ -30,6 +30,16 @@ export interface GameEngineConfig {
   random?: RandomSource;
 }
 
+export interface LastMonthlySettlement {
+  month: number;
+  revenue: number;
+  infrastructureCost: number;
+  aiCost: number;
+  totalCost: number;
+  profit: number;
+  cashAfter: number;
+}
+
 export interface GameSnapshot {
   day: number;
   status: GameStatus;
@@ -45,10 +55,24 @@ export interface GameSnapshot {
     estimatedRemainingDays: number;
   };
   currentLearning: null | { id: string; targetLevel: number; studyDays: number };
-  currentTechnologyBuild: null | { id: string; progress: number; requiredWork: number };
+  currentTechnologyBuild: null | {
+    id: string;
+    progress: number;
+    requiredWork: number;
+    elapsedDays: number;
+    estimatedRemainingDays: number;
+  };
   load: LoadSnapshot;
-  incidents: readonly { id: string; nodeId: string; severity: string; remainingResponseDays: number | null }[];
+  incidents: readonly {
+    id: string;
+    nodeId: string;
+    severity: string;
+    remainingResponseDays: number | null;
+    totalResponseDays: number | null;
+    elapsedResponseDays: number | null;
+  }[];
   lastMonthlyRevenue: number;
+  lastSettlement: LastMonthlySettlement | null;
 }
 
 export class GameEngine {
@@ -71,6 +95,7 @@ export class GameEngine {
   private _launched = false;
   private _status: GameStatus = 'RUNNING';
   private _lastMonthlyRevenue = 0;
+  private _lastSettlement: LastMonthlySettlement | null = null;
   private _load: LoadSnapshot;
 
   constructor(readonly config: GameEngineConfig) {
@@ -91,6 +116,9 @@ export class GameEngine {
   get snapshot(): GameSnapshot {
     const learningTask = this.learning.current;
     const buildTask = this.technologyBuild.current;
+    const buildTechnologyLevel = buildTask
+      ? this.developer.get(skillRef.technology(buildTask.definition.id)).level
+      : 1;
     return {
       day: this._day,
       status: this._status,
@@ -111,7 +139,13 @@ export class GameEngine {
         ? { id: learningTask.skill.id, targetLevel: learningTask.targetLevel, studyDays: learningTask.requiredStudyDays }
         : null,
       currentTechnologyBuild: buildTask
-        ? { id: buildTask.definition.id, progress: buildTask.completedWork, requiredWork: buildTask.definition.buildWork }
+        ? {
+            id: buildTask.definition.id,
+            progress: buildTask.completedWork,
+            requiredWork: buildTask.definition.buildWork,
+            elapsedDays: buildTask.elapsedDays,
+            estimatedRemainingDays: buildTask.estimatedRemainingDays(buildTechnologyLevel, this.incidents.developmentModifier),
+          }
         : null,
       load: this._load,
       incidents: this.incidents.incidents.map((incident) => ({
@@ -119,8 +153,11 @@ export class GameEngine {
         nodeId: incident.nodeId,
         severity: incident.severity,
         remainingResponseDays: incident.remainingResponseDays,
+        totalResponseDays: incident.totalResponseDays,
+        elapsedResponseDays: incident.elapsedResponseDays,
       })),
       lastMonthlyRevenue: this._lastMonthlyRevenue,
+      lastSettlement: this._lastSettlement,
     };
   }
 
@@ -136,8 +173,7 @@ export class GameEngine {
       technologies: this.infrastructure.deployedTechnologies,
     });
 
-    // Growth uses the previous day's observed availability. This keeps the day
-    // boundary deterministic: today's request failures influence tomorrow's DAU.
+    // Growth uses the previous day's observed availability and capacity.
     if (this._launched) this.advanceGrowth();
     this._load = LoadCalculator.calculate(
       this._dau,
@@ -224,12 +260,19 @@ export class GameEngine {
   private advanceGrowth(): void {
     this.growthEvent = GrowthPolicy.maybeStartEvent(this.growthEvent, this.random);
     const phase = this.progression.finished ? 3 : this.progression.currentRequirement.phase;
+    const maxLoadRatio = Math.max(
+      this._load.appRatio,
+      this._load.dbRatio,
+      this._load.asyncRatio,
+      this._load.storageRatio,
+    );
     const result = GrowthPolicy.calculate({
       phase,
       completedFeatureCount: this.completedFeatureDefinitions.length,
       event: this.growthEvent,
       incidents: this.incidents.severities,
       failureRate: this._load.failureRate,
+      maxLoadRatio,
       random: this.random,
     });
     this._dau = GrowthPolicy.nextDau(this._dau, result.totalModifier);
@@ -292,12 +335,22 @@ export class GameEngine {
   private settlePreviousMonthIfNeeded(): void {
     if (this._day <= 1 || (this._day - 1) % 30 !== 0) return;
     const month = this.monthlyLedger.snapshot();
+    const infrastructureCost = this.infrastructure.monthlyCost;
     const settlement = this.finance.settleMonth({
       revenue: month.revenue,
-      infrastructureCost: this.infrastructure.monthlyCost,
+      infrastructureCost,
       aiCost: month.aiCost,
     });
     this._lastMonthlyRevenue = month.revenue;
+    this._lastSettlement = {
+      month: Math.floor((this._day - 1) / 30),
+      revenue: settlement.revenue,
+      infrastructureCost,
+      aiCost: month.aiCost,
+      totalCost: settlement.totalCost,
+      profit: settlement.profit,
+      cashAfter: settlement.cash,
+    };
     this.monthlyLedger.reset();
 
     if (settlement.bankrupt) {
