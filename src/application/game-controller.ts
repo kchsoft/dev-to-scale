@@ -101,6 +101,9 @@ export interface SkillNodeView {
   studyDays: number | null;
   cost: number | null;
   canStudy: boolean;
+  studying: boolean;
+  studyProgress: number | null;
+  elapsedStudyDays: number | null;
   reason: string | null;
   category: SkillRef['category'];
 }
@@ -180,6 +183,10 @@ function phaseForSlot(index: number): 1 | 2 | 3 {
   if (index < 3) return 1;
   if (index < 6) return 2;
   return 3;
+}
+
+function sameSkill(left: SkillRef, right: SkillRef): boolean {
+  return left.category === right.category && left.id === right.id;
 }
 
 function cloneInfrastructure(engine: GameEngine): InfrastructureState {
@@ -381,9 +388,9 @@ export class GameController {
       {
         id: 'learning',
         label: 'LEARNING',
-        title: learning ? (LABELS[learning.skill.id] ?? learning.skill.id) : '비어 있음',
-        progress: null,
-        meta: learning ? `Lv.${learning.targetLevel} 학습 중 · ${learning.requiredStudyDays}일` : '학습을 선택하세요',
+        title: learning ? `${LABELS[learning.skill.id] ?? learning.skill.id} → Lv.${learning.targetLevel}` : '비어 있음',
+        progress: learning ? learning.progress : null,
+        meta: learning ? `학습 중 · ${learning.elapsedStudyDays}/${learning.requiredStudyDays}일` : '학습을 선택하세요',
         active: Boolean(learning),
       },
       {
@@ -495,8 +502,11 @@ export class GameController {
       skillRef.technology(this.engine.config.databaseId),
       ...TECHNOLOGY_SKILLS.filter((id) => id !== this.engine.config.databaseId).map(skillRef.technology),
     ];
+    const currentLearning = this.engine.learning.current;
+
     return refs.map((ref) => {
       const proficiency = this.engine.developer.get(ref);
+      const studying = Boolean(currentLearning && sameSkill(currentLearning.skill, ref));
       let targetLevel: number | null = null;
       let requiredExperience: number | null = null;
       let studyDays: number | null = null;
@@ -513,8 +523,10 @@ export class GameController {
         studyDays = requirement.studyDays;
         cost = requirement.cost;
 
-        if (this.engine.learning.current) {
-          reason = '다른 학습 진행 중';
+        if (currentLearning) {
+          reason = studying
+            ? `학습 중 · ${currentLearning.elapsedStudyDays}/${currentLearning.requiredStudyDays}일`
+            : '다른 학습 진행 중';
         } else if (proficiency.experienceDays < requirement.experienceDays) {
           reason = `경험 ${requirement.experienceDays - proficiency.experienceDays}일 부족`;
         } else {
@@ -537,6 +549,9 @@ export class GameController {
         studyDays,
         cost,
         canStudy,
+        studying,
+        studyProgress: studying && currentLearning ? currentLearning.progress : null,
+        elapsedStudyDays: studying && currentLearning ? currentLearning.elapsedStudyDays : null,
         reason,
         category: ref.category,
       };
