@@ -55,10 +55,15 @@ export class Incident {
 export class IncidentGenerator {
   private sequence = 0;
 
-  tryGenerate(candidates: readonly IncidentCandidate[], activeNodeIds: ReadonlySet<string>, random: RandomSource): Incident | null {
+  tryGenerate(
+    candidates: readonly IncidentCandidate[],
+    activeNodeIds: ReadonlySet<string>,
+    random: RandomSource,
+    probabilityMultiplier = 1,
+  ): Incident | null {
     for (const candidate of candidates) {
       if (activeNodeIds.has(candidate.nodeId)) continue;
-      const probability = IncidentPolicy.dailyProbability(candidate);
+      const probability = Math.min(1, IncidentPolicy.dailyProbability(candidate) * Math.max(0, probabilityMultiplier));
       if (random.next() >= probability) continue;
 
       const severity = IncidentPolicy.severityRoll(candidate.loadRatio, random.next());
