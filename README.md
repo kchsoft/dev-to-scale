@@ -18,7 +18,6 @@
 - 트래픽 Capacity 및 Architecture Complexity
 - 과부하 / 복잡도 / 바이럴 이벤트와 대응 선택
 - 기본 역량 / 언어 / 프레임워크 숙련도 성장
-- LocalStorage 자동 저장
 
 ## 기본 역량
 
