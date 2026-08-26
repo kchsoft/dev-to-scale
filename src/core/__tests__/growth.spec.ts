@@ -27,8 +27,17 @@ describe('growth', () => {
   });
 
   it('applies 7-day viral and negative buzz modifiers', () => {
-    expect(new GrowthEvent('VIRAL').modifier).toBe(0.05);
-    expect(new GrowthEvent('NEGATIVE_BUZZ').modifier).toBe(-0.05);
+    const viral = new GrowthEvent('VIRAL');
+    const negative = new GrowthEvent('NEGATIVE_BUZZ');
+
+    expect(viral.modifier).toBe(0.05);
+    expect(viral.trafficMultiplier).toBe(1.8);
+    expect(viral.remainingDays).toBe(7);
+    expect(negative.modifier).toBe(-0.05);
+    expect(negative.trafficMultiplier).toBe(1);
+
+    viral.advanceDay();
+    expect(viral.remainingDays).toBe(6);
   });
 
   it('caps stacked incident growth penalties at -10 percentage points', () => {
