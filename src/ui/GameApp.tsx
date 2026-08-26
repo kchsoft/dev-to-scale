@@ -54,6 +54,8 @@ const BOTTLENECK_LABEL: Record<string, string> = {
   ASYNC: 'ASYNC QUEUE', STORAGE: 'STORAGE', NONE: 'NONE',
 };
 
+type TrafficChoice = 'RIDE' | 'THROTTLE' | 'BURST';
+
 function money(value: number): string {
   const sign = value < 0 ? '-' : '';
   const absolute = Math.abs(value);
@@ -208,6 +210,18 @@ export default function GameApp() {
   const activeEvent = events[0] ?? null;
   const selected = view.nodes.find((node) => node.id === selectedNode) ?? null;
   const observability = ObservabilityPolicy.evaluate(controller.engine.developer);
+  const handleTrafficResponse = (response: TrafficChoice) => {
+    try {
+      const event = view.snapshot.growthEvent;
+      const cost = response === 'BURST' ? event?.burstCost ?? 0 : 0;
+      controller.respondTrafficSpike(response);
+      const label = response === 'RIDE' ? 'RIDE THE WAVE' : response === 'THROTTLE' ? 'TRAFFIC LIMIT' : 'EMERGENCY BURST';
+      setToast(`${label} 선택${cost > 0 ? ` · 즉시 ${money(cost)}` : ''}`);
+      closeActiveEvent();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Traffic 대응을 적용할 수 없습니다.');
+    }
+  };
 
   return (
     <main className="game-screen">
@@ -234,7 +248,7 @@ export default function GameApp() {
       </div>
 
       {selected && <NodeInspector node={selected} view={view} observability={observability} onClose={() => setSelectedNode(null)} onAction={(action) => run(action)} controller={controller} />}
-      {activeEvent && <EventOverlay event={activeEvent} view={view} observability={observability} onDismiss={closeActiveEvent} onRespond={() => {
+      {activeEvent && <EventOverlay event={activeEvent} view={view} observability={observability} onDismiss={closeActiveEvent} onTrafficResponse={handleTrafficResponse} onRespond={() => {
         if (activeEvent.kind === 'incident') run(() => controller.startIncidentResponse(activeEvent.id), '장애 대응을 시작했습니다.');
         closeActiveEvent();
       }} />}
@@ -553,7 +567,7 @@ function NodeInspector({ node, view, observability, onClose, onAction, controlle
   </aside></div>;
 }
 
-function EventOverlay({ event, view, observability, onDismiss, onRespond }: { event: GameEventView; view: GameView; observability: ObservabilitySnapshot; onDismiss: () => void; onRespond: () => void }) {
+function EventOverlay({ event, view, observability, onDismiss, onRespond, onTrafficResponse }: { event: GameEventView; view: GameView; observability: ObservabilitySnapshot; onDismiss: () => void; onRespond: () => void; onTrafficResponse: (response: TrafficChoice) => void }) {
   const incident = event.kind === 'incident';
   const traffic = event.kind === 'traffic';
   const diagnosis = incident && event.nodeId
@@ -571,7 +585,9 @@ function EventOverlay({ event, view, observability, onDismiss, onRespond }: { ev
         ? `SIGNAL · ${diagnosis.primarySignal} ${loadPct(diagnosis.primaryRatio)}% · APM에서 Traffic / Tech Debt / Request Failure 상관관계 분석이 해금됩니다.`
         : `${diagnosis.likelyCause} · SIGNALS ${diagnosis.signals.join(' / ')} · OPTIONS ${diagnosis.suggestions.slice(0, 3).join(' / ')}`
     : null;
-  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><button aria-label="팝업 닫기" onClick={onDismiss} className="event-close">×</button><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : incident ? `SYSTEM / INCIDENT / ${observability.level}` : traffic ? 'SYSTEM / TRAFFIC' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : traffic ? '🔥' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{diagnosisText && <p>{diagnosisText}</p>}{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : traffic ? '인프라 확인' : '확인'}</button></footer></article></div>;
+  const viral = traffic ? view.snapshot.growthEvent : null;
+  const dismiss = traffic ? () => onTrafficResponse('RIDE') : onDismiss;
+  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><button aria-label="팝업 닫기" onClick={dismiss} className="event-close">×</button><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : incident ? `SYSTEM / INCIDENT / ${observability.level}` : traffic ? 'SYSTEM / TRAFFIC / DECISION' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : traffic ? '🔥' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{diagnosisText && <p>{diagnosisText}</p>}{traffic && viral && <p>RIDE · 부하 ×1.80 / 성장 +5%p / 무료　·　LIMIT · 부하 ×1.15 / 성장 +1%p / 무료　·　BURST · 부하 ×1.35 / 성장 +5%p / {money(viral.burstCost)}</p>}{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{traffic ? <><button className="secondary" onClick={() => onTrafficResponse('RIDE')}>그냥 버틴다</button><button className="secondary" onClick={() => onTrafficResponse('THROTTLE')}>Traffic Limit</button><button className="primary" disabled={Boolean(viral && view.hud.cash < viral.burstCost)} onClick={() => onTrafficResponse('BURST')}>Emergency Burst · {money(viral?.burstCost ?? 0)}</button></> : <>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : '확인'}</button></>}</footer></article></div>;
 }
 
 function PanelTitle({ code, title, badge }: { code: string; title: string; badge: string }) {
