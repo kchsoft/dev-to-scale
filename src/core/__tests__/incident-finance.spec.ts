@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FinanceAccount, RevenuePolicy } from '../finance';
 import { IncidentPolicy } from '../incident';
+import { Incident, IncidentManager } from '../incident-manager';
 
 describe('incident policy', () => {
   it('raises incident probability with load and low proficiency', () => {
@@ -35,6 +36,21 @@ describe('incident policy', () => {
     });
 
     expect(highSkill).toBeLessThan(lowSkill);
+  });
+
+  it('removes an incident when its infrastructure node is retired', () => {
+    const manager = new IncidentManager();
+    const incident = new Incident('queue-1', 'technology:SQS', 'MAJOR', 2);
+    manager.add(incident);
+    manager.startResponse(incident.id, 5, 5);
+
+    expect(manager.removeForNode('technology:SQS')).toBe(incident);
+    expect(manager.incidents).toHaveLength(0);
+    expect(manager.developmentModifier).toBe(1);
+
+    const replacementIncident = new Incident('queue-2', 'technology:KAFKA', 'MINOR', 2);
+    manager.add(replacementIncident);
+    expect(() => manager.startResponse(replacementIncident.id, 5, 5)).not.toThrow();
   });
 });
 

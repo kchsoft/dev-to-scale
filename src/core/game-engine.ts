@@ -128,7 +128,12 @@ export class GameEngine {
     this.learning.advanceDay(this.developer);
 
     const builtTechnology = this.technologyBuild.advanceDay(this.developer, incidentDevelopmentModifier);
-    if (builtTechnology) this.infrastructure.deployTechnology(builtTechnology);
+    if (builtTechnology) {
+      const retiredTechnologies = this.infrastructure.deployTechnology(builtTechnology);
+      for (const retiredTechnology of retiredTechnologies) {
+        this.incidents.removeForNode(`technology:${retiredTechnology}`);
+      }
+    }
 
     this.incidents.advanceResponseDay();
     this.advanceFeatureDevelopment(incidentDevelopmentModifier);

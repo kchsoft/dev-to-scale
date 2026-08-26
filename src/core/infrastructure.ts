@@ -11,6 +11,13 @@ export enum ServerSize {
 
 export type { DatabaseId } from './database';
 export type TechnologyId = BuildableTechnologyId;
+export type QueueTechnologyId = 'SQS' | 'RABBITMQ' | 'KAFKA';
+
+export const QUEUE_TECHNOLOGY_IDS: readonly QueueTechnologyId[] = ['SQS', 'RABBITMQ', 'KAFKA'];
+
+export function isQueueTechnology(technology: TechnologyId): technology is QueueTechnologyId {
+  return QUEUE_TECHNOLOGY_IDS.includes(technology as QueueTechnologyId);
+}
 
 const APP_SIZE: Record<ServerSize, { capacity: number; cost: number }> = {
   [ServerSize.SMALL]: { capacity: 100, cost: 100_000 },
@@ -111,19 +118,40 @@ export class InfrastructureState {
     );
   }
 
-  deployTechnology(technology: TechnologyId): void {
+  /**
+   * Deploys a technology and returns any technology nodes retired by the change.
+   *
+   * V1 product policy allows one active queue implementation at a time. The
+   * infrastructure still stores technologies as a collection so a future MSA
+   * topology can relax this policy and attach different queues to different
+   * services without replacing the entire model.
+   */
+  deployTechnology(technology: TechnologyId): readonly TechnologyId[] {
+    const retired: TechnologyId[] = [];
+
+    if (isQueueTechnology(technology)) {
+      for (const queue of this.queueTechnologies) {
+        if (queue === technology) continue;
+        this.technologies.delete(queue);
+        retired.push(queue);
+      }
+    }
+
     this.technologies.add(technology);
     if (technology === 'ALB') this.app.enableAlb();
+    return retired;
   }
 
   hasTechnology(technology: TechnologyId): boolean { return this.technologies.has(technology); }
   get deployedTechnologies(): readonly TechnologyId[] { return [...this.technologies]; }
 
-  get queueTechnology(): TechnologyId | null {
-    if (this.technologies.has('KAFKA')) return 'KAFKA';
-    if (this.technologies.has('RABBITMQ')) return 'RABBITMQ';
-    if (this.technologies.has('SQS')) return 'SQS';
-    return null;
+  get queueTechnologies(): readonly QueueTechnologyId[] {
+    return QUEUE_TECHNOLOGY_IDS.filter((technology) => this.technologies.has(technology));
+  }
+
+  /** V1 convenience accessor. queueTechnologies is intentionally collection-shaped for future MSA support. */
+  get queueTechnology(): QueueTechnologyId | null {
+    return this.queueTechnologies[0] ?? null;
   }
 
   get asyncCapacity(): number {

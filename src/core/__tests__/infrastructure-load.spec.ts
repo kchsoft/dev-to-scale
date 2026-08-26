@@ -59,6 +59,24 @@ describe('infrastructure and load', () => {
     expect(withInfra.asyncCapacity).toBe(300);
   });
 
+  it('keeps only one active queue in V1 and retires the previous queue on replacement', () => {
+    const infra = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+
+    infra.deployTechnology('SQS');
+    expect(infra.queueTechnologies).toEqual(['SQS']);
+    expect(infra.monthlyCost).toBeCloseTo(105_000 + 120_000 + 80_000);
+
+    const retired = infra.deployTechnology('KAFKA');
+
+    expect(retired).toEqual(['SQS']);
+    expect(infra.queueTechnologies).toEqual(['KAFKA']);
+    expect(infra.queueTechnology).toBe('KAFKA');
+    expect(infra.hasTechnology('SQS')).toBe(false);
+    expect(infra.hasTechnology('KAFKA')).toBe(true);
+    expect(infra.asyncCapacity).toBe(1_000);
+    expect(infra.monthlyCost).toBeCloseTo(105_000 + 120_000 + 350_000);
+  });
+
   it('keeps maximum prepared infrastructure viable around 25M DAU', () => {
     const infra = new InfrastructureState(
       new AppCluster('SPRING_BOOT', ServerSize.XLARGE, 10, true),
