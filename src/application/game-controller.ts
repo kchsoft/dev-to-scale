@@ -21,6 +21,7 @@ import {
   SkillRef,
   TECHNOLOGIES,
   TechnologySkillId,
+  TrafficSpikeResponse,
   skillRef,
 } from '../core';
 
@@ -335,6 +336,7 @@ export class GameController {
   addDatabaseReplica(): void { this.engine.addDatabaseReplica(); this.emit(); }
   fastTrackCurrentFeature(): void { this.engine.fastTrackCurrentFeature(); this.emit(); }
   startRefactor(): void { this.engine.startRefactor(); this.emit(); }
+  respondTrafficSpike(response: TrafficSpikeResponse): void { this.engine.respondToTrafficSpike(response); this.emit(); }
 
   private emit(): void {
     const view = this.getView();
@@ -361,7 +363,7 @@ export class GameController {
         id: `traffic-${after.day}`,
         kind: 'traffic',
         title: 'TRAFFIC SPIKE',
-        message: `바이럴 유입이 시작됐습니다. 약 ${after.growthEvent.remainingDays}일 동안 요청량 ×${after.growthEvent.trafficMultiplier.toFixed(1)} · DAU 성장 보너스 +${percent(after.growthEvent.growthModifier)}%p. 현재 병목을 보고 Scale / Cache / Queue를 준비하세요.`,
+        message: `바이럴 유입이 시작됐습니다. ${after.growthEvent.remainingDays}일 동안 유입 ×${after.growthEvent.trafficMultiplier.toFixed(1)}. 버티면 성장 기회를 모두 가져가지만 부하도 그대로 받고, Traffic Limit은 성장을 포기해 안정화하며, Emergency Burst는 비용을 내고 성장 기회를 유지합니다.`,
         autoPause: true,
       });
     }
@@ -528,11 +530,19 @@ export class GameController {
     const alerts: AlertView[] = [];
 
     if (snapshot.growthEvent?.type === 'VIRAL') {
+      const event = snapshot.growthEvent;
+      const responseText = event.response === 'PENDING'
+        ? '대응 선택 대기'
+        : event.response === 'THROTTLE'
+          ? `TRAFFIC LIMIT · 유효 부하 ×${event.loadMultiplier.toFixed(2)} · 성장 +${percent(event.growthModifier)}%p`
+          : event.response === 'BURST'
+            ? `EMERGENCY BURST · 유효 부하 ×${event.loadMultiplier.toFixed(2)} · 성장 +${percent(event.growthModifier)}%p`
+            : `RIDE THE WAVE · 유효 부하 ×${event.loadMultiplier.toFixed(1)} · 성장 +${percent(event.growthModifier)}%p`;
       alerts.push({
         id: 'viral-traffic',
-        tone: 'warning',
-        title: `Viral Traffic ×${snapshot.growthEvent.trafficMultiplier.toFixed(1)}`,
-        detail: `${snapshot.growthEvent.remainingDays}일 남음 · CPU/I/O/Queue/Storage Demand가 일시적으로 증가합니다.`,
+        tone: event.response === 'THROTTLE' ? 'info' : 'warning',
+        title: `Viral Traffic ×${event.trafficMultiplier.toFixed(1)}`,
+        detail: `${event.remainingDays}일 남음 · ${responseText}`,
       });
     }
 
@@ -695,7 +705,7 @@ export class GameController {
         ]
       : [];
     const after = LoadCalculator.calculate(snapshot.dau, features, clone, {
-      trafficMultiplier: snapshot.growthEvent?.trafficMultiplier ?? 1,
+      trafficMultiplier: snapshot.growthEvent?.loadMultiplier ?? 1,
     });
     if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
       return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
