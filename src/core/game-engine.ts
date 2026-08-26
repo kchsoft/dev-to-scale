@@ -3,9 +3,10 @@ import { ExperienceAccrualService } from './experience';
 import { FeatureDefinition, FeatureDevelopmentTask, FrameworkDefinition, FrameworkId } from './feature';
 import { FinanceAccount, MonthlyEconomyLedger, RevenuePolicy } from './finance';
 import { GrowthEvent, GrowthPolicy, RandomSource } from './growth';
-import { IncidentCandidate, IncidentGenerator, IncidentManager } from './incident-manager';
-import { DatabaseId, InfrastructureState, LoadCalculator, LoadSnapshot, ServerSize, TechnologyId } from './infrastructure';
-import { DeveloperProfile, FundamentalSkillId, LearningRules, LearningSlot, SkillRef, skillRef, TechnologySkillId } from './learning';
+import { IncidentGenerator, IncidentManager } from './incident-manager';
+import { IncidentTopology } from './incident-topology';
+import { DatabaseId, InfrastructureState, LoadCalculator, LoadSnapshot, ServerSize } from './infrastructure';
+import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
@@ -33,16 +34,6 @@ export interface GameSnapshot {
   load: LoadSnapshot;
   incidents: readonly { id: string; nodeId: string; severity: string; remainingResponseDays: number | null }[];
   lastMonthlyRevenue: number;
-}
-
-const DB_INCIDENT: Record<DatabaseId, { risk: 1 | 2 | 3 | 4 | 5; difficulty: number }> = {
-  POSTGRESQL: { risk: 2, difficulty: 5 },
-  MYSQL: { risk: 2, difficulty: 4 },
-  MONGODB: { risk: 3, difficulty: 4 },
-};
-
-function average(values: number[]): number {
-  return values.length === 0 ? 1 : values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 export class GameEngine {
@@ -126,25 +117,19 @@ export class GameEngine {
 
     if (this._launched) this.advanceGrowth();
     this._load = LoadCalculator.calculate(this._dau, this.activeFeaturesForLoad(), this.infrastructure);
-
     if (this._launched) this.maybeGenerateIncident();
-    const incidentDevelopmentModifier = this.incidents.developmentModifier;
 
+    this.recordMonthlyEconomy();
+
+    const incidentDevelopmentModifier = this.incidents.developmentModifier;
     this.learning.advanceDay(this.developer);
+
     const builtTechnology = this.technologyBuild.advanceDay(this.developer, incidentDevelopmentModifier);
     if (builtTechnology) this.infrastructure.deployTechnology(builtTechnology);
+
     this.incidents.advanceResponseDay();
-
-    if (this.featureTask) {
-      const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
-      this.featureTask.advanceDay({ frameworkLevel, incidentModifier: incidentDevelopmentModifier });
-      this.finishFeatureIfComplete();
-    }
+    this.advanceFeatureDevelopment(incidentDevelopmentModifier);
     this.autoStartRequirementIfEligible();
-
-    const revenueModifier = this.completedFeatureDefinitions.reduce((sum, feature) => sum + feature.revenueModifier, 0);
-    const aiActive = this.completedFeatureDefinitions.some((feature) => feature.id === 'AI_RECOMMENDATION');
-    this.monthlyLedger.recordDay(this._dau, revenueModifier, aiActive);
 
     if (this.growthEvent?.active) this.growthEvent.advanceDay();
     this._day += 1;
@@ -173,7 +158,7 @@ export class GameEngine {
     this.ensureRunning();
     const incident = this.incidents.incidents.find((candidate) => candidate.id === incidentId);
     if (!incident) throw new Error('Incident not found');
-    const context = this.nodeSkillContext(incident.nodeId);
+    const context = IncidentTopology.skillContext(incident.nodeId, this.incidentTopologyContext());
     this.incidents.startResponse(incidentId, context.proficiencyLevel, context.fundamentalAverage);
   }
 
@@ -214,6 +199,13 @@ export class GameEngine {
     this._dau = GrowthPolicy.nextDau(this._dau, result.totalModifier);
   }
 
+  private advanceFeatureDevelopment(incidentModifier: number): void {
+    if (!this.featureTask) return;
+    const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
+    this.featureTask.advanceDay({ frameworkLevel, incidentModifier });
+    this.finishFeatureIfComplete();
+  }
+
   private activeFeaturesForLoad(): FeatureDefinition[] {
     return this._launched ? [COMMUNITY_BOOTSTRAP, ...this.completedFeatureDefinitions] : [];
   }
@@ -244,6 +236,12 @@ export class GameEngine {
     );
   }
 
+  private recordMonthlyEconomy(): void {
+    const revenueModifier = this.completedFeatureDefinitions.reduce((sum, feature) => sum + feature.revenueModifier, 0);
+    const aiActive = this.completedFeatureDefinitions.some((feature) => feature.id === 'AI_RECOMMENDATION');
+    this.monthlyLedger.recordDay(this._dau, revenueModifier, aiActive);
+  }
+
   private settlePreviousMonthIfNeeded(): void {
     if (this._day <= 1 || (this._day - 1) % 30 !== 0) return;
     const month = this.monthlyLedger.snapshot();
@@ -266,85 +264,20 @@ export class GameEngine {
 
   private maybeGenerateIncident(): void {
     const incident = this.incidentGenerator.tryGenerate(
-      this.incidentCandidates(),
+      IncidentTopology.candidates(this.incidentTopologyContext()),
       this.incidents.activeNodeIds,
       this.random,
     );
     if (incident) this.incidents.add(incident);
   }
 
-  private incidentCandidates(): IncidentCandidate[] {
-    const candidates: IncidentCandidate[] = [];
-    const frameworkContext = this.nodeSkillContext(`framework:${this.config.frameworkId}`);
-    candidates.push({
-      nodeId: `framework:${this.config.frameworkId}`,
-      baseRisk: 2,
-      difficulty: 4,
-      loadRatio: this._load.appRatio,
-      ...frameworkContext,
-    });
-
-    const dbContext = this.nodeSkillContext(`database:${this.config.databaseId}`);
-    const dbIncident = DB_INCIDENT[this.config.databaseId];
-    candidates.push({
-      nodeId: `database:${this.config.databaseId}`,
-      baseRisk: dbIncident.risk,
-      difficulty: dbIncident.difficulty,
-      loadRatio: this._load.dbRatio,
-      ...dbContext,
-    });
-
-    for (const technologyId of this.infrastructure.deployedTechnologies) {
-      const definition = TECHNOLOGIES[technologyId];
-      const context = this.nodeSkillContext(`technology:${technologyId}`);
-      const loadRatio = this.technologyLoadRatio(technologyId);
-      candidates.push({
-        nodeId: `technology:${technologyId}`,
-        baseRisk: definition.incidentRisk,
-        difficulty: definition.incidentDifficulty,
-        loadRatio,
-        ...context,
-      });
-    }
-    return candidates;
-  }
-
-  private technologyLoadRatio(id: TechnologyId): number {
-    switch (id) {
-      case 'REDIS': return this._load.dbRatio;
-      case 'SQS':
-      case 'RABBITMQ':
-      case 'KAFKA': return this._load.asyncRatio;
-      case 'ALB': return this._load.appRatio;
-      case 'OBJECT_STORAGE': return this._load.storageRatio;
-    }
-  }
-
-  private nodeSkillContext(nodeId: string): { proficiencyLevel: number; fundamentalAverage: number } {
-    if (nodeId.startsWith('framework:')) {
-      const level = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
-      return {
-        proficiencyLevel: level,
-        fundamentalAverage: this.fundamentalAverage(['NETWORK', 'OS_RUNTIME', 'SOFTWARE_DESIGN']),
-      };
-    }
-    if (nodeId.startsWith('database:')) {
-      const databaseSkill = this.config.databaseId as TechnologySkillId;
-      return {
-        proficiencyLevel: this.developer.get(skillRef.technology(databaseSkill)).level,
-        fundamentalAverage: this.fundamentalAverage(['DATABASE', 'OS_RUNTIME', 'SOFTWARE_DESIGN']),
-      };
-    }
-
-    const technologyId = nodeId.split(':')[1] as BuildableTechnologyId;
-    const fundamentals = Object.keys(TECHNOLOGIES[technologyId].prerequisites) as FundamentalSkillId[];
+  private incidentTopologyContext() {
     return {
-      proficiencyLevel: this.developer.get(skillRef.technology(technologyId)).level,
-      fundamentalAverage: this.fundamentalAverage(fundamentals),
+      frameworkId: this.config.frameworkId,
+      databaseId: this.config.databaseId,
+      developer: this.developer,
+      infrastructure: this.infrastructure,
+      load: this._load,
     };
-  }
-
-  private fundamentalAverage(ids: FundamentalSkillId[]): number {
-    return average(ids.map((id) => this.developer.get(skillRef.fundamental(id)).level));
   }
 }
