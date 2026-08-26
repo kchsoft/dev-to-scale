@@ -47,6 +47,7 @@ export class GameClock {
   resumeAfterAutoPause(): void {
     const speed = this.resumeSpeedAfterAutoPause;
     this.resumeSpeedAfterAutoPause = 0;
+    if (this.controller.getView().hud.status !== 'RUNNING') return;
     if (speed !== 0) this.setSpeed(speed);
   }
 
