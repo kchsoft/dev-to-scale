@@ -39,15 +39,29 @@ describe('application layer', () => {
     expect(controller.getView().technologies.find((tech) => tech.id === 'REDIS')?.available).toBe(true);
   });
 
-  it('keeps x1/x2 timing in GameClock while the domain only advances one day at a time', () => {
+  it('keeps x1/x2 timing and visible day progress in GameClock', () => {
     vi.useFakeTimers();
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 1 });
     const clock = new GameClock(controller);
 
     expect(controller.getView().hud.day).toBe(1);
+    expect(clock.dayProgress).toBe(0);
+
     clock.setSpeed(1);
-    vi.advanceTimersByTime(10_000);
+    vi.advanceTimersByTime(5_000);
+    expect(clock.dayProgress).toBeCloseTo(0.5, 1);
+    expect(controller.getView().hud.day).toBe(1);
+
+    clock.pause();
+    const pausedProgress = clock.dayProgress;
+    vi.advanceTimersByTime(5_000);
+    expect(clock.dayProgress).toBeCloseTo(pausedProgress);
+    expect(controller.getView().hud.day).toBe(1);
+
+    clock.setSpeed(1);
+    vi.advanceTimersByTime(5_000);
     expect(controller.getView().hud.day).toBe(2);
+    expect(clock.dayProgress).toBeCloseTo(0);
 
     clock.setSpeed(2);
     vi.advanceTimersByTime(5_000);
