@@ -6,10 +6,18 @@ import { FinanceAccount, MonthlyEconomyLedger, RevenuePolicy } from './finance';
 import { GrowthEvent, GrowthPolicy, RandomSource } from './growth';
 import { IncidentGenerator, IncidentManager } from './incident-manager';
 import { IncidentTopology } from './incident-topology';
-import { InfrastructureState, LoadCalculator, LoadSnapshot, ServerSize } from './infrastructure';
+import {
+  InfrastructureState,
+  LoadCalculationContext,
+  LoadCalculator,
+  LoadSnapshot,
+  ServerSize,
+  TechnologyId,
+} from './infrastructure';
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
+import { requestNodeForIncident, RequestNodeKind, trafficHealthForSeverity } from './request-flow';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
 
 export type GameStatus = 'RUNNING' | 'BANKRUPT' | 'WON';
@@ -22,6 +30,16 @@ export interface GameEngineConfig {
   random?: RandomSource;
 }
 
+export interface LastMonthlySettlement {
+  month: number;
+  revenue: number;
+  infrastructureCost: number;
+  aiCost: number;
+  totalCost: number;
+  profit: number;
+  cashAfter: number;
+}
+
 export interface GameSnapshot {
   day: number;
   status: GameStatus;
@@ -29,12 +47,32 @@ export interface GameSnapshot {
   dau: number;
   cash: number;
   completedFeatures: readonly string[];
-  currentFeature: null | { id: string; progress: number; requiredWork: number };
+  currentFeature: null | {
+    id: string;
+    progress: number;
+    requiredWork: number;
+    elapsedDays: number;
+    estimatedRemainingDays: number;
+  };
   currentLearning: null | { id: string; targetLevel: number; studyDays: number };
-  currentTechnologyBuild: null | { id: string; progress: number; requiredWork: number };
+  currentTechnologyBuild: null | {
+    id: string;
+    progress: number;
+    requiredWork: number;
+    elapsedDays: number;
+    estimatedRemainingDays: number;
+  };
   load: LoadSnapshot;
-  incidents: readonly { id: string; nodeId: string; severity: string; remainingResponseDays: number | null }[];
+  incidents: readonly {
+    id: string;
+    nodeId: string;
+    severity: string;
+    remainingResponseDays: number | null;
+    totalResponseDays: number | null;
+    elapsedResponseDays: number | null;
+  }[];
   lastMonthlyRevenue: number;
+  lastSettlement: LastMonthlySettlement | null;
 }
 
 export class GameEngine {
@@ -57,6 +95,7 @@ export class GameEngine {
   private _launched = false;
   private _status: GameStatus = 'RUNNING';
   private _lastMonthlyRevenue = 0;
+  private _lastSettlement: LastMonthlySettlement | null = null;
   private _load: LoadSnapshot;
 
   constructor(readonly config: GameEngineConfig) {
@@ -65,7 +104,7 @@ export class GameEngine {
     this.progression = new CommunityProgression(config.seed);
     this.finance = new FinanceAccount(config.startingCash ?? 3_000_000);
     this.featureTask = this.createFeatureTask(COMMUNITY_BOOTSTRAP);
-    this._load = LoadCalculator.calculate(0, [], this.infrastructure);
+    this._load = LoadCalculator.calculate(0, [], this.infrastructure, this.loadCalculationContext());
   }
 
   get day(): number { return this._day; }
@@ -77,6 +116,9 @@ export class GameEngine {
   get snapshot(): GameSnapshot {
     const learningTask = this.learning.current;
     const buildTask = this.technologyBuild.current;
+    const buildTechnologyLevel = buildTask
+      ? this.developer.get(skillRef.technology(buildTask.definition.id)).level
+      : 1;
     return {
       day: this._day,
       status: this._status,
@@ -85,13 +127,25 @@ export class GameEngine {
       cash: this.finance.cash,
       completedFeatures: this.completedFeatureDefinitions.map((feature) => feature.id),
       currentFeature: this.featureTask
-        ? { id: this.featureTask.feature.id, progress: this.featureTask.completedWork, requiredWork: this.featureTask.requiredWork }
+        ? {
+            id: this.featureTask.feature.id,
+            progress: this.featureTask.completedWork,
+            requiredWork: this.featureTask.requiredWork,
+            elapsedDays: this.featureTask.elapsedDays,
+            estimatedRemainingDays: this.estimatedFeatureRemainingDays(this.featureTask),
+          }
         : null,
       currentLearning: learningTask
         ? { id: learningTask.skill.id, targetLevel: learningTask.targetLevel, studyDays: learningTask.requiredStudyDays }
         : null,
       currentTechnologyBuild: buildTask
-        ? { id: buildTask.definition.id, progress: buildTask.completedWork, requiredWork: buildTask.definition.buildWork }
+        ? {
+            id: buildTask.definition.id,
+            progress: buildTask.completedWork,
+            requiredWork: buildTask.definition.buildWork,
+            elapsedDays: buildTask.elapsedDays,
+            estimatedRemainingDays: buildTask.estimatedRemainingDays(buildTechnologyLevel, this.incidents.developmentModifier),
+          }
         : null,
       load: this._load,
       incidents: this.incidents.incidents.map((incident) => ({
@@ -99,15 +153,15 @@ export class GameEngine {
         nodeId: incident.nodeId,
         severity: incident.severity,
         remainingResponseDays: incident.remainingResponseDays,
+        totalResponseDays: incident.totalResponseDays,
+        elapsedResponseDays: incident.elapsedResponseDays,
       })),
       lastMonthlyRevenue: this._lastMonthlyRevenue,
+      lastSettlement: this._lastSettlement,
     };
   }
 
   advanceDay(): GameSnapshot {
-    if (this._status !== 'RUNNING') return this.snapshot;
-
-    this.settlePreviousMonthIfNeeded();
     if (this._status !== 'RUNNING') return this.snapshot;
 
     ExperienceAccrualService.recordDay(this.developer, {
@@ -116,13 +170,27 @@ export class GameEngine {
       technologies: this.infrastructure.deployedTechnologies,
     });
 
+    // Growth uses the previous day's observed availability and capacity.
     if (this._launched) this.advanceGrowth();
-    this._load = LoadCalculator.calculate(this._dau, this.activeFeaturesForLoad(), this.infrastructure);
+    this._load = LoadCalculator.calculate(
+      this._dau,
+      this.activeFeaturesForLoad(),
+      this.infrastructure,
+      this.loadCalculationContext(),
+    );
     if (this._launched) this.maybeGenerateIncident();
 
     // Record the current day's economy before completing new work so newly
     // released features/technologies begin affecting the following day.
     this.recordMonthlyEconomy();
+
+    // The cash settlement happens as D30 finishes. The next snapshot therefore
+    // enters the next month at D1 with the cash change already visible.
+    this.settleMonthIfEnding();
+    if (this._status !== 'RUNNING') {
+      this._day += 1;
+      return this.snapshot;
+    }
 
     const incidentDevelopmentModifier = this.incidents.developmentModifier;
     this.learning.advanceDay(this.developer);
@@ -197,11 +265,19 @@ export class GameEngine {
   private advanceGrowth(): void {
     this.growthEvent = GrowthPolicy.maybeStartEvent(this.growthEvent, this.random);
     const phase = this.progression.finished ? 3 : this.progression.currentRequirement.phase;
+    const maxLoadRatio = Math.max(
+      this._load.appRatio,
+      this._load.dbRatio,
+      this._load.asyncRatio,
+      this._load.storageRatio,
+    );
     const result = GrowthPolicy.calculate({
       phase,
       completedFeatureCount: this.completedFeatureDefinitions.length,
       event: this.growthEvent,
       incidents: this.incidents.severities,
+      failureRate: this._load.failureRate,
+      maxLoadRatio,
       random: this.random,
     });
     this._dau = GrowthPolicy.nextDau(this._dau, result.totalModifier);
@@ -212,6 +288,14 @@ export class GameEngine {
     const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
     this.featureTask.advanceDay({ frameworkLevel, incidentModifier });
     this.finishFeatureIfComplete();
+  }
+
+  private estimatedFeatureRemainingDays(task: FeatureDevelopmentTask): number {
+    const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
+    const currentDailyProgress = task.framework.productivity(frameworkLevel, task.feature.complexity)
+      * this.incidents.developmentModifier;
+    if (currentDailyProgress <= 0) return 0;
+    return Math.max(0, Math.ceil((task.requiredWork - task.completedWork) / currentDailyProgress));
   }
 
   private createFeatureTask(feature: FeatureDefinition): FeatureDevelopmentTask {
@@ -253,15 +337,25 @@ export class GameEngine {
     this.monthlyLedger.recordDay(this._dau, revenueModifier, aiActive);
   }
 
-  private settlePreviousMonthIfNeeded(): void {
-    if (this._day <= 1 || (this._day - 1) % 30 !== 0) return;
+  private settleMonthIfEnding(): void {
+    if (this._day % 30 !== 0) return;
     const month = this.monthlyLedger.snapshot();
+    const infrastructureCost = this.infrastructure.monthlyCost;
     const settlement = this.finance.settleMonth({
       revenue: month.revenue,
-      infrastructureCost: this.infrastructure.monthlyCost,
+      infrastructureCost,
       aiCost: month.aiCost,
     });
     this._lastMonthlyRevenue = month.revenue;
+    this._lastSettlement = {
+      month: Math.floor((this._day - 1) / 30) + 1,
+      revenue: settlement.revenue,
+      infrastructureCost,
+      aiCost: month.aiCost,
+      totalCost: settlement.totalCost,
+      profit: settlement.profit,
+      cashAfter: settlement.cash,
+    };
     this.monthlyLedger.reset();
 
     if (settlement.bankrupt) {
@@ -280,6 +374,27 @@ export class GameEngine {
       this.random,
     );
     if (incident) this.incidents.add(incident);
+  }
+
+  private loadCalculationContext(): LoadCalculationContext {
+    const technologyProficiencyLevels: Partial<Record<TechnologyId, number>> = {};
+    for (const technology of this.infrastructure.deployedTechnologies) {
+      technologyProficiencyLevels[technology] = this.developer.get(skillRef.technology(technology)).level;
+    }
+
+    const nodeHealth: Partial<Record<RequestNodeKind, number>> = {};
+    for (const incident of this.incidents.incidents) {
+      const node = requestNodeForIncident(incident.nodeId);
+      if (!node) continue;
+      nodeHealth[node] = trafficHealthForSeverity(incident.severity);
+    }
+
+    return {
+      appProficiencyLevel: this.developer.get(skillRef.framework(this.config.frameworkId)).level,
+      databaseProficiencyLevel: this.developer.get(skillRef.technology(this.config.databaseId)).level,
+      technologyProficiencyLevels,
+      nodeHealth,
+    };
   }
 
   private incidentTopologyContext() {

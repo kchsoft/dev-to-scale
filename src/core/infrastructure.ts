@@ -1,5 +1,6 @@
 import { DatabaseDefinition, DatabaseId } from './database';
 import { FeatureDefinition, FrameworkDefinition, FrameworkId } from './feature';
+import { RequestFlowResult, RequestFlowSimulator, RequestNodeKind } from './request-flow';
 import { BuildableTechnologyId, TECHNOLOGIES } from './technology';
 
 export enum ServerSize {
@@ -38,6 +39,24 @@ const ASYNC_CAPACITY: Partial<Record<TechnologyId, number>> = {
   RABBITMQ: 500,
   KAFKA: 1_000,
 };
+
+const CAPACITY_TUNING: Record<number, number> = {
+  1: 1,
+  2: 1.02,
+  3: 1.04,
+  4: 1.06,
+  5: 1.08,
+  6: 1.10,
+  7: 1.13,
+  8: 1.16,
+  9: 1.20,
+  10: 1.25,
+};
+
+export function capacityTuningMultiplier(level: number): number {
+  const normalized = Math.max(1, Math.min(10, Math.round(level)));
+  return CAPACITY_TUNING[normalized];
+}
 
 export class AppCluster {
   private albAvailable: boolean;
@@ -119,12 +138,8 @@ export class InfrastructureState {
   }
 
   /**
-   * Deploys a technology and returns any technology nodes retired by the change.
-   *
-   * V1 product policy allows one active queue implementation at a time. The
-   * infrastructure still stores technologies as a collection so a future MSA
-   * topology can relax this policy and attach different queues to different
-   * services without replacing the entire model.
+   * V1 allows one active queue implementation. The collection-shaped model is
+   * intentionally retained so a future MSA topology can attach queues per service.
    */
   deployTechnology(technology: TechnologyId): readonly TechnologyId[] {
     const retired: TechnologyId[] = [];
@@ -149,7 +164,6 @@ export class InfrastructureState {
     return QUEUE_TECHNOLOGY_IDS.filter((technology) => this.technologies.has(technology));
   }
 
-  /** V1 convenience accessor. queueTechnologies is intentionally collection-shaped for future MSA support. */
   get queueTechnology(): QueueTechnologyId | null {
     return this.queueTechnologies[0] ?? null;
   }
@@ -168,11 +182,21 @@ export class InfrastructureState {
   }
 }
 
+export interface LoadCalculationContext {
+  appProficiencyLevel?: number;
+  databaseProficiencyLevel?: number;
+  technologyProficiencyLevels?: Partial<Record<TechnologyId, number>>;
+  nodeHealth?: Partial<Record<RequestNodeKind, number>>;
+}
+
 export interface LoadSnapshot {
   appDemand: number;
   dbDemand: number;
   asyncDemand: number;
   storageDemand: number;
+  rawAppCapacity: number;
+  rawDbCapacity: number;
+  rawAsyncCapacity: number;
   appCapacity: number;
   dbCapacity: number;
   asyncCapacity: number;
@@ -181,6 +205,8 @@ export interface LoadSnapshot {
   dbRatio: number;
   asyncRatio: number;
   storageRatio: number;
+  failureRate: number;
+  requestFlows: readonly RequestFlowResult[];
 }
 
 const LOAD_CURVE = {
@@ -195,47 +221,102 @@ function demand(weight: number, dau: number, curve: { coefficient: number; expon
   return weight * curve.coefficient * Math.pow(dau / 1_000, curve.exponent);
 }
 
+function queueRequirement(feature: FeatureDefinition): 'REQUIRED' | 'OPTIONAL' | null {
+  const queueStep = feature.requestRoute.find((step) => step.node === 'QUEUE');
+  return queueStep ? queueStep.requirement ?? 'REQUIRED' : null;
+}
+
 export class LoadCalculator {
-  static calculate(dau: number, features: readonly FeatureDefinition[], infrastructure: InfrastructureState): LoadSnapshot {
-    const weights = features.reduce(
-      (sum, feature) => ({
-        app: sum.app + feature.load.app,
-        db: sum.db + feature.load.db,
-        async: sum.async + feature.load.async,
-        storage: sum.storage + feature.load.storage,
-      }),
-      { app: 0, db: 0, async: 0, storage: 0 },
-    );
-
-    const hasReadHeavy = features.some((feature) => feature.tags.has('READ_HEAVY'));
-    const hasEventHeavy = features.some((feature) => feature.tags.has('EVENT_HEAVY'));
-    const rawAsync = demand(weights.async, dau, LOAD_CURVE.async);
+  static calculate(
+    dau: number,
+    features: readonly FeatureDefinition[],
+    infrastructure: InfrastructureState,
+    context: LoadCalculationContext = {},
+  ): LoadSnapshot {
     const queue = infrastructure.queueTechnology;
-    const asyncDemand = queue === 'KAFKA' && hasEventHeavy ? rawAsync * 0.85 : rawAsync;
-    const appDemand = demand(weights.app, dau, LOAD_CURVE.app) + (queue ? 0 : rawAsync);
+    const requestFlows = features.map((feature) => RequestFlowSimulator.simulate(feature, {
+      prependAlb: infrastructure.hasTechnology('ALB'),
+      available: {
+        ALB: infrastructure.hasTechnology('ALB'),
+        APP: true,
+        DB: true,
+        CACHE: infrastructure.hasTechnology('REDIS'),
+        QUEUE: Boolean(queue),
+        STORAGE: true,
+        AI: true,
+      },
+      health: context.nodeHealth,
+    }));
 
-    let dbDemand = demand(weights.db, dau, LOAD_CURVE.db);
-    if (infrastructure.hasTechnology('REDIS')) dbDemand *= hasReadHeavy ? 0.7 : 0.75;
+    let appDemand = 0;
+    let dbDemand = 0;
+    let asyncDemand = 0;
+    let storageDemand = 0;
+    let weightedSuccess = 0;
+    let totalTrafficWeight = 0;
 
-    const storageDemand = demand(weights.storage, dau, LOAD_CURVE.storage);
-    const appCapacity = infrastructure.app.capacity;
-    const dbCapacity = infrastructure.database.capacity;
-    const asyncCapacity = infrastructure.asyncCapacity;
+    features.forEach((feature, index) => {
+      const flow = requestFlows[index];
+      const appBase = demand(feature.load.app, dau, LOAD_CURVE.app);
+      const dbBase = demand(feature.load.db, dau, LOAD_CURVE.db);
+      const asyncBase = demand(feature.load.async, dau, LOAD_CURVE.async);
+      const storageBase = demand(feature.load.storage, dau, LOAD_CURVE.storage);
+
+      appDemand += appBase * flow.arrivalRatio('APP');
+      dbDemand += dbBase * flow.arrivalRatio('DB');
+      storageDemand += storageBase * flow.arrivalRatio('STORAGE');
+
+      const requirement = queueRequirement(feature);
+      if (queue) {
+        const kafkaModifier = queue === 'KAFKA' && feature.tags.has('EVENT_HEAVY') ? 0.85 : 1;
+        asyncDemand += asyncBase * flow.arrivalRatio('QUEUE') * kafkaModifier;
+      } else if (requirement === 'OPTIONAL') {
+        appDemand += asyncBase * flow.arrivalRatio('APP');
+      }
+
+      const trafficWeight = Math.max(
+        1,
+        feature.load.app + feature.load.db + feature.load.async + feature.load.storage,
+      );
+      totalTrafficWeight += trafficWeight;
+      weightedSuccess += trafficWeight * flow.successRatio;
+    });
+
+    if (infrastructure.hasTechnology('REDIS')) {
+      const hasReadHeavy = features.some((feature) => feature.tags.has('READ_HEAVY'));
+      const cacheHealth = Math.max(0, Math.min(1, context.nodeHealth?.CACHE ?? 1));
+      const reduction = (hasReadHeavy ? 0.30 : 0.25) * cacheHealth;
+      dbDemand *= 1 - reduction;
+    }
+
+    const rawAppCapacity = infrastructure.app.capacity;
+    const rawDbCapacity = infrastructure.database.capacity;
+    const rawAsyncCapacity = infrastructure.asyncCapacity;
+    const appCapacity = rawAppCapacity * capacityTuningMultiplier(context.appProficiencyLevel ?? 1);
+    const dbCapacity = rawDbCapacity * capacityTuningMultiplier(context.databaseProficiencyLevel ?? 1);
+    const queueLevel = queue ? context.technologyProficiencyLevels?.[queue] ?? 1 : 1;
+    const asyncCapacity = rawAsyncCapacity * capacityTuningMultiplier(queueLevel);
     const storageCapacity = infrastructure.storageCapacity;
+    const failureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
 
     return {
       appDemand,
       dbDemand,
-      asyncDemand: queue ? asyncDemand : 0,
+      asyncDemand,
       storageDemand,
+      rawAppCapacity,
+      rawDbCapacity,
+      rawAsyncCapacity,
       appCapacity,
       dbCapacity,
       asyncCapacity,
       storageCapacity,
-      appRatio: appDemand / appCapacity,
-      dbRatio: dbDemand / dbCapacity,
+      appRatio: appCapacity > 0 ? appDemand / appCapacity : 0,
+      dbRatio: dbCapacity > 0 ? dbDemand / dbCapacity : 0,
       asyncRatio: queue && asyncCapacity > 0 ? asyncDemand / asyncCapacity : 0,
-      storageRatio: storageDemand / storageCapacity,
+      storageRatio: storageCapacity > 0 ? storageDemand / storageCapacity : 0,
+      failureRate: Math.max(0, Math.min(1, failureRate)),
+      requestFlows,
     };
   }
 }

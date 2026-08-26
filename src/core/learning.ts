@@ -226,7 +226,7 @@ export class LearningRules {
 }
 
 export class LearningTask {
-  private elapsedStudyDays = 0;
+  private _elapsedStudyDays = 0;
 
   constructor(
     readonly skill: SkillRef,
@@ -235,9 +235,12 @@ export class LearningTask {
     readonly cost: number,
   ) {}
 
+  get elapsedStudyDays(): number { return this._elapsedStudyDays; }
+  get progress(): number { return this.requiredStudyDays === 0 ? 1 : this._elapsedStudyDays / this.requiredStudyDays; }
+
   advanceDay(): boolean {
-    this.elapsedStudyDays += 1;
-    return this.elapsedStudyDays >= this.requiredStudyDays;
+    this._elapsedStudyDays += 1;
+    return this._elapsedStudyDays >= this.requiredStudyDays;
   }
 }
 

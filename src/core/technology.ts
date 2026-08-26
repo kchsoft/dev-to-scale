@@ -68,18 +68,32 @@ const BUILD_PRODUCTIVITY: Record<number, number> = {
   6: 1.08, 7: 1.16, 8: 1.25, 9: 1.35, 10: 1.5,
 };
 
+export function technologyBuildProductivity(level: number): number {
+  const normalized = Math.max(1, Math.min(10, Math.round(level)));
+  return BUILD_PRODUCTIVITY[normalized];
+}
+
 export class TechnologyBuildTask {
   private _completedWork = 0;
+  private _elapsedDays = 0;
 
   constructor(readonly definition: TechnologyDefinition) {}
 
   get completedWork(): number { return this._completedWork; }
+  get elapsedDays(): number { return this._elapsedDays; }
   get completed(): boolean { return this._completedWork >= this.definition.buildWork; }
+
+  estimatedRemainingDays(technologyLevel: number, incidentModifier: number): number {
+    const dailyProgress = technologyBuildProductivity(technologyLevel) * incidentModifier;
+    if (dailyProgress <= 0) return 0;
+    return Math.max(0, Math.ceil((this.definition.buildWork - this._completedWork) / dailyProgress));
+  }
 
   advanceDay(technologyLevel: number, incidentModifier: number): number {
     if (this.completed) return 0;
-    const progress = BUILD_PRODUCTIVITY[technologyLevel] * incidentModifier;
+    const progress = technologyBuildProductivity(technologyLevel) * incidentModifier;
     this._completedWork = Math.min(this.definition.buildWork, this._completedWork + progress);
+    this._elapsedDays += 1;
     return progress;
   }
 }

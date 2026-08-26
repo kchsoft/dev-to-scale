@@ -1,0 +1,165 @@
+/* Density/readability overrides for the A2 dark game UI. */
+
+.hud {
+  height: 84px;
+  padding: 6px 8px 10px;
+  gap: 6px;
+}
+.hud-status { min-width: 164px; padding: 0 11px; gap: 9px; }
+.hud-status strong { font-size: 11px; }
+.hud-status small { font-size: 9px; }
+.hud-metrics { grid-template-columns: 1.05fr .8fr .9fr 1.05fr 1.05fr; }
+.hud-metrics > div { padding: 8px 10px; }
+.hud-metrics span, .profit-chip span { font-size: 9px; letter-spacing: .07em; }
+.hud-metrics strong { margin-top: 4px; font-size: 16px; }
+.hud-metrics small, .profit-chip small { margin-top: 3px; color: #91a4b5; font-size: 9px; line-height: 1.2; white-space: nowrap; }
+.profit-chip { min-width: 150px; padding: 0 11px; }
+.profit-chip strong { font-size: 15px; }
+.clock-controls { padding: 4px; gap: 3px; }
+.clock-controls button { height: 40px; min-width: 42px; font-size: 11px; }
+.day-progress-shell {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 2px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #13202b;
+  box-shadow: inset 0 0 0 1px rgba(72,102,126,.28);
+}
+.day-progress-shell > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3d9cff, #43d9d1);
+  box-shadow: 0 0 12px rgba(67,217,209,.5);
+  transition: width 100ms linear;
+}
+
+.main-shell { grid-template-columns: 68px minmax(0,1fr); min-height: calc(100vh - 84px); }
+.side-nav { top: 84px; height: calc(100vh - 84px); padding: 8px 6px; }
+.side-nav button { width: 52px; min-height: 51px; }
+.side-nav button small { font-size: 9px; }
+.workspace { padding: 7px; }
+.dashboard-layout { grid-template-columns: 244px minmax(500px,1fr) 280px; gap: 7px; min-height: calc(100vh - 98px); }
+.panel-title { height: 50px; padding: 0 12px; }
+.panel-title span { font-size: 9px; }
+.panel-title strong { font-size: 13px; }
+.panel-title > b { font-size: 8px; }
+
+.work-slot-list { padding: 7px; gap: 5px; }
+.work-slot { min-height: 91px; padding: 9px 10px; }
+.work-slot span { font-size: 8px; }
+.work-slot strong { margin-top: 7px; font-size: 12px; }
+.work-slot > small { margin-top: 3px; color: #92a5b6; font-size: 10px; line-height: 1.35; }
+.progress-track { height: 5px; margin-top: 7px; }
+.progress-percent { display: block; margin-top: 4px; color: var(--cyan); font: 800 9px/1 ui-monospace, monospace; font-style: normal; text-align: right; }
+.runway-box { margin: 4px 7px 7px; padding: 10px; gap: 4px; }
+.runway-box span { font-size: 8px; }
+.runway-box strong { font-size: 12px; }
+.runway-box small { font-size: 9px; line-height: 1.35; }
+
+.service-map { grid-template-rows: 50px auto auto auto; }
+.architecture-canvas { min-height: 475px; padding-top: 25px; }
+.users-node { height: 61px; }
+.infra-node { min-height: 100px; padding: 10px; }
+.infra-node > strong { margin-top: 7px; font-size: 13px; }
+.infra-node > small { font-size: 9px; }
+.node-head small { font-size: 8px; }
+.node-load em { font-size: 10px; }
+.cache-node { top: 350px; }
+.queue-node { top: 202px; }
+.storage-node { top: 286px; }
+.empty-node.cache-node { top: 363px; }
+.empty-node.queue-node { top: 214px; }
+.empty-node.storage-node { top: 299px; }
+.load-strip { padding: 7px; gap: 5px; }
+.load-mini { padding: 7px 8px; }
+.load-mini span { font-size: 8px; }
+.load-mini strong { font-size: 11px; }
+
+.alert-list { padding: 7px; gap: 5px; }
+.alert-card { min-height: 66px; padding: 8px; grid-template-columns: 26px 1fr 10px; }
+.alert-card strong { font-size: 10px; }
+.alert-card small { font-size: 9px; line-height: 1.4; }
+
+.page-panel { min-height: calc(100vh - 98px); padding: 20px; }
+.page-heading { margin-bottom: 20px; }
+.page-heading > span { font-size: 10px; }
+.page-heading h2 { margin: 5px 0 6px; font-size: 27px; }
+.page-heading p { font-size: 13px; line-height: 1.5; }
+.technology-groups { gap: 17px; }
+.technology-grid { gap: 6px; }
+.technology-card { min-height: 194px; padding: 12px; }
+.technology-card > strong { margin-top: 10px; font-size: 15px; }
+.technology-card > p { margin: 5px 0 10px; min-height: 30px; font-size: 11px; line-height: 1.4; }
+.tech-top em { font-size: 8px; }
+.tech-numbers { gap: 4px; }
+.tech-numbers span { padding: 7px 6px; }
+.tech-numbers small { font-size: 8px; }
+.tech-numbers b { font-size: 10px; }
+.tech-action { margin-top: 9px; padding-top: 8px; font-size: 9px; }
+.inline-progress { grid-column: 1 / -1; margin-top: 8px; width: 100%; }
+.inline-progress .progress-track { margin-top: 0; }
+.inline-progress small { display: block; margin-top: 5px; color: var(--cyan); font-size: 9px; line-height: 1.35; }
+
+.skill-tree { gap: 19px; }
+.skill-lane-title { margin-bottom: 7px; }
+.skill-node-grid { gap: 6px; }
+.skill-node { min-height: 124px; padding: 10px; gap: 6px; }
+.skill-node strong { font-size: 11px; }
+.skill-node em { font-size: 9px; }
+.skill-exp small { font-size: 8px; }
+.skill-node footer { font-size: 8px; }
+.skill-node footer span { color: #a8b8c5; }
+
+.phase-board { gap: 10px; }
+.phase-lane > header { width: 126px; padding: 12px; min-height: 132px; }
+.phase-lane > div { padding: 7px; gap: 5px; }
+.feature-card { min-height: 120px; padding: 10px; gap: 4px; }
+.feature-card strong { font-size: 11px; }
+.feature-card small { font-size: 9px; }
+.feature-card i { font-size: 7px; }
+
+.report-grid { gap: 6px; }
+.report-grid article { min-height: 135px; padding: 14px; }
+.report-grid span { font-size: 9px; }
+.report-grid strong { margin-top: 12px; font-size: 23px; }
+.report-grid small { font-size: 10px; }
+.settlement-summary { margin-top: 8px; border: 1px solid #2d4355; border-radius: 10px; background: #0a1219; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; align-items: center; }
+.settlement-summary > span { color: var(--blue); font: 800 9px/1 ui-monospace, monospace; letter-spacing: .09em; }
+.settlement-summary > strong { font-size: 17px; }
+.settlement-summary > small { grid-column: 1 / 3; color: #9aacba; font-size: 10px; }
+
+.node-drawer { padding: 14px; }
+.drawer-load { padding: 15px 0; }
+.drawer-section { padding: 15px 0; }
+.drawer-section > label { font-size: 9px; }
+.size-grid { gap: 4px; }
+.size-grid button { padding: 9px 3px; }
+.size-grid small { font-size: 7px; }
+.size-grid button em { margin-top: 3px; color: var(--green); font: 700 8px/1.15 ui-monospace, monospace; font-style: normal; }
+.scale-row { margin-top: 10px; gap: 8px; }
+.scale-row span { font-size: 8px; }
+.scale-row small { margin-top: 3px; color: #9aabba; font-size: 9px; }
+.scale-row button { font-size: 9px; white-space: nowrap; }
+.scale-row button:disabled { opacity: .45; cursor: not-allowed; }
+.replica-add { width: 100%; margin-top: 10px; border: 1px solid #285a82; background: #0d2030; color: #9dd0ff; padding: 9px 10px; border-radius: 7px; cursor: pointer; font-size: 9px; font-weight: 750; }
+.drawer-section p { font-size: 9px; }
+.event-close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: #0a1118; color: var(--muted); cursor: pointer; z-index: 2; }
+.toast { max-width: min(760px, calc(100vw - 30px)); font-size: 11px; line-height: 1.4; }
+
+@media (max-width: 1180px) {
+  .dashboard-layout { grid-template-columns: 230px minmax(470px,1fr); }
+}
+
+@media (max-width: 820px) {
+  .hud { height: auto; padding-bottom: 10px; }
+  .hud-metrics { grid-template-columns: repeat(2,1fr); }
+  .profit-chip { min-height: 54px; }
+  .day-progress-shell { bottom: 1px; }
+  .workspace { padding: 6px 6px 76px; }
+  .architecture-canvas { min-height: 475px; }
+  .page-panel { padding: 14px; }
+}

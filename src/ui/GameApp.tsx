@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DatabaseId, FrameworkId, ServerSize, SkillRef } from '../core';
 import { GameClock, GameSpeed } from '../application/game-clock';
 import {
@@ -8,6 +8,7 @@ import {
   GameController,
   GameEventView,
   GameView,
+  RequestFlowView,
   ServiceNodeView,
   SkillNodeView,
   TechnologyOptionView,
@@ -32,6 +33,10 @@ const SIZE_LABEL: Record<ServerSize, string> = { SMALL: 'S', MEDIUM: 'M', LARGE:
 
 const CATEGORY_LABEL: Record<SkillRef['category'], string> = {
   fundamental: 'FUNDAMENTALS', language: 'LANGUAGE', framework: 'FRAMEWORK', technology: 'TECHNOLOGY',
+};
+
+const REQUEST_NODE_LABEL: Record<string, string> = {
+  ALB: 'ALB', APP: 'APP', DB: 'DB', CACHE: 'REDIS', QUEUE: 'MQ', STORAGE: 'STORAGE', AI: 'AI',
 };
 
 function money(value: number): string {
@@ -59,6 +64,7 @@ export default function GameApp() {
   const [controller, setController] = useState<GameController | null>(null);
   const [view, setView] = useState<GameView | null>(null);
   const [speed, setSpeedState] = useState<GameSpeed>(0);
+  const [dayProgress, setDayProgress] = useState(0);
   const [tab, setTab] = useState<'service' | 'features' | 'technology' | 'learning' | 'report'>('service');
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [events, setEvents] = useState<GameEventView[]>([]);
@@ -69,14 +75,18 @@ export default function GameApp() {
     if (!controller) return;
     const unsubscribe = controller.subscribe(setView);
     const clock = new GameClock(controller, (incoming) => {
+      const settlement = incoming.find((event) => event.kind === 'settlement');
+      if (settlement) setToast(`${settlement.title} · ${settlement.message}`);
       const blocking = incoming.filter((event) => event.autoPause);
       if (blocking.length) setEvents((current) => [...current, ...blocking]);
     });
     const unsubscribeClock = clock.subscribe(setSpeedState);
+    const unsubscribeProgress = clock.subscribeProgress(setDayProgress);
     clockRef.current = clock;
     return () => {
       unsubscribe();
       unsubscribeClock();
+      unsubscribeProgress();
       clock.dispose();
       clockRef.current = null;
     };
@@ -84,7 +94,7 @@ export default function GameApp() {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 2800);
+    const timer = setTimeout(() => setToast(null), 3600);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -92,6 +102,7 @@ export default function GameApp() {
     const next = new GameController({ frameworkId, databaseId, seed: Math.floor(Date.now() % 2_147_483_647) });
     setController(next);
     setView(next.getView());
+    setDayProgress(0);
     setTab('service');
   };
 
@@ -102,6 +113,7 @@ export default function GameApp() {
     setEvents([]);
     setSelectedNode(null);
     setSpeedState(0);
+    setDayProgress(0);
   };
 
   const run = (action: () => void, success?: string) => {
@@ -111,6 +123,12 @@ export default function GameApp() {
     } catch (error) {
       setToast(error instanceof Error ? error.message : '처리할 수 없습니다.');
     }
+  };
+
+  const closeActiveEvent = () => {
+    const hasMoreBlockingEvents = events.length > 1;
+    setEvents((current) => current.slice(1));
+    if (!hasMoreBlockingEvents) clockRef.current?.resumeAfterAutoPause();
   };
 
   if (!controller || !view) {
@@ -169,7 +187,7 @@ export default function GameApp() {
 
   return (
     <main className="game-screen">
-      <Hud view={view} speed={speed} onSpeed={(next) => clockRef.current?.setSpeed(next)} onStep={() => clockRef.current?.advanceOneDay()} />
+      <Hud view={view} speed={speed} dayProgress={dayProgress} onSpeed={(next) => clockRef.current?.setSpeed(next)} onStep={() => clockRef.current?.advanceOneDay()} />
 
       <div className="main-shell">
         <nav className="side-nav">
@@ -185,36 +203,45 @@ export default function GameApp() {
         <section className="workspace">
           {tab === 'service' && <ServiceDashboard view={view} onNode={setSelectedNode} onTab={setTab} />}
           {tab === 'features' && <FeatureBoard view={view} />}
-          {tab === 'technology' && <TechnologyPanel view={view} onBuild={(tech) => run(() => controller.startTechnologyBuild(tech.id), `${tech.name} 구축을 시작했습니다.`)} />}
-          {tab === 'learning' && <LearningPanel view={view} onStudy={(skill) => run(() => controller.startLearning(skill.ref), `${skill.name} 학습을 시작했습니다.`)} />}
+          {tab === 'technology' && <TechnologyPanel view={view} onBuild={(tech) => run(() => controller.startTechnologyBuild(tech.id), `${tech.name} 구축 시작 · 즉시 ${money(tech.buildCost)} · 월 ${money(tech.monthlyCost)}`)} />}
+          {tab === 'learning' && <LearningPanel view={view} onStudy={(skill) => run(() => controller.startLearning(skill.ref), `${skill.name} 학습 시작 · ${money(skill.cost ?? 0)}`)} />}
           {tab === 'report' && <ReportPanel view={view} />}
         </section>
       </div>
 
       {selected && <NodeInspector node={selected} view={view} onClose={() => setSelectedNode(null)} onAction={(action) => run(action)} controller={controller} />}
-      {activeEvent && <EventOverlay event={activeEvent} onDismiss={() => setEvents((current) => current.slice(1))} onRespond={() => {
+      {activeEvent && <EventOverlay event={activeEvent} onDismiss={closeActiveEvent} onRespond={() => {
         if (activeEvent.kind === 'incident') run(() => controller.startIncidentResponse(activeEvent.id), '장애 대응을 시작했습니다.');
-        setEvents((current) => current.slice(1));
+        closeActiveEvent();
       }} />}
       {toast && <div className="toast">{toast}</div>}
     </main>
   );
 }
 
-function Hud({ view, speed, onSpeed, onStep }: { view: GameView; speed: GameSpeed; onSpeed: (speed: GameSpeed) => void; onStep: () => void }) {
+function Hud({ view, speed, dayProgress, onSpeed, onStep }: { view: GameView; speed: GameSpeed; dayProgress: number; onSpeed: (speed: GameSpeed) => void; onStep: () => void }) {
   const metrics = [
-    ['DAY', `#${view.hud.day}`], ['DAU', number(view.hud.dau)], ['CASH', money(view.hud.cash)], ['MRR · EST', money(view.hud.monthlyRevenue)], ['COST · EST', money(view.hud.monthlyCost)],
+    ['DATE', `M${view.hud.month} · D${view.hud.dayOfMonth}`, `정산까지 ${view.hud.daysUntilSettlement}일`],
+    ['DAU', number(view.hud.dau), '일간 활성 사용자'],
+    ['CASH', money(view.hud.cash), '정산 시 실제 증감'],
+    ['월 예상 매출', money(view.hud.monthlyRevenue), '현재 DAU 기준'],
+    ['월 예상 비용', money(view.hud.monthlyCost), '인프라 + AI'],
   ];
+  const progressPercent = Math.max(0, Math.min(100, dayProgress * 100));
+  const last = view.hud.lastSettlement;
   return (
     <header className="hud">
       <div className="hud-status"><span className={`status-dot ${view.hud.status.toLowerCase()}`} /><div><strong>{view.hud.launched ? 'SERVICE ONLINE' : 'BUILDING MVP'}</strong><small>{view.hud.status}</small></div></div>
-      <div className="hud-metrics">{metrics.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
-      <div className={`profit-chip ${view.hud.monthlyProfit >= 0 ? 'positive' : 'negative'}`}><span>PROFIT</span><strong>{money(view.hud.monthlyProfit)}</strong></div>
+      <div className="hud-metrics">{metrics.map(([label, value, detail]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>)}</div>
+      <div className={`profit-chip ${view.hud.monthlyProfit >= 0 ? 'positive' : 'negative'}`}><span>월 예상 순이익</span><strong>{money(view.hud.monthlyProfit)}</strong><small>{last ? `직전 M${last.month}: ${last.profit >= 0 ? '+' : ''}${money(last.profit)}` : '첫 정산 대기'}</small></div>
       <div className="clock-controls">
         <button className={speed === 0 ? 'active' : ''} onClick={() => onSpeed(0)}>Ⅱ</button>
         <button className={speed === 1 ? 'active' : ''} onClick={() => onSpeed(1)}>▶ <small>x1</small></button>
         <button className={speed === 2 ? 'active' : ''} onClick={() => onSpeed(2)}>▶▶ <small>x2</small></button>
         <button title="하루 진행" onClick={onStep}>+1D</button>
+      </div>
+      <div className="day-progress-shell" aria-label={`M${view.hud.month} D${view.hud.dayOfMonth} progress ${Math.round(progressPercent)} percent`} title={speed === 0 ? `M${view.hud.month} D${view.hud.dayOfMonth} · PAUSED` : `M${view.hud.month} D${view.hud.dayOfMonth} 진행 중`}>
+        <span style={{ width: `${progressPercent}%` }} />
       </div>
     </header>
   );
@@ -229,16 +256,17 @@ function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id
           {view.workSlots.map((slot) => (
             <button key={slot.id} onClick={() => slot.id === 'technology' ? onTab('technology') : slot.id === 'learning' ? onTab('learning') : undefined} className={`work-slot ${slot.active ? 'active' : 'empty'}`}>
               <div><span>{slot.label}</span><b>{slot.active ? '●' : '+'}</b></div><strong>{slot.title}</strong><small>{slot.meta}</small>
-              {slot.progress !== null && <div className="progress-track"><i style={{ width: `${pct(slot.progress)}%` }} /></div>}
+              {slot.progress !== null && <><div className="progress-track"><i style={{ width: `${pct(slot.progress)}%` }} /></div><em className="progress-percent">{pct(slot.progress)}%</em></>}
             </button>
           ))}
         </div>
-        <div className="runway-box"><span>RUNWAY SIGNAL</span><strong className={view.hud.monthlyProfit >= 0 ? 'ok' : 'warn'}>{view.hud.monthlyProfit >= 0 ? 'PROFITABLE' : 'BURNING CASH'}</strong><small>{view.hud.monthlyProfit >= 0 ? '현재 예상 손익이 양수입니다.' : `${money(Math.abs(view.hud.monthlyProfit))} / month`}</small></div>
+        <div className="runway-box"><span>MONTHLY NET · EST</span><strong className={view.hud.monthlyProfit >= 0 ? 'ok' : 'warn'}>{money(view.hud.monthlyProfit)}</strong><small>실제 CASH 반영은 M{view.hud.month} D30 종료 시</small></div>
       </aside>
 
       <section className="service-map panel-shell">
         <PanelTitle code="LIVE ARCHITECTURE" title="Service Map" badge="AUTO LAYOUT" />
         <ArchitectureGraph view={view} onNode={onNode} />
+        <RequestFlowBoard flows={view.requestFlows} failureRate={view.snapshot.load.failureRate} />
         <div className="load-strip">
           <LoadMini label="APP" value={view.snapshot.load.appRatio} />
           <LoadMini label="DB" value={view.snapshot.load.dbRatio} />
@@ -252,6 +280,47 @@ function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id
         <div className="alert-list">{view.alerts.map((alert) => <AlertCard key={alert.id} alert={alert} onClick={() => alert.nodeId && onNode(alert.nodeId.replace('technology:', '').replace('framework:', 'application').replace('database:', 'database'))} />)}</div>
       </aside>
     </div>
+  );
+}
+
+function RequestFlowBoard({ flows, failureRate }: { flows: RequestFlowView[]; failureRate: number }) {
+  if (flows.length === 0) {
+    return <section className="request-flow-board empty"><div><span>LIVE REQUEST FLOW</span><strong>서비스 공개 후 요청이 흐릅니다.</strong></div></section>;
+  }
+
+  const trafficUnit = flows[0].trafficUnit;
+  return (
+    <section className={`request-flow-board ${failureRate > 0 ? 'has-failure' : ''}`}>
+      <header>
+        <div><span>LIVE REQUEST FLOW</span><strong>기능 요청이 실제 인프라를 통과하는 경로</strong></div>
+        <small>● ≈ {number(trafficUnit)} requests · FAIL {Math.round(failureRate * 100)}%</small>
+      </header>
+      <div className="request-flow-list">
+        {flows.map((flow) => (
+          <div className={`request-flow-row ${flow.failureNode ? 'failed' : ''}`} key={flow.id}>
+            <div className="request-source"><span>FEATURE</span><strong>{flow.name}</strong><small>{flow.successPercent}% success</small></div>
+            <div className="request-route">
+              {flow.nodes.map((node, nodeIndex) => (
+                <div className="request-hop" key={`${flow.id}-${node.node}-${nodeIndex}`}>
+                  {nodeIndex > 0 && (
+                    <div className="request-link">
+                      {Array.from({ length: flow.particleCount }).map((_, particleIndex) => (
+                        <i key={particleIndex} style={{ animationDelay: `${particleIndex * -.34}s` }} />
+                      ))}
+                    </div>
+                  )}
+                  <div className={`request-node ${node.available ? '' : 'missing'} ${flow.failureNode === node.node ? 'failed' : ''}`}>
+                    <b>{REQUEST_NODE_LABEL[node.node] ?? node.node}</b>
+                    <small>{node.available ? `${node.arrivalPercent}% IN` : 'MISSING'}</small>
+                  </div>
+                </div>
+              ))}
+              {flow.failureNode && <span className="request-failed-mark">× REQUEST FAILED</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -306,19 +375,23 @@ function TechnologyPanel({ view, onBuild }: { view: GameView; onBuild: (tech: Te
   const groups = [
     ['TRAFFIC', ['ALB']], ['CACHE', ['REDIS']], ['ASYNC', ['SQS', 'RABBITMQ', 'KAFKA']], ['STORAGE', ['OBJECT_STORAGE']],
   ] as const;
+  const activeBuild = view.snapshot.currentTechnologyBuild;
   return (
     <section className="page-panel">
-      <PageHeading eyebrow="TECHNOLOGY CATALOG" title="서비스에 기술 연결" description="카드를 눌러 구축합니다. 수식 대신 현재 구조에서 예상되는 효과를 먼저 보여줍니다." />
+      <PageHeading eyebrow="TECHNOLOGY CATALOG" title="서비스에 기술 연결" description="구축비는 즉시 CASH에서 빠지고, 월 비용은 매월 정산 때 반영됩니다." />
       <div className="technology-groups">
         {groups.map(([name, ids]) => (
           <div className="technology-group" key={name}><div className="group-label"><span>{name}</span><i /></div><div className="technology-grid">
             {ids.map((id) => {
               const tech = view.technologies.find((item) => item.id === id)!;
-              return <button className={`technology-card ${tech.deployed ? 'deployed' : ''}`} key={id} disabled={!tech.available} onClick={() => onBuild(tech)}>
-                <div className="tech-top"><span>{tech.icon}</span><em>{tech.deployed ? 'ACTIVE' : tech.available ? 'READY' : 'LOCKED'}</em></div>
+              const building = activeBuild?.id === id;
+              const totalDays = building ? activeBuild.elapsedDays + activeBuild.estimatedRemainingDays : 0;
+              return <button className={`technology-card ${tech.deployed ? 'deployed' : ''} ${building ? 'building' : ''}`} key={id} disabled={!tech.available} onClick={() => onBuild(tech)}>
+                <div className="tech-top"><span>{tech.icon}</span><em>{tech.deployed ? 'ACTIVE' : building ? 'BUILDING' : tech.available ? 'READY' : 'LOCKED'}</em></div>
                 <strong>{tech.name}</strong><p>{tech.preview}</p>
-                <div className="tech-numbers"><span><small>BUILD</small><b>{money(tech.buildCost)}</b></span><span><small>MONTH</small><b>{money(tech.monthlyCost)}</b></span><span><small>WORK</small><b>{tech.buildWork}</b></span></div>
-                <div className="tech-action">{tech.deployed ? 'CONNECTED' : tech.reason ?? 'BUILD →'}</div>
+                <div className="tech-numbers"><span><small>즉시 구축비</small><b>{money(tech.buildCost)}</b></span><span><small>월 비용</small><b>{money(tech.monthlyCost)}</b></span><span><small>BASE WORK</small><b>{tech.buildWork}</b></span></div>
+                {building && <div className="inline-progress"><div className="progress-track"><i style={{ width: `${pct(activeBuild.progress / activeBuild.requiredWork)}%` }} /></div><small>{activeBuild.elapsedDays}/~{totalDays}일 · 약 {activeBuild.estimatedRemainingDays}일 남음</small></div>}
+                <div className="tech-action">{tech.deployed ? 'CONNECTED' : building ? 'BUILDING…' : tech.reason ?? 'BUILD →'}</div>
               </button>;
             })}
           </div></div>
@@ -332,15 +405,24 @@ function LearningPanel({ view, onStudy }: { view: GameView; onStudy: (skill: Ski
   const categories = ['fundamental', 'language', 'framework', 'technology'] as const;
   return (
     <section className="page-panel">
-      <PageHeading eyebrow="DEVELOPER SKILL TREE" title="실전 경험 → 학습 → 레벨업" description="실제로 사용한 기술만 경험이 쌓입니다. 선행 노드와 경험 조건을 만족한 뒤 학습 슬롯을 사용합니다." />
+      <PageHeading eyebrow="DEVELOPER SKILL TREE" title="실전 경험 → 학습 → 레벨업" description="학습 비용은 시작 즉시 CASH에서 차감됩니다. 잠겨 있어도 다음 학습의 예상 일수와 비용을 미리 보여줍니다." />
       <div className="skill-tree">
         {categories.map((category) => (
           <div className={`skill-lane ${category}`} key={category}><div className="skill-lane-title"><span>{CATEGORY_LABEL[category]}</span><i /></div><div className="skill-node-grid">
             {view.skills.filter((skill) => skill.category === category).map((skill) => (
-              <button key={skill.key} className={`skill-node ${skill.canStudy ? 'ready' : ''}`} disabled={!skill.canStudy} onClick={() => onStudy(skill)}>
-                <span className="skill-icon">{skill.icon}</span><div><strong>{skill.name}</strong><em>Lv.{skill.level}</em></div>
-                <div className="skill-exp"><i><b style={{ width: `${skill.requiredExperience ? Math.min(100, Math.round(skill.experienceDays / skill.requiredExperience * 100)) : 100}%` }} /></i><small>{skill.requiredExperience ? `${skill.experienceDays}/${skill.requiredExperience}d` : 'MAX'}</small></div>
-                <footer>{skill.canStudy ? <><b>STUDY</b><span>{skill.studyDays}d · {money(skill.cost ?? 0)}</span></> : <span>{skill.reason ?? 'LOCKED'}</span>}</footer>
+              <button
+                key={skill.key}
+                className={`skill-node ${skill.canStudy ? 'ready' : ''} ${skill.studying ? 'studying' : ''}`}
+                disabled={!skill.canStudy}
+                onClick={() => onStudy(skill)}
+              >
+                <span className="skill-icon">{skill.icon}</span><div><strong>{skill.name}</strong><em>Lv.{skill.level}{skill.studying && skill.targetLevel ? ` → ${skill.targetLevel}` : ''}</em></div>
+                <div className="skill-exp"><i><b style={{ width: `${skill.requiredExperience ? Math.min(100, Math.round(skill.experienceDays / skill.requiredExperience * 100)) : 100}%` }} /></i><small>{skill.requiredExperience ? `${skill.experienceDays}/${skill.requiredExperience}d EXP` : 'MAX'}</small></div>
+                {skill.studying && <div className="inline-progress"><div className="progress-track"><i style={{ width: `${pct(skill.studyProgress)}%` }} /></div><small>STUDYING · {skill.elapsedStudyDays}/{skill.studyDays}일 · {pct(skill.studyProgress)}%</small></div>}
+                <footer>
+                  <b>{skill.studying ? 'STUDYING' : skill.canStudy ? 'STUDY' : skill.reason ?? 'LOCKED'}</b>
+                  <span>{skill.studyDays ? `${skill.studyDays}일 · ${money(skill.cost ?? 0)}` : 'MAX'}</span>
+                </footer>
               </button>
             ))}
           </div></div>
@@ -351,11 +433,12 @@ function LearningPanel({ view, onStudy }: { view: GameView; onStudy: (skill: Ski
 }
 
 function FeatureBoard({ view }: { view: GameView }) {
+  const current = view.snapshot.currentFeature;
   return (
     <section className="page-panel">
-      <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="Phase 안의 기능 순서는 Seed에 따라 달라집니다. 해금되기 전에는 무엇이 나올지 알 수 없습니다." />
+      <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="기능 카드의 APP / DB / MQ / STORAGE 태그는 실제 요청이 지나가는 서버 경로를 뜻합니다." />
       <div className="phase-board">{([1, 2, 3] as const).map((phase) => <div className="phase-lane" key={phase}><header><span>PHASE {phase}</span><strong>{phase === 1 ? 'EARLY' : phase === 2 ? 'GROWTH' : 'SCALE'}</strong></header><div>
-        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.load && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}</article>)}
+        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <div className="inline-progress"><div className="progress-track"><i style={{ width: `${pct(current.progress / current.requiredWork)}%` }} /></div><small>{current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일 · 약 {current.estimatedRemainingDays}일 남음</small></div>}{feature.route && <div className="feature-route-tags">{feature.route.map((node, nodeIndex) => <i key={`${node}-${nodeIndex}`}>{REQUEST_NODE_LABEL[node] ?? node}</i>)}</div>}{feature.load && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}</article>)}
       </div></div>)}</div>
     </section>
   );
@@ -363,24 +446,27 @@ function FeatureBoard({ view }: { view: GameView }) {
 
 function ReportPanel({ view }: { view: GameView }) {
   const cards = [
-    ['DAU', number(view.hud.dau), '현재 일간 활성 사용자'], ['REVENUE · EST', money(view.hud.monthlyRevenue), '현재 DAU 기준 월 매출'], ['INFRA + AI', money(view.hud.monthlyCost), '현재 월 예상 비용'], ['PROFIT · EST', money(view.hud.monthlyProfit), '현재 월 예상 손익'],
+    ['DAU', number(view.hud.dau), '현재 일간 활성 사용자'], ['월 예상 매출', money(view.hud.monthlyRevenue), '현재 DAU 기준 예상치'], ['월 예상 비용', money(view.hud.monthlyCost), '인프라 + AI 예상치'], ['월 예상 순이익', money(view.hud.monthlyProfit), '실제 반영은 월말 정산'],
   ];
-  return <section className="page-panel"><PageHeading eyebrow="OPERATING REPORT" title="현재 런 요약" description="V1 리포트는 현재 운영 상태를 요약합니다. 월별 히스토리 차트는 다음 UI 마일스톤에서 연결합니다." /><div className="report-grid">{cards.map(([label, value, detail]) => <article key={label}><span>{label}</span><strong>{value}</strong><small>{detail}</small><i /></article>)}</div><div className="report-loads"><LoadMini label="APPLICATION" value={view.snapshot.load.appRatio} /><LoadMini label="DATABASE" value={view.snapshot.load.dbRatio} /><LoadMini label="ASYNC" value={view.snapshot.load.asyncRatio} /><LoadMini label="STORAGE" value={view.snapshot.load.storageRatio} /></div></section>;
+  const last = view.hud.lastSettlement;
+  return <section className="page-panel"><PageHeading eyebrow="OPERATING REPORT" title="현재 런 요약" description={`현재 M${view.hud.month} D${view.hud.dayOfMonth} · 다음 CASH 정산까지 ${view.hud.daysUntilSettlement}일`} /><div className="report-grid">{cards.map(([label, value, detail]) => <article key={label}><span>{label}</span><strong>{value}</strong><small>{detail}</small><i /></article>)}</div>{last && <div className="settlement-summary"><span>LAST SETTLEMENT · M{last.month}</span><strong>{last.profit >= 0 ? '+' : ''}{money(last.profit)}</strong><small>매출 {money(last.revenue)} · 비용 {money(last.totalCost)} · 정산 후 CASH {money(last.cashAfter)}</small></div>}<div className="report-loads"><LoadMini label="APPLICATION" value={view.snapshot.load.appRatio} /><LoadMini label="DATABASE" value={view.snapshot.load.dbRatio} /><LoadMini label="ASYNC" value={view.snapshot.load.asyncRatio} /><LoadMini label="STORAGE" value={view.snapshot.load.storageRatio} /></div></section>;
 }
 
 function NodeInspector({ node, view, onClose, onAction, controller }: { node: ServiceNodeView; view: GameView; onClose: () => void; onAction: (action: () => void) => void; controller: GameController }) {
   const app = node.kind === 'application';
   const db = node.kind === 'database';
+  const appServerDelta = view.infrastructureCosts.addAppServerMonthlyCostDelta;
+  const dbReplicaDelta = view.infrastructureCosts.addDbReplicaMonthlyCostDelta;
   return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="node-drawer"><header><div className={`drawer-icon ${node.tone}`}>{node.icon}</div><div><span>{node.kind.toUpperCase()}</span><strong>{node.name}</strong></div><button onClick={onClose}>×</button></header><section className="drawer-load"><span>LIVE LOAD</span><strong>{node.loadPercent}%</strong><i><b style={{ width: `${Math.min(100, node.loadPercent)}%` }} /></i><small>{node.detail}</small></section>
-    {app && <section className="drawer-section"><label>SERVER SIZE</label><div className="size-grid">{SIZE_ORDER.map((size) => <button key={size} className={view.appSize === size ? 'active' : ''} onClick={() => onAction(() => controller.scaleApplication(size))}><span>{SIZE_LABEL[size]}</span><small>{size}</small></button>)}</div><div className="scale-row"><div><span>INSTANCE</span><strong>{view.appCount} / 10</strong></div><button onClick={() => onAction(() => controller.addApplicationServer())}>＋ SERVER</button></div><p>Scale-out은 ALB가 구축된 뒤 사용할 수 있습니다.</p></section>}
-    {db && <section className="drawer-section"><label>DATABASE SIZE</label><div className="size-grid">{SIZE_ORDER.map((size) => <button key={size} className={view.dbSize === size ? 'active' : ''} onClick={() => onAction(() => controller.scaleDatabase(size))}><span>{SIZE_LABEL[size]}</span><small>{size}</small></button>)}</div><div className="replica-row"><div className="db-cylinder primary">P</div>{Array.from({ length: view.dbReplicaCount }).map((_, index) => <div className="db-cylinder" key={index}>R</div>)}{view.dbReplicaCount < 3 && <button onClick={() => onAction(() => controller.addDatabaseReplica())}>＋</button>}</div><p>Replica는 최대 3개까지 추가할 수 있습니다.</p></section>}
+    {app && <section className="drawer-section"><label>SERVER SIZE · MONTHLY COST</label><div className="size-grid">{SIZE_ORDER.map((size) => <button key={size} className={view.appSize === size ? 'active' : ''} onClick={() => onAction(() => controller.scaleApplication(size))}><span>{SIZE_LABEL[size]}</span><small>{size}</small><em>{money(view.infrastructureCosts.appSizeMonthlyCosts[size])}/월</em></button>)}</div><div className="scale-row"><div><span>INSTANCE</span><strong>{view.appCount} / 10</strong><small>{appServerDelta !== null ? `추가 시 월 +${money(appServerDelta)}` : 'ALB 필요 또는 최대치'}</small></div><button disabled={appServerDelta === null} onClick={() => onAction(() => controller.addApplicationServer())}>＋ SERVER{appServerDelta !== null ? ` · 월 +${money(appServerDelta)}` : ''}</button></div><p>Size/서버 수 변경은 즉시 구축비 없이 월 인프라 비용만 변경됩니다.</p></section>}
+    {db && <section className="drawer-section"><label>DATABASE SIZE · MONTHLY COST</label><div className="size-grid">{SIZE_ORDER.map((size) => <button key={size} className={view.dbSize === size ? 'active' : ''} onClick={() => onAction(() => controller.scaleDatabase(size))}><span>{SIZE_LABEL[size]}</span><small>{size}</small><em>{money(view.infrastructureCosts.dbSizeMonthlyCosts[size])}/월</em></button>)}</div><div className="replica-row"><div className="db-cylinder primary">P</div>{Array.from({ length: view.dbReplicaCount }).map((_, index) => <div className="db-cylinder" key={index}>R</div>)}</div>{view.dbReplicaCount < 3 && <button className="replica-add" onClick={() => onAction(() => controller.addDatabaseReplica())}>＋ REPLICA · 월 +{money(dbReplicaDelta ?? 0)}</button>}<p>Replica는 최대 3개까지 추가할 수 있으며, 추가 비용은 매월 정산 때 반영됩니다.</p></section>}
     {node.incidentId && <section className="incident-action"><span>⚡ {node.incidentSeverity} INCIDENT</span><button onClick={() => onAction(() => controller.startIncidentResponse(node.incidentId!))}>대응 시작</button></section>}
   </aside></div>;
 }
 
 function EventOverlay({ event, onDismiss, onRespond }: { event: GameEventView; onDismiss: () => void; onRespond: () => void }) {
   const incident = event.kind === 'incident';
-  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : event.kind === 'incident' ? 'SYSTEM / INCIDENT' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : '확인'}</button></footer></article></div>;
+  return <div className="event-overlay"><article className={`event-card ${event.kind}`}><button aria-label="팝업 닫기" onClick={onDismiss} className="event-close">×</button><div className="event-scan" /><span className="event-code">{event.kind === 'requirement' ? 'SYSTEM / REQUIREMENT' : event.kind === 'incident' ? 'SYSTEM / INCIDENT' : 'SYSTEM'}</span><div className="event-symbol">{incident ? '⚡' : event.kind === 'won' ? '◆' : event.kind === 'bankrupt' ? '×' : '＋'}</div><h2>{event.title}</h2><p>{event.message}</p>{event.severity && <strong className="severity-chip">{event.severity}</strong>}<footer>{incident && <button className="secondary" onClick={onDismiss}>나중에</button>}<button className="primary" onClick={incident ? onRespond : onDismiss}>{incident ? '대응 시작' : '확인'}</button></footer></article></div>;
 }
 
 function PanelTitle({ code, title, badge }: { code: string; title: string; badge: string }) {

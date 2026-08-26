@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AppCluster,
+  capacityTuningMultiplier,
   DatabaseCluster,
   InfrastructureState,
   LoadCalculator,
@@ -36,6 +37,33 @@ describe('infrastructure and load', () => {
     expect(db.capacity).toBeCloseTo(240);
   });
 
+  it('turns proficiency into a modest effective capacity tuning bonus', () => {
+    expect(capacityTuningMultiplier(1)).toBe(1);
+    expect(capacityTuningMultiplier(5)).toBe(1.08);
+    expect(capacityTuningMultiplier(10)).toBe(1.25);
+
+    const infra = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    const feature = new FeatureDefinition({
+      id: 'POSTS', name: 'Posts', baseWork: 1, complexity: 'NORMAL',
+      load: { app: 2, db: 2, async: 0, storage: 0 },
+      requestRoute: [{ node: 'APP' }, { node: 'DB' }],
+    });
+
+    const novice = LoadCalculator.calculate(100_000, [feature], infra, {
+      appProficiencyLevel: 1,
+      databaseProficiencyLevel: 1,
+    });
+    const expert = LoadCalculator.calculate(100_000, [feature], infra, {
+      appProficiencyLevel: 10,
+      databaseProficiencyLevel: 10,
+    });
+
+    expect(expert.appCapacity).toBeCloseTo(novice.appCapacity * 1.25);
+    expect(expert.dbCapacity).toBeCloseTo(novice.dbCapacity * 1.25);
+    expect(expert.appDemand).toBeCloseTo(novice.appDemand);
+    expect(expert.dbDemand).toBeCloseTo(novice.dbDemand);
+  });
+
   it('redis reduces DB demand and a queue removes async demand from the app', () => {
     const feature = new FeatureDefinition({
       id: 'NOTIFICATION',
@@ -57,6 +85,47 @@ describe('infrastructure and load', () => {
     expect(withInfra.dbDemand).toBeLessThan(without.dbDemand);
     expect(withInfra.appDemand).toBeLessThan(without.appDemand);
     expect(withInfra.asyncCapacity).toBe(300);
+  });
+
+  it('removes downstream DB load when an APP incident blocks request flow', () => {
+    const feature = new FeatureDefinition({
+      id: 'POSTS', name: 'Posts', baseWork: 1, complexity: 'NORMAL',
+      load: { app: 2, db: 3, async: 0, storage: 0 },
+      requestRoute: [{ node: 'APP' }, { node: 'DB' }],
+    });
+    const infra = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+
+    const healthy = LoadCalculator.calculate(100_000, [feature], infra);
+    const appDown = LoadCalculator.calculate(100_000, [feature], infra, {
+      nodeHealth: { APP: 0 },
+    });
+
+    expect(appDown.appDemand).toBeCloseTo(healthy.appDemand);
+    expect(appDown.dbDemand).toBe(0);
+    expect(appDown.failureRate).toBe(1);
+  });
+
+  it('reports failed requests when a required queue is missing', () => {
+    const feature = new FeatureDefinition({
+      id: 'RECOMMENDATION', name: 'Recommendation', baseWork: 1, complexity: 'NORMAL',
+      load: { app: 2, db: 2, async: 3, storage: 0 },
+      requestRoute: [
+        { node: 'APP' },
+        { node: 'DB' },
+        { node: 'AI' },
+        { node: 'QUEUE', requirement: 'REQUIRED' },
+      ],
+    });
+    const infra = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+
+    const missing = LoadCalculator.calculate(100_000, [feature], infra);
+    infra.deployTechnology('SQS');
+    const restored = LoadCalculator.calculate(100_000, [feature], infra);
+
+    expect(missing.failureRate).toBe(1);
+    expect(missing.asyncDemand).toBe(0);
+    expect(restored.failureRate).toBe(0);
+    expect(restored.asyncDemand).toBeGreaterThan(0);
   });
 
   it('keeps only one active queue in V1 and retires the previous queue on replacement', () => {
