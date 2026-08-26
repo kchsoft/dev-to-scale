@@ -164,9 +164,6 @@ export class GameEngine {
   advanceDay(): GameSnapshot {
     if (this._status !== 'RUNNING') return this.snapshot;
 
-    this.settlePreviousMonthIfNeeded();
-    if (this._status !== 'RUNNING') return this.snapshot;
-
     ExperienceAccrualService.recordDay(this.developer, {
       frameworkId: this.config.frameworkId,
       databaseId: this.config.databaseId,
@@ -186,6 +183,14 @@ export class GameEngine {
     // Record the current day's economy before completing new work so newly
     // released features/technologies begin affecting the following day.
     this.recordMonthlyEconomy();
+
+    // The cash settlement happens as D30 finishes. The next snapshot therefore
+    // enters the next month at D1 with the cash change already visible.
+    this.settleMonthIfEnding();
+    if (this._status !== 'RUNNING') {
+      this._day += 1;
+      return this.snapshot;
+    }
 
     const incidentDevelopmentModifier = this.incidents.developmentModifier;
     this.learning.advanceDay(this.developer);
@@ -332,8 +337,8 @@ export class GameEngine {
     this.monthlyLedger.recordDay(this._dau, revenueModifier, aiActive);
   }
 
-  private settlePreviousMonthIfNeeded(): void {
-    if (this._day <= 1 || (this._day - 1) % 30 !== 0) return;
+  private settleMonthIfEnding(): void {
+    if (this._day % 30 !== 0) return;
     const month = this.monthlyLedger.snapshot();
     const infrastructureCost = this.infrastructure.monthlyCost;
     const settlement = this.finance.settleMonth({
@@ -343,7 +348,7 @@ export class GameEngine {
     });
     this._lastMonthlyRevenue = month.revenue;
     this._lastSettlement = {
-      month: Math.floor((this._day - 1) / 30),
+      month: Math.floor((this._day - 1) / 30) + 1,
       revenue: settlement.revenue,
       infrastructureCost,
       aiCost: month.aiCost,
