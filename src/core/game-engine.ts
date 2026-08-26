@@ -3,7 +3,7 @@ import { DatabaseDefinition, DatabaseId } from './database';
 import { ExperienceAccrualService } from './experience';
 import { FeatureDefinition, FeatureDevelopmentTask, FrameworkDefinition, FrameworkId } from './feature';
 import { FinanceAccount, MonthlyEconomyLedger, RevenuePolicy } from './finance';
-import { GrowthEvent, GrowthPolicy, RandomSource } from './growth';
+import { GrowthEvent, GrowthPolicy, RandomSource, TrafficSpikeResponse } from './growth';
 import { IncidentGenerator, IncidentManager } from './incident-manager';
 import { IncidentTopology } from './incident-topology';
 import {
@@ -67,7 +67,10 @@ export interface GameSnapshot {
     type: GrowthEvent['type'];
     remainingDays: number;
     trafficMultiplier: number;
+    loadMultiplier: number;
     growthModifier: number;
+    response: GrowthEvent['response'];
+    burstCost: number;
   };
   techDebt: {
     value: number;
@@ -128,6 +131,12 @@ export class GameEngine {
   get launched(): boolean { return this._launched; }
   get status(): GameStatus { return this._status; }
   get lastMonthlyRevenue(): number { return this._lastMonthlyRevenue; }
+  get trafficSpikeBurstCost(): number {
+    // Expensive enough to remain a choice at scale, but not so punitive that a
+    // healthy cash buffer becomes meaningless. Rounded for game-readable UI.
+    const raw = Math.max(150_000, this.infrastructure.monthlyCost * 0.75);
+    return Math.ceil(raw / 10_000) * 10_000;
+  }
 
   get snapshot(): GameSnapshot {
     const learningTask = this.learning.current;
@@ -174,7 +183,10 @@ export class GameEngine {
             type: this.growthEvent.type,
             remainingDays: this.growthEvent.remainingDays,
             trafficMultiplier: this.growthEvent.trafficMultiplier,
+            loadMultiplier: this.growthEvent.loadMultiplier,
             growthModifier: this.growthEvent.modifier,
+            response: this.growthEvent.response,
+            burstCost: this.growthEvent.type === 'VIRAL' ? this.trafficSpikeBurstCost : 0,
           }
         : null,
       techDebt: {
@@ -316,6 +328,28 @@ export class GameEngine {
     this.ensureRunning();
     if (!this._launched) throw new Error('Service must be online before refactoring');
     this.techDebt.startRefactor();
+  }
+
+  respondToTrafficSpike(response: TrafficSpikeResponse): { cost: number } {
+    this.ensureRunning();
+    const event = this.growthEvent;
+    if (!event?.active || event.type !== 'VIRAL') throw new Error('No active viral traffic spike');
+    if (!event.canRespond) throw new Error('Traffic spike response already selected');
+
+    const cost = response === 'BURST' ? this.trafficSpikeBurstCost : 0;
+    if (cost > 0 && this.finance.cash < cost) throw new Error('Insufficient cash for emergency burst');
+
+    event.respond(response);
+    if (cost > 0) this.finance.spendImmediately(cost);
+
+    // The decision should be visible immediately instead of waiting for next day.
+    this._load = LoadCalculator.calculate(
+      this._dau,
+      this.activeFeaturesForLoad(),
+      this.infrastructure,
+      this.loadCalculationContext(),
+    );
+    return { cost };
   }
 
   /**
@@ -474,7 +508,7 @@ export class GameEngine {
       databaseProficiencyLevel: this.developer.get(skillRef.technology(this.config.databaseId)).level,
       technologyProficiencyLevels,
       nodeHealth,
-      trafficMultiplier: this.growthEvent?.active ? this.growthEvent.trafficMultiplier : 1,
+      trafficMultiplier: this.growthEvent?.active ? this.growthEvent.loadMultiplier : 1,
     };
   }
 
