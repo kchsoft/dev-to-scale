@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { COMMUNITY_FEATURES } from '../community';
 import { GameEngine } from '../game-engine';
 import { RandomSource } from '../growth';
 
@@ -44,6 +45,23 @@ describe('game engine orchestration', () => {
 
     expect(game.dau).toBeGreaterThanOrEqual(100);
     expect(game.snapshot.currentFeature?.id).toBe(game.progression.featureOrder[0]);
+  });
+
+  it('previews the same-day load impact of a feature before it is released', () => {
+    const game = new GameEngine({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 42,
+      random: new SafePositiveRandom(),
+    });
+
+    for (let day = 0; day < 19; day += 1) game.advanceDay();
+    const before = game.snapshot.load;
+    const feature = COMMUNITY_FEATURES[game.progression.featureOrder[0]];
+    const projected = game.previewLoadWithFeature(feature);
+
+    expect(projected.appCpuDemand + projected.appIoDemand).toBeGreaterThan(before.appCpuDemand + before.appIoDemand);
+    expect(projected.dbCpuDemand + projected.dbIoDemand).toBeGreaterThan(before.dbCpuDemand + before.dbIoDemand);
   });
 
   it('settles cash as day 30 completes and enters the next month at day 31', () => {
