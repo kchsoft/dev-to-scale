@@ -1,7 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { DatabaseId, FrameworkId, ServerSize, ServiceHealthAnalyzer, SkillRef, TECHNOLOGIES } from '../core';
+import {
+  DatabaseId,
+  FrameworkId,
+  ObservabilityPolicy,
+  ObservabilitySnapshot,
+  ServerSize,
+  ServiceHealthAnalyzer,
+  SkillRef,
+  TECHNOLOGIES,
+} from '../core';
 import { GameClock, GameSpeed } from '../application/game-clock';
 import {
   AlertView,
@@ -65,6 +74,10 @@ function pct(progress: number | null): number {
 
 function loadPct(value: number): number {
   return Math.max(0, Math.round(value * 100));
+}
+
+function observabilityLabel(observability: ObservabilitySnapshot): string {
+  return observability.level === 'BASIC' ? 'BASIC HEALTH' : observability.level === 'METRICS' ? 'CPU / I/O METRICS' : 'APM';
 }
 
 export default function GameApp() {
@@ -193,6 +206,7 @@ export default function GameApp() {
 
   const activeEvent = events[0] ?? null;
   const selected = view.nodes.find((node) => node.id === selectedNode) ?? null;
+  const observability = ObservabilityPolicy.evaluate(controller.engine.developer);
 
   return (
     <main className="game-screen">
@@ -210,15 +224,15 @@ export default function GameApp() {
         </nav>
 
         <section className="workspace">
-          {tab === 'service' && <ServiceDashboard view={view} onNode={setSelectedNode} onTab={setTab} />}
-          {tab === 'features' && <FeatureBoard view={view} onFastTrack={() => run(() => controller.fastTrackCurrentFeature(), 'FAST TRACK · 기능 진행 +30% · Tech Debt 증가')} onRefactor={() => run(() => controller.startRefactor(), 'REFACTORING 시작 · 5일간 기능 개발 중단')} />}
+          {tab === 'service' && <ServiceDashboard view={view} observability={observability} onNode={setSelectedNode} onTab={setTab} />}
+          {tab === 'features' && <FeatureBoard view={view} observability={observability} onFastTrack={() => run(() => controller.fastTrackCurrentFeature(), 'FAST TRACK · 기능 진행 +30% · Tech Debt 증가')} onRefactor={() => run(() => controller.startRefactor(), 'REFACTORING 시작 · 5일간 기능 개발 중단')} />}
           {tab === 'technology' && <TechnologyPanel view={view} onBuild={(tech) => run(() => controller.startTechnologyBuild(tech.id), `${tech.name} 구축 시작 · 즉시 ${money(tech.buildCost)} · 월 ${money(tech.monthlyCost)}`)} />}
           {tab === 'learning' && <LearningPanel view={view} onStudy={(skill) => run(() => controller.startLearning(skill.ref), `${skill.name} 학습 시작 · ${money(skill.cost ?? 0)}`)} />}
-          {tab === 'report' && <ReportPanel view={view} />}
+          {tab === 'report' && <ReportPanel view={view} observability={observability} />}
         </section>
       </div>
 
-      {selected && <NodeInspector node={selected} view={view} onClose={() => setSelectedNode(null)} onAction={(action) => run(action)} controller={controller} />}
+      {selected && <NodeInspector node={selected} view={view} observability={observability} onClose={() => setSelectedNode(null)} onAction={(action) => run(action)} controller={controller} />}
       {activeEvent && <EventOverlay event={activeEvent} onDismiss={closeActiveEvent} onRespond={() => {
         if (activeEvent.kind === 'incident') run(() => controller.startIncidentResponse(activeEvent.id), '장애 대응을 시작했습니다.');
         closeActiveEvent();
@@ -256,8 +270,19 @@ function Hud({ view, speed, dayProgress, onSpeed, onStep }: { view: GameView; sp
   );
 }
 
-function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id: string) => void; onTab: (tab: 'technology' | 'learning' | 'service' | 'features' | 'report') => void }) {
+function ServiceDashboard({ view, observability, onNode, onTab }: { view: GameView; observability: ObservabilitySnapshot; onNode: (id: string) => void; onTab: (tab: 'technology' | 'learning' | 'service' | 'features' | 'report') => void }) {
   const health = ServiceHealthAnalyzer.analyze(view.snapshot.load);
+  const visibleAlerts = view.alerts.map((alert) => {
+    if (!alert.id.startsWith('feature-impact-') || observability.level === 'APM') return alert;
+    return {
+      ...alert,
+      tone: 'info' as const,
+      detail: observability.level === 'METRICS'
+        ? '새 기능이 자원 사용량을 높입니다. APM 해금 시 축별 출시 영향과 예상 병목을 확인할 수 있습니다.'
+        : '새 기능이 서비스 부하를 높일 수 있습니다. Metrics/APM을 해금하면 출시 영향을 더 정확히 볼 수 있습니다.',
+      nodeId: undefined,
+    };
+  });
   return (
     <div className="dashboard-layout">
       <aside className="work-rail panel-shell">
@@ -274,69 +299,84 @@ function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id
       </aside>
 
       <section className="service-map panel-shell">
-        <PanelTitle code="LIVE ARCHITECTURE" title="Service Map" badge="CPU / I/O" />
+        <PanelTitle code="LIVE ARCHITECTURE" title="Service Map" badge={`OBS · ${observability.level}`} />
         {view.hud.launched ? (
           <div className="settlement-summary service-health-summary">
-            <span>SERVICE HEALTH · {health.status}</span>
-            <strong>P95 {health.p95LatencyMs.toLocaleString()}ms</strong>
-            <small>TOP BOTTLENECK · {BOTTLENECK_LABEL[health.bottleneck]} {loadPct(health.bottleneckRatio)}% · Latency는 CPU/I/O 압력과 Request Failure에서 파생되는 결과 지표입니다.</small>
+            <span>SERVICE HEALTH · {health.status} · {observabilityLabel(observability)}</span>
+            <strong>{observability.level === 'BASIC' ? `LOAD ${Math.max(loadPct(view.snapshot.load.appRatio), loadPct(view.snapshot.load.dbRatio))}%` : `P95 ${health.p95LatencyMs.toLocaleString()}ms`}</strong>
+            <small>{observability.level === 'APM'
+              ? `TOP BOTTLENECK · ${BOTTLENECK_LABEL[health.bottleneck]} ${loadPct(health.bottleneckRatio)}% · 요청 경로와 출시 영향까지 추적 가능합니다.`
+              : observability.level === 'METRICS'
+                ? `CPU / I/O와 P95가 해금되었습니다. ${observability.nextUnlock}`
+                : `현재는 서비스 상태와 전체 Load만 보입니다. ${observability.nextUnlock}`}</small>
           </div>
         ) : (
-          <div className="settlement-summary service-health-summary"><span>SERVICE HEALTH · PRE-LAUNCH</span><strong>P95 —</strong><small>서비스 공개 후 병목과 응답시간을 자동 진단합니다.</small></div>
+          <div className="settlement-summary service-health-summary"><span>SERVICE HEALTH · PRE-LAUNCH</span><strong>OBS · {observability.level}</strong><small>{observability.nextUnlock ?? 'APM까지 해금됨'}</small></div>
         )}
-        <ArchitectureGraph view={view} onNode={onNode} />
-        <RequestFlowBoard flows={view.requestFlows} failureRate={view.snapshot.load.failureRate} />
-        <div className="load-strip resource-load-strip">
-          <LoadMini label="APP CPU" value={view.snapshot.load.appCpuRatio} />
-          <LoadMini label="APP I/O" value={view.snapshot.load.appIoRatio} />
-          <LoadMini label="DB CPU" value={view.snapshot.load.dbCpuRatio} />
-          <LoadMini label="DB I/O" value={view.snapshot.load.dbIoRatio} />
-          <LoadMini label="ASYNC" value={view.snapshot.load.asyncRatio} />
-          <LoadMini label="STORAGE" value={view.snapshot.load.storageRatio} />
-        </div>
+        <ArchitectureGraph view={view} observability={observability} onNode={onNode} />
+        <RequestFlowBoard flows={view.requestFlows} failureRate={view.snapshot.load.failureRate} observability={observability} />
+        {observability.level === 'BASIC' ? (
+          <div className="load-strip resource-load-strip">
+            <LoadMini label="APP" value={view.snapshot.load.appRatio} />
+            <LoadMini label="DB" value={view.snapshot.load.dbRatio} />
+            <LoadMini label="ASYNC" value={view.snapshot.load.asyncRatio} />
+            <LoadMini label="STORAGE" value={view.snapshot.load.storageRatio} />
+          </div>
+        ) : (
+          <div className="load-strip resource-load-strip">
+            <LoadMini label="APP CPU" value={view.snapshot.load.appCpuRatio} />
+            <LoadMini label="APP I/O" value={view.snapshot.load.appIoRatio} />
+            <LoadMini label="DB CPU" value={view.snapshot.load.dbCpuRatio} />
+            <LoadMini label="DB I/O" value={view.snapshot.load.dbIoRatio} />
+            <LoadMini label="ASYNC" value={view.snapshot.load.asyncRatio} />
+            <LoadMini label="STORAGE" value={view.snapshot.load.storageRatio} />
+          </div>
+        )}
       </section>
 
       <aside className="alert-rail panel-shell">
-        <PanelTitle code="NOW / ALERT" title="주목할 상태" badge={`${view.alerts.length}`} />
-        <div className="alert-list">{view.alerts.map((alert) => <AlertCard key={alert.id} alert={alert} onClick={() => alert.nodeId && onNode(alert.nodeId.replace('technology:', '').replace('framework:', 'application').replace('database:', 'database'))} />)}</div>
+        <PanelTitle code="NOW / ALERT" title="주목할 상태" badge={`${visibleAlerts.length}`} />
+        <div className="alert-list">{visibleAlerts.map((alert) => <AlertCard key={alert.id} alert={alert} onClick={() => alert.nodeId && onNode(alert.nodeId.replace('technology:', '').replace('framework:', 'application').replace('database:', 'database'))} />)}</div>
       </aside>
     </div>
   );
 }
 
-function RequestFlowBoard({ flows, failureRate }: { flows: RequestFlowView[]; failureRate: number }) {
+function RequestFlowBoard({ flows, failureRate, observability }: { flows: RequestFlowView[]; failureRate: number; observability: ObservabilitySnapshot }) {
   if (flows.length === 0) {
     return <section className="request-flow-board empty"><div><span>LIVE REQUEST FLOW</span><strong>서비스 공개 후 요청이 흐릅니다.</strong></div></section>;
   }
 
   const trafficUnit = flows[0].trafficUnit;
+  const apm = observability.level === 'APM';
+  const metrics = observability.level !== 'BASIC';
   return (
-    <section className={`request-flow-board ${failureRate > 0 ? 'has-failure' : ''}`}>
+    <section className={`request-flow-board ${apm && failureRate > 0 ? 'has-failure' : ''}`}>
       <header>
-        <div><span>LIVE REQUEST FLOW</span><strong>기능 요청이 실제 인프라를 통과하는 경로</strong></div>
-        <small>● ≈ {number(trafficUnit)} requests · FAIL {Math.round(failureRate * 100)}%</small>
+        <div><span>LIVE REQUEST FLOW · {apm ? 'TRACED' : 'TOPOLOGY'}</span><strong>{apm ? '요청이 실제 인프라를 통과하는 경로와 실패 지점' : '요청 경로 구조 · APM에서 Hop별 추적 해금'}</strong></div>
+        <small>{metrics ? `● ≈ ${number(trafficUnit)} requests · FAIL ${Math.round(failureRate * 100)}%` : '상세 Traffic Metrics 잠김'}</small>
       </header>
       <div className="request-flow-list">
         {flows.map((flow) => (
-          <div className={`request-flow-row ${flow.failureNode ? 'failed' : ''}`} key={flow.id}>
-            <div className="request-source"><span>FEATURE</span><strong>{flow.name}</strong><small>{flow.successPercent}% success</small></div>
+          <div className={`request-flow-row ${apm && flow.failureNode ? 'failed' : ''}`} key={flow.id}>
+            <div className="request-source"><span>FEATURE</span><strong>{flow.name}</strong><small>{apm ? `${flow.successPercent}% success` : 'route known'}</small></div>
             <div className="request-route">
               {flow.nodes.map((node, nodeIndex) => (
                 <div className="request-hop" key={`${flow.id}-${node.node}-${nodeIndex}`}>
                   {nodeIndex > 0 && (
                     <div className="request-link">
-                      {Array.from({ length: flow.particleCount }).map((_, particleIndex) => (
+                      {Array.from({ length: apm ? flow.particleCount : 1 }).map((_, particleIndex) => (
                         <i key={particleIndex} style={{ animationDelay: `${particleIndex * -.34}s` }} />
                       ))}
                     </div>
                   )}
-                  <div className={`request-node ${node.available ? '' : 'missing'} ${flow.failureNode === node.node ? 'failed' : ''}`}>
+                  <div className={`request-node ${apm && !node.available ? 'missing' : ''} ${apm && flow.failureNode === node.node ? 'failed' : ''}`}>
                     <b>{REQUEST_NODE_LABEL[node.node] ?? node.node}</b>
-                    <small>{node.available ? `${node.arrivalPercent}% IN` : 'MISSING'}</small>
+                    <small>{apm ? (node.available ? `${node.arrivalPercent}% IN` : 'MISSING') : 'CONNECTED'}</small>
                   </div>
                 </div>
               ))}
-              {flow.failureNode && <span className="request-failed-mark">× REQUEST FAILED</span>}
+              {apm && flow.failureNode && <span className="request-failed-mark">× REQUEST FAILED</span>}
             </div>
           </div>
         ))}
@@ -345,22 +385,23 @@ function RequestFlowBoard({ flows, failureRate }: { flows: RequestFlowView[]; fa
   );
 }
 
-function ArchitectureGraph({ view, onNode }: { view: GameView; onNode: (id: string) => void }) {
+function ArchitectureGraph({ view, observability, onNode }: { view: GameView; observability: ObservabilitySnapshot; onNode: (id: string) => void }) {
   const app = view.nodes.find((node) => node.kind === 'application')!;
   const db = view.nodes.find((node) => node.kind === 'database')!;
   const alb = view.nodes.find((node) => node.kind === 'load-balancer');
   const cache = view.nodes.find((node) => node.kind === 'cache');
   const queue = view.nodes.find((node) => node.kind === 'queue');
   const storage = view.nodes.find((node) => node.kind === 'storage');
+  const metrics = observability.level !== 'BASIC';
   return (
     <div className="architecture-canvas">
       <div className="grid-glow" />
       <div className="users-node"><span>◎</span><b>USERS</b><small>{view.hud.launched ? `${number(view.hud.dau)} DAU` : 'PRE-LAUNCH'}</small></div>
       <div className="flow-line vertical line-top" />
       {alb && <><InfraNode node={alb} onClick={() => onNode(alb.id)} extra="TRAFFIC" /><div className="flow-line vertical line-alb" /></>}
-      <InfraNode node={app} onClick={() => onNode(app.id)} extra={`${view.appCount} SERVER${view.appCount > 1 ? 'S' : ''}`} resourceDetail={`CPU ${loadPct(view.snapshot.load.appCpuRatio)}% · I/O ${loadPct(view.snapshot.load.appIoRatio)}%`} />
+      <InfraNode node={app} onClick={() => onNode(app.id)} extra={`${view.appCount} SERVER${view.appCount > 1 ? 'S' : ''}`} resourceDetail={metrics ? `CPU ${loadPct(view.snapshot.load.appCpuRatio)}% · I/O ${loadPct(view.snapshot.load.appIoRatio)}%` : 'RESOURCE METRICS LOCKED'} />
       <div className="flow-line vertical line-db" />
-      <InfraNode node={db} onClick={() => onNode(db.id)} extra={`${view.dbReplicaCount} REPLICA`} resourceDetail={`CPU ${loadPct(view.snapshot.load.dbCpuRatio)}% · I/O ${loadPct(view.snapshot.load.dbIoRatio)}%`} />
+      <InfraNode node={db} onClick={() => onNode(db.id)} extra={`${view.dbReplicaCount} REPLICA`} resourceDetail={metrics ? `CPU ${loadPct(view.snapshot.load.dbCpuRatio)}% · I/O ${loadPct(view.snapshot.load.dbIoRatio)}%` : 'RESOURCE METRICS LOCKED'} />
       {cache && <div className="side-node cache-node"><div className="side-line" /><InfraNode node={cache} onClick={() => onNode(cache.id)} extra="CACHE" /></div>}
       {queue && <div className="side-node queue-node"><div className="side-line" /><InfraNode node={queue} onClick={() => onNode(queue.id)} extra="ASYNC" /></div>}
       {storage && <div className="side-node storage-node"><div className="side-line" /><InfraNode node={storage} onClick={() => onNode(storage.id)} extra="STORAGE" /></div>}
@@ -427,7 +468,7 @@ function LearningPanel({ view, onStudy }: { view: GameView; onStudy: (skill: Ski
   const categories = ['fundamental', 'language', 'framework', 'technology'] as const;
   return (
     <section className="page-panel">
-      <PageHeading eyebrow="DEVELOPER SKILL TREE" title="실전 경험 → 학습 → 레벨업" description="학습 비용은 시작 즉시 CASH에서 차감됩니다. 잠겨 있어도 다음 학습의 예상 일수와 비용을 미리 보여줍니다." />
+      <PageHeading eyebrow="DEVELOPER SKILL TREE" title="실전 경험 → 학습 → 레벨업" description="학습 비용은 시작 즉시 CASH에서 차감됩니다. OS & Runtime / Network / Software Design을 올리면 관측 정보도 BASIC → METRICS → APM으로 깊어집니다." />
       <div className="skill-tree">
         {categories.map((category) => (
           <div className={`skill-lane ${category}`} key={category}><div className="skill-lane-title"><span>{CATEGORY_LABEL[category]}</span><i /></div><div className="skill-node-grid">
@@ -454,12 +495,13 @@ function LearningPanel({ view, onStudy }: { view: GameView; onStudy: (skill: Ski
   );
 }
 
-function FeatureBoard({ view, onFastTrack, onRefactor }: { view: GameView; onFastTrack: () => void; onRefactor: () => void }) {
+function FeatureBoard({ view, observability, onFastTrack, onRefactor }: { view: GameView; observability: ObservabilitySnapshot; onFastTrack: () => void; onRefactor: () => void }) {
   const current = view.snapshot.currentFeature;
   const debt = view.snapshot.techDebt;
+  const showResourceSignature = observability.level !== 'BASIC';
   return (
     <section className="page-panel">
-      <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="기능마다 서로 다른 CPU / I/O 성향을 가지며, 빠른 출시와 코드 건강성 사이의 트레이드오프도 관리합니다." />
+      <PageHeading eyebrow="COMMUNITY ROADMAP" title="Requirement Timeline" description="기능마다 서로 다른 자원 성향을 가지며, 빠른 출시와 코드 건강성 사이의 트레이드오프도 관리합니다." />
       {view.hud.launched && <div className="settlement-summary">
         <span>TECH DEBT · {debt.value}/100</span>
         <strong>{debt.refactoring ? `REFACTORING · ${debt.remainingRefactorDays}D` : `DEV EFF ${pct(debt.developmentModifier)}%`}</strong>
@@ -467,34 +509,45 @@ function FeatureBoard({ view, onFastTrack, onRefactor }: { view: GameView; onFas
         <button className="replica-add" disabled={!debt.canFastTrack || debt.refactoring} onClick={onFastTrack}>⚡ FAST TRACK · +30% PROGRESS</button>
         <button className="replica-add" disabled={debt.value < 10 || debt.refactoring} onClick={onRefactor}>↺ REFACTOR · 5 DAYS · DEBT -30</button>
       </div>}
+      <div className="settlement-summary">
+        <span>OBSERVABILITY · {observability.level}</span>
+        <strong>{observabilityLabel(observability)}</strong>
+        <small>{observability.nextUnlock ?? '요청 추적과 출시 영향 분석까지 모두 해금되었습니다.'}</small>
+      </div>
       <div className="phase-board">{([1, 2, 3] as const).map((phase) => <div className="phase-lane" key={phase}><header><span>PHASE {phase}</span><strong>{phase === 1 ? 'EARLY' : phase === 2 ? 'GROWTH' : 'SCALE'}</strong></header><div>
-        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <div className="inline-progress"><div className="progress-track"><i style={{ width: `${pct(current.progress / current.requiredWork)}%` }} /></div><small>{current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일 · 약 {current.estimatedRemainingDays}일 남음</small></div>}{feature.route && <div className="feature-route-tags">{feature.route.map((node, nodeIndex) => <i key={`${node}-${nodeIndex}`}>{REQUEST_NODE_LABEL[node] ?? node}</i>)}</div>}{feature.load && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}</article>)}
+        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <div className="inline-progress"><div className="progress-track"><i style={{ width: `${pct(current.progress / current.requiredWork)}%` }} /></div><small>{current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일 · 약 {current.estimatedRemainingDays}일 남음</small></div>}{feature.route && <div className="feature-route-tags">{feature.route.map((node, nodeIndex) => <i key={`${node}-${nodeIndex}`}>{REQUEST_NODE_LABEL[node] ?? node}</i>)}</div>}{feature.load && showResourceSignature && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}{feature.load && !showResourceSignature && <small>Resource signature · METRICS에서 해금</small>}</article>)}
       </div></div>)}</div>
     </section>
   );
 }
 
-function ReportPanel({ view }: { view: GameView }) {
+function ReportPanel({ view, observability }: { view: GameView; observability: ObservabilitySnapshot }) {
   const cards = [
     ['DAU', number(view.hud.dau), '현재 일간 활성 사용자'], ['월 예상 매출', money(view.hud.monthlyRevenue), '현재 DAU 기준 예상치'], ['월 예상 비용', money(view.hud.monthlyCost), '인프라 + AI 예상치'], ['월 예상 순이익', money(view.hud.monthlyProfit), '실제 반영은 월말 정산'],
   ];
   const last = view.hud.lastSettlement;
-  return <section className="page-panel"><PageHeading eyebrow="OPERATING REPORT" title="현재 런 요약" description={`현재 M${view.hud.month} D${view.hud.dayOfMonth} · 다음 CASH 정산까지 ${view.hud.daysUntilSettlement}일`} /><div className="report-grid">{cards.map(([label, value, detail]) => <article key={label}><span>{label}</span><strong>{value}</strong><small>{detail}</small><i /></article>)}</div>{last && <div className="settlement-summary"><span>LAST SETTLEMENT · M{last.month}</span><strong>{last.profit >= 0 ? '+' : ''}{money(last.profit)}</strong><small>매출 {money(last.revenue)} · 비용 {money(last.totalCost)} · 정산 후 CASH {money(last.cashAfter)}</small></div>}<div className="report-loads resource-report-loads"><LoadMini label="APP CPU" value={view.snapshot.load.appCpuRatio} /><LoadMini label="APP I/O" value={view.snapshot.load.appIoRatio} /><LoadMini label="DB CPU" value={view.snapshot.load.dbCpuRatio} /><LoadMini label="DB I/O" value={view.snapshot.load.dbIoRatio} /><LoadMini label="ASYNC" value={view.snapshot.load.asyncRatio} /><LoadMini label="STORAGE" value={view.snapshot.load.storageRatio} /></div></section>;
+  return <section className="page-panel"><PageHeading eyebrow="OPERATING REPORT" title="현재 런 요약" description={`현재 M${view.hud.month} D${view.hud.dayOfMonth} · Observability ${observability.level} · 다음 CASH 정산까지 ${view.hud.daysUntilSettlement}일`} /><div className="report-grid">{cards.map(([label, value, detail]) => <article key={label}><span>{label}</span><strong>{value}</strong><small>{detail}</small><i /></article>)}</div>{last && <div className="settlement-summary"><span>LAST SETTLEMENT · M{last.month}</span><strong>{last.profit >= 0 ? '+' : ''}{money(last.profit)}</strong><small>매출 {money(last.revenue)} · 비용 {money(last.totalCost)} · 정산 후 CASH {money(last.cashAfter)}</small></div>}{observability.level === 'BASIC' ? <div className="report-loads resource-report-loads"><LoadMini label="APP" value={view.snapshot.load.appRatio} /><LoadMini label="DB" value={view.snapshot.load.dbRatio} /><LoadMini label="ASYNC" value={view.snapshot.load.asyncRatio} /><LoadMini label="STORAGE" value={view.snapshot.load.storageRatio} /></div> : <div className="report-loads resource-report-loads"><LoadMini label="APP CPU" value={view.snapshot.load.appCpuRatio} /><LoadMini label="APP I/O" value={view.snapshot.load.appIoRatio} /><LoadMini label="DB CPU" value={view.snapshot.load.dbCpuRatio} /><LoadMini label="DB I/O" value={view.snapshot.load.dbIoRatio} /><LoadMini label="ASYNC" value={view.snapshot.load.asyncRatio} /><LoadMini label="STORAGE" value={view.snapshot.load.storageRatio} /></div>}<div className="settlement-summary"><span>OBSERVABILITY · {observability.level}</span><strong>{observabilityLabel(observability)}</strong><small>{observability.nextUnlock ?? '모든 관측 정보 해금 완료'}</small></div></section>;
 }
 
-function NodeInspector({ node, view, onClose, onAction, controller }: { node: ServiceNodeView; view: GameView; onClose: () => void; onAction: (action: () => void) => void; controller: GameController }) {
+function NodeInspector({ node, view, observability, onClose, onAction, controller }: { node: ServiceNodeView; view: GameView; observability: ObservabilitySnapshot; onClose: () => void; onAction: (action: () => void) => void; controller: GameController }) {
   const app = node.kind === 'application';
   const db = node.kind === 'database';
   const appServerDelta = view.infrastructureCosts.addAppServerMonthlyCostDelta;
   const dbReplicaDelta = view.infrastructureCosts.addDbReplicaMonthlyCostDelta;
-  const resourceDetail = app
-    ? `CPU ${loadPct(view.snapshot.load.appCpuRatio)}% (${Math.round(view.snapshot.load.appCpuDemand)}/${Math.round(view.snapshot.load.appCpuCapacity)}) · I/O ${loadPct(view.snapshot.load.appIoRatio)}% (${Math.round(view.snapshot.load.appIoDemand)}/${Math.round(view.snapshot.load.appIoCapacity)})`
-    : db
-      ? `CPU ${loadPct(view.snapshot.load.dbCpuRatio)}% (${Math.round(view.snapshot.load.dbCpuDemand)}/${Math.round(view.snapshot.load.dbCpuCapacity)}) · I/O ${loadPct(view.snapshot.load.dbIoRatio)}% (${Math.round(view.snapshot.load.dbIoDemand)}/${Math.round(view.snapshot.load.dbIoCapacity)})`
-      : null;
-  return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="node-drawer"><header><div className={`drawer-icon ${node.tone}`}>{node.icon}</div><div><span>{node.kind.toUpperCase()}</span><strong>{node.name}</strong></div><button onClick={onClose}>×</button></header><section className="drawer-load"><span>LIVE LOAD · WORST BOTTLENECK</span><strong>{node.loadPercent}%</strong><i><b style={{ width: `${Math.min(100, node.loadPercent)}%` }} /></i><small>{resourceDetail ? `${resourceDetail} · ${node.detail}` : node.detail}</small></section>
-    {app && <section className="drawer-section"><label>SERVER SIZE · MONTHLY COST</label><div className="size-grid">{SIZE_ORDER.map((size) => <button key={size} className={view.appSize === size ? 'active' : ''} onClick={() => onAction(() => controller.scaleApplication(size))}><span>{SIZE_LABEL[size]}</span><small>{size}</small><em>{money(view.infrastructureCosts.appSizeMonthlyCosts[size])}/월</em></button>)}</div><div className="scale-row"><div><span>INSTANCE</span><strong>{view.appCount} / 10</strong><small>{appServerDelta !== null ? `추가 시 월 +${money(appServerDelta)}` : 'ALB 필요 또는 최대치'}</small></div><button disabled={appServerDelta === null} onClick={() => onAction(() => controller.addApplicationServer())}>＋ SERVER{appServerDelta !== null ? ` · 월 +${money(appServerDelta)}` : ''}</button></div><p>Scale-up/out은 CPU와 I/O Capacity를 함께 늘립니다. 프레임워크 성향에 따라 실제 증가 폭은 다릅니다.</p></section>}
-    {db && <section className="drawer-section"><label>DATABASE SIZE · MONTHLY COST</label><div className="size-grid">{SIZE_ORDER.map((size) => <button key={size} className={view.dbSize === size ? 'active' : ''} onClick={() => onAction(() => controller.scaleDatabase(size))}><span>{SIZE_LABEL[size]}</span><small>{size}</small><em>{money(view.infrastructureCosts.dbSizeMonthlyCosts[size])}/월</em></button>)}</div><div className="replica-row"><div className="db-cylinder primary">P</div>{Array.from({ length: view.dbReplicaCount }).map((_, index) => <div className="db-cylinder" key={index}>R</div>)}</div>{view.dbReplicaCount < 3 && <button className="replica-add" onClick={() => onAction(() => controller.addDatabaseReplica())}>＋ REPLICA · 월 +{money(dbReplicaDelta ?? 0)}</button>}<p>Replica는 CPU보다 Read I/O Capacity 증가 효과가 더 큽니다. Read-heavy I/O 병목이면 Redis와 비교해서 선택하세요.</p></section>}
+  const resourceDetail = observability.level === 'BASIC'
+    ? null
+    : app
+      ? observability.level === 'APM'
+        ? `CPU ${loadPct(view.snapshot.load.appCpuRatio)}% (${Math.round(view.snapshot.load.appCpuDemand)}/${Math.round(view.snapshot.load.appCpuCapacity)}) · I/O ${loadPct(view.snapshot.load.appIoRatio)}% (${Math.round(view.snapshot.load.appIoDemand)}/${Math.round(view.snapshot.load.appIoCapacity)})`
+        : `CPU ${loadPct(view.snapshot.load.appCpuRatio)}% · I/O ${loadPct(view.snapshot.load.appIoRatio)}%`
+      : db
+        ? observability.level === 'APM'
+          ? `CPU ${loadPct(view.snapshot.load.dbCpuRatio)}% (${Math.round(view.snapshot.load.dbCpuDemand)}/${Math.round(view.snapshot.load.dbCpuCapacity)}) · I/O ${loadPct(view.snapshot.load.dbIoRatio)}% (${Math.round(view.snapshot.load.dbIoDemand)}/${Math.round(view.snapshot.load.dbIoCapacity)})`
+          : `CPU ${loadPct(view.snapshot.load.dbCpuRatio)}% · I/O ${loadPct(view.snapshot.load.dbIoRatio)}%`
+        : null;
+  return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="node-drawer"><header><div className={`drawer-icon ${node.tone}`}>{node.icon}</div><div><span>{node.kind.toUpperCase()}</span><strong>{node.name}</strong></div><button onClick={onClose}>×</button></header><section className="drawer-load"><span>LIVE LOAD · {observability.level}</span><strong>{node.loadPercent}%</strong><i><b style={{ width: `${Math.min(100, node.loadPercent)}%` }} /></i><small>{resourceDetail ? `${resourceDetail} · ${node.detail}` : `${node.detail} · ${observability.nextUnlock ?? 'APM ACTIVE'}`}</small></section>
+    {app && <section className="drawer-section"><label>SERVER SIZE · MONTHLY COST</label><div className="size-grid">{SIZE_ORDER.map((size) => <button key={size} className={view.appSize === size ? 'active' : ''} onClick={() => onAction(() => controller.scaleApplication(size))}><span>{SIZE_LABEL[size]}</span><small>{size}</small><em>{money(view.infrastructureCosts.appSizeMonthlyCosts[size])}/월</em></button>)}</div><div className="scale-row"><div><span>INSTANCE</span><strong>{view.appCount} / 10</strong><small>{appServerDelta !== null ? `추가 시 월 +${money(appServerDelta)}` : 'ALB 필요 또는 최대치'}</small></div><button disabled={appServerDelta === null} onClick={() => onAction(() => controller.addApplicationServer())}>＋ SERVER{appServerDelta !== null ? ` · 월 +${money(appServerDelta)}` : ''}</button></div><p>Scale-up/out은 CPU와 I/O Capacity를 함께 늘립니다. METRICS부터 두 축을 직접 비교할 수 있습니다.</p></section>}
+    {db && <section className="drawer-section"><label>DATABASE SIZE · MONTHLY COST</label><div className="size-grid">{SIZE_ORDER.map((size) => <button key={size} className={view.dbSize === size ? 'active' : ''} onClick={() => onAction(() => controller.scaleDatabase(size))}><span>{SIZE_LABEL[size]}</span><small>{size}</small><em>{money(view.infrastructureCosts.dbSizeMonthlyCosts[size])}/월</em></button>)}</div><div className="replica-row"><div className="db-cylinder primary">P</div>{Array.from({ length: view.dbReplicaCount }).map((_, index) => <div className="db-cylinder" key={index}>R</div>)}</div>{view.dbReplicaCount < 3 && <button className="replica-add" onClick={() => onAction(() => controller.addDatabaseReplica())}>＋ REPLICA · 월 +{money(dbReplicaDelta ?? 0)}</button>}<p>Replica는 CPU보다 Read I/O Capacity 증가 효과가 더 큽니다. METRICS 해금 후 병목 축을 비교하세요.</p></section>}
     {node.incidentId && <section className="incident-action"><span>⚡ {node.incidentSeverity} INCIDENT</span><button onClick={() => onAction(() => controller.startIncidentResponse(node.incidentId!))}>대응 시작</button></section>}
   </aside></div>;
 }
