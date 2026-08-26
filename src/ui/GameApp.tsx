@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { DatabaseId, FrameworkId, ServerSize, SkillRef } from '../core';
+import { DatabaseId, FrameworkId, ServerSize, ServiceHealthAnalyzer, SkillRef } from '../core';
 import { GameClock, GameSpeed } from '../application/game-clock';
 import {
   AlertView,
@@ -37,6 +37,11 @@ const CATEGORY_LABEL: Record<SkillRef['category'], string> = {
 
 const REQUEST_NODE_LABEL: Record<string, string> = {
   ALB: 'ALB', APP: 'APP', DB: 'DB', CACHE: 'REDIS', QUEUE: 'MQ', STORAGE: 'STORAGE', AI: 'AI',
+};
+
+const BOTTLENECK_LABEL: Record<string, string> = {
+  APP_CPU: 'APP CPU', APP_IO: 'APP I/O', DB_CPU: 'DB CPU', DB_IO: 'DB I/O',
+  ASYNC: 'ASYNC QUEUE', STORAGE: 'STORAGE', NONE: 'NONE',
 };
 
 function money(value: number): string {
@@ -252,6 +257,7 @@ function Hud({ view, speed, dayProgress, onSpeed, onStep }: { view: GameView; sp
 }
 
 function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id: string) => void; onTab: (tab: 'technology' | 'learning' | 'service' | 'features' | 'report') => void }) {
+  const health = ServiceHealthAnalyzer.analyze(view.snapshot.load);
   return (
     <div className="dashboard-layout">
       <aside className="work-rail panel-shell">
@@ -269,6 +275,15 @@ function ServiceDashboard({ view, onNode, onTab }: { view: GameView; onNode: (id
 
       <section className="service-map panel-shell">
         <PanelTitle code="LIVE ARCHITECTURE" title="Service Map" badge="CPU / I/O" />
+        {view.hud.launched ? (
+          <div className="settlement-summary service-health-summary">
+            <span>SERVICE HEALTH · {health.status}</span>
+            <strong>P95 {health.p95LatencyMs.toLocaleString()}ms</strong>
+            <small>TOP BOTTLENECK · {BOTTLENECK_LABEL[health.bottleneck]} {loadPct(health.bottleneckRatio)}% · Latency는 CPU/I/O 압력과 Request Failure에서 파생되는 결과 지표입니다.</small>
+          </div>
+        ) : (
+          <div className="settlement-summary service-health-summary"><span>SERVICE HEALTH · PRE-LAUNCH</span><strong>P95 —</strong><small>서비스 공개 후 병목과 응답시간을 자동 진단합니다.</small></div>
+        )}
         <ArchitectureGraph view={view} onNode={onNode} />
         <RequestFlowBoard flows={view.requestFlows} failureRate={view.snapshot.load.failureRate} />
         <div className="load-strip resource-load-strip">
