@@ -206,6 +206,27 @@ describe('infrastructure and load', () => {
     expect(infra.monthlyCost).toBeCloseTo(105_000 + 120_000 + 350_000);
   });
 
+  it('multiplies CPU, IO and storage demand during a temporary traffic spike', () => {
+    const infra = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    const feature = new FeatureDefinition({
+      id: 'SPIKE', name: 'Spike traffic', baseWork: 1, complexity: 'NORMAL',
+      load: { app: 2, db: 2, async: 0, storage: 1 },
+      resourceLoad: {
+        app: { cpu: 1.2, io: 1.6 },
+        db: { cpu: 0.8, io: 1.4 },
+      },
+      requestRoute: [{ node: 'APP' }, { node: 'DB' }, { node: 'STORAGE' }],
+    });
+
+    const normal = LoadCalculator.calculate(100_000, [feature], infra);
+    const spike = LoadCalculator.calculate(100_000, [feature], infra, { trafficMultiplier: 1.8 });
+
+    expect(spike.appCpuDemand).toBeCloseTo(normal.appCpuDemand * 1.8);
+    expect(spike.appIoDemand).toBeCloseTo(normal.appIoDemand * 1.8);
+    expect(spike.dbIoDemand).toBeCloseTo(normal.dbIoDemand * 1.8);
+    expect(spike.storageDemand).toBeCloseTo(normal.storageDemand * 1.8);
+  });
+
   it('keeps maximum prepared infrastructure just within capacity around 25M DAU', () => {
     const infra = new InfrastructureState(
       new AppCluster('SPRING_BOOT', ServerSize.XLARGE, 10, true),
