@@ -1,3 +1,4 @@
+import { DatabaseDefinition, DatabaseId } from './database';
 import { FeatureDefinition, FrameworkDefinition, FrameworkId } from './feature';
 import { BuildableTechnologyId, TECHNOLOGIES } from './technology';
 
@@ -8,7 +9,7 @@ export enum ServerSize {
   XLARGE = 'XLARGE',
 }
 
-export type DatabaseId = 'POSTGRESQL' | 'MYSQL' | 'MONGODB';
+export type { DatabaseId } from './database';
 export type TechnologyId = BuildableTechnologyId;
 
 const APP_SIZE: Record<ServerSize, { capacity: number; cost: number }> = {
@@ -23,12 +24,6 @@ const DB_SIZE: Record<ServerSize, { capacity: number; cost: number }> = {
   [ServerSize.MEDIUM]: { capacity: 150, cost: 250_000 },
   [ServerSize.LARGE]: { capacity: 270, cost: 500_000 },
   [ServerSize.XLARGE]: { capacity: 450, cost: 1_000_000 },
-};
-
-const DB_MODIFIERS: Record<DatabaseId, { capacity: number; cost: number }> = {
-  POSTGRESQL: { capacity: 1, cost: 1 },
-  MYSQL: { capacity: 1, cost: 0.95 },
-  MONGODB: { capacity: 1.05, cost: 1 },
 };
 
 const ASYNC_CAPACITY: Partial<Record<TechnologyId, number>> = {
@@ -94,13 +89,13 @@ export class DatabaseCluster {
   }
 
   get capacity(): number {
-    const modifier = DB_MODIFIERS[this.databaseId];
-    return DB_SIZE[this._size].capacity * (1 + 0.6 * this._replicaCount) * modifier.capacity;
+    const database = DatabaseDefinition.byId(this.databaseId);
+    return DB_SIZE[this._size].capacity * (1 + 0.6 * this._replicaCount) * database.capacityModifier;
   }
 
   get monthlyCost(): number {
-    const modifier = DB_MODIFIERS[this.databaseId];
-    return DB_SIZE[this._size].cost * (1 + this._replicaCount) * modifier.cost;
+    const database = DatabaseDefinition.byId(this.databaseId);
+    return DB_SIZE[this._size].cost * (1 + this._replicaCount) * database.costModifier;
   }
 }
 
@@ -121,13 +116,8 @@ export class InfrastructureState {
     if (technology === 'ALB') this.app.enableAlb();
   }
 
-  hasTechnology(technology: TechnologyId): boolean {
-    return this.technologies.has(technology);
-  }
-
-  get deployedTechnologies(): readonly TechnologyId[] {
-    return [...this.technologies];
-  }
+  hasTechnology(technology: TechnologyId): boolean { return this.technologies.has(technology); }
+  get deployedTechnologies(): readonly TechnologyId[] { return [...this.technologies]; }
 
   get queueTechnology(): TechnologyId | null {
     if (this.technologies.has('KAFKA')) return 'KAFKA';
@@ -141,9 +131,7 @@ export class InfrastructureState {
     return queue ? ASYNC_CAPACITY[queue] ?? 0 : 0;
   }
 
-  get storageCapacity(): number {
-    return this.hasTechnology('OBJECT_STORAGE') ? 1_000 : 100;
-  }
+  get storageCapacity(): number { return this.hasTechnology('OBJECT_STORAGE') ? 1_000 : 100; }
 
   get monthlyCost(): number {
     let total = this.app.monthlyCost + this.database.monthlyCost;
@@ -193,7 +181,6 @@ export class LoadCalculator {
 
     const hasReadHeavy = features.some((feature) => feature.tags.has('READ_HEAVY'));
     const hasEventHeavy = features.some((feature) => feature.tags.has('EVENT_HEAVY'));
-
     const rawAsync = demand(weights.async, dau, LOAD_CURVE.async);
     const queue = infrastructure.queueTechnology;
     const asyncDemand = queue === 'KAFKA' && hasEventHeavy ? rawAsync * 0.85 : rawAsync;
