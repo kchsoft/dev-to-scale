@@ -1,4 +1,5 @@
 import { FeatureDefinition, FrameworkDefinition, FrameworkId } from './feature';
+import { BuildableTechnologyId, TECHNOLOGIES } from './technology';
 
 export enum ServerSize {
   SMALL = 'SMALL',
@@ -8,7 +9,7 @@ export enum ServerSize {
 }
 
 export type DatabaseId = 'POSTGRESQL' | 'MYSQL' | 'MONGODB';
-export type TechnologyId = 'REDIS' | 'SQS' | 'RABBITMQ' | 'KAFKA' | 'ALB' | 'OBJECT_STORAGE';
+export type TechnologyId = BuildableTechnologyId;
 
 const APP_SIZE: Record<ServerSize, { capacity: number; cost: number }> = {
   [ServerSize.SMALL]: { capacity: 100, cost: 100_000 },
@@ -28,15 +29,6 @@ const DB_MODIFIERS: Record<DatabaseId, { capacity: number; cost: number }> = {
   POSTGRESQL: { capacity: 1, cost: 1 },
   MYSQL: { capacity: 1, cost: 0.95 },
   MONGODB: { capacity: 1.05, cost: 1 },
-};
-
-const TECHNOLOGY_MONTHLY_COST: Record<TechnologyId, number> = {
-  REDIS: 100_000,
-  SQS: 80_000,
-  RABBITMQ: 150_000,
-  KAFKA: 350_000,
-  ALB: 100_000,
-  OBJECT_STORAGE: 80_000,
 };
 
 const ASYNC_CAPACITY: Partial<Record<TechnologyId, number>> = {
@@ -63,10 +55,7 @@ export class AppCluster {
   get count(): number { return this._count; }
 
   enableAlb(): void { this.albAvailable = true; }
-
-  scaleUp(size: ServerSize): void {
-    this._size = size;
-  }
+  scaleUp(size: ServerSize): void { this._size = size; }
 
   addServer(): void {
     if (!this.albAvailable) throw new Error('ALB is required before application scale-out');
@@ -136,6 +125,10 @@ export class InfrastructureState {
     return this.technologies.has(technology);
   }
 
+  get deployedTechnologies(): readonly TechnologyId[] {
+    return [...this.technologies];
+  }
+
   get queueTechnology(): TechnologyId | null {
     if (this.technologies.has('KAFKA')) return 'KAFKA';
     if (this.technologies.has('RABBITMQ')) return 'RABBITMQ';
@@ -154,7 +147,7 @@ export class InfrastructureState {
 
   get monthlyCost(): number {
     let total = this.app.monthlyCost + this.database.monthlyCost;
-    for (const technology of this.technologies) total += TECHNOLOGY_MONTHLY_COST[technology];
+    for (const technology of this.technologies) total += TECHNOLOGIES[technology].monthlyCost;
     return total;
   }
 }
