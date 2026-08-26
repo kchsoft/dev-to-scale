@@ -120,6 +120,7 @@ export interface FeatureDevelopmentProgressContext {
 
 export class FeatureDevelopmentTask {
   private _completedWork = 0;
+  private _elapsedDays = 0;
 
   private constructor(
     readonly feature: FeatureDefinition,
@@ -140,6 +141,7 @@ export class FeatureDevelopmentTask {
   }
 
   get completedWork(): number { return this._completedWork; }
+  get elapsedDays(): number { return this._elapsedDays; }
   get progressRatio(): number { return Math.min(1, this._completedWork / this.requiredWork); }
   get completed(): boolean { return this._completedWork >= this.requiredWork; }
 
@@ -148,6 +150,7 @@ export class FeatureDevelopmentTask {
     const progress = this.framework.productivity(context.frameworkLevel, this.feature.complexity)
       * context.incidentModifier;
     this._completedWork = Math.min(this.requiredWork, this._completedWork + progress);
+    this._elapsedDays += 1;
     return progress;
   }
 }
