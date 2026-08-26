@@ -62,6 +62,12 @@ export interface GameSnapshot {
     elapsedDays: number;
     estimatedRemainingDays: number;
   };
+  growthEvent: null | {
+    type: GrowthEvent['type'];
+    remainingDays: number;
+    trafficMultiplier: number;
+    growthModifier: number;
+  };
   load: LoadSnapshot;
   incidents: readonly {
     id: string;
@@ -145,6 +151,14 @@ export class GameEngine {
             requiredWork: buildTask.definition.buildWork,
             elapsedDays: buildTask.elapsedDays,
             estimatedRemainingDays: buildTask.estimatedRemainingDays(buildTechnologyLevel, this.incidents.developmentModifier),
+          }
+        : null,
+      growthEvent: this.growthEvent?.active
+        ? {
+            type: this.growthEvent.type,
+            remainingDays: this.growthEvent.remainingDays,
+            trafficMultiplier: this.growthEvent.trafficMultiplier,
+            growthModifier: this.growthEvent.modifier,
           }
         : null,
       load: this._load,
@@ -256,6 +270,23 @@ export class GameEngine {
   addDatabaseReplica(): void {
     this.ensureRunning();
     this.infrastructure.database.addReplica();
+  }
+
+  /**
+   * Preview the load that would exist immediately after a not-yet-released feature ships.
+   * The same proficiency, incidents, technologies and temporary traffic conditions are used.
+   */
+  previewLoadWithFeature(feature: FeatureDefinition): LoadSnapshot {
+    const active = this.activeFeaturesForLoad();
+    const projectedFeatures = active.some((candidate) => candidate.id === feature.id)
+      ? active
+      : [...active, feature];
+    return LoadCalculator.calculate(
+      this._dau,
+      projectedFeatures,
+      this.infrastructure,
+      this.loadCalculationContext(),
+    );
   }
 
   private ensureRunning(): void {
@@ -394,6 +425,7 @@ export class GameEngine {
       databaseProficiencyLevel: this.developer.get(skillRef.technology(this.config.databaseId)).level,
       technologyProficiencyLevels,
       nodeHealth,
+      trafficMultiplier: this.growthEvent?.active ? this.growthEvent.trafficMultiplier : 1,
     };
   }
 
