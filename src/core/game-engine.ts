@@ -29,7 +29,7 @@ export interface GameSnapshot {
   dau: number;
   cash: number;
   completedFeatures: readonly string[];
-  currentFeature: null | { id: string; progress: number; requiredWork: number };
+  currentFeature: null | { id: string; progress: number; requiredWork: number; elapsedDays: number };
   currentLearning: null | { id: string; targetLevel: number; studyDays: number };
   currentTechnologyBuild: null | { id: string; progress: number; requiredWork: number };
   load: LoadSnapshot;
@@ -85,7 +85,12 @@ export class GameEngine {
       cash: this.finance.cash,
       completedFeatures: this.completedFeatureDefinitions.map((feature) => feature.id),
       currentFeature: this.featureTask
-        ? { id: this.featureTask.feature.id, progress: this.featureTask.completedWork, requiredWork: this.featureTask.requiredWork }
+        ? {
+            id: this.featureTask.feature.id,
+            progress: this.featureTask.completedWork,
+            requiredWork: this.featureTask.requiredWork,
+            elapsedDays: this.featureTask.elapsedDays,
+          }
         : null,
       currentLearning: learningTask
         ? { id: learningTask.skill.id, targetLevel: learningTask.targetLevel, studyDays: learningTask.requiredStudyDays }
