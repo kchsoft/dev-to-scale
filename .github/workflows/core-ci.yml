@@ -2,9 +2,9 @@ name: Dev to Scale CI
 
 on:
   pull_request:
-    branches: [main, feature/playable-mvp, feature/core-engine-v1]
+    branches: [main, feature/playable-mvp, feature/core-engine-v1, feature/mvp-ui-tweaks]
   push:
-    branches: [feature/core-engine-v1, feature/ui-rebuild-v1, feature/request-flow-v1]
+    branches: [feature/core-engine-v1, feature/ui-rebuild-v1, feature/request-flow-v1, feature/cpu-io-load-v1]
 
 jobs:
   verify:

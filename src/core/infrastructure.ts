@@ -84,9 +84,20 @@ export class AppCluster {
     this._count += 1;
   }
 
+  /** Legacy aggregate capacity retained for existing economy/UI previews. */
   get capacity(): number {
     const framework = FrameworkDefinition.byId(this.frameworkId);
     return APP_SIZE[this._size].capacity * this._count * framework.capacityModifier;
+  }
+
+  get cpuCapacity(): number {
+    const framework = FrameworkDefinition.byId(this.frameworkId);
+    return APP_SIZE[this._size].capacity * this._count * framework.cpuCapacityModifier;
+  }
+
+  get ioCapacity(): number {
+    const framework = FrameworkDefinition.byId(this.frameworkId);
+    return APP_SIZE[this._size].capacity * this._count * framework.ioCapacityModifier;
   }
 
   get monthlyCost(): number {
@@ -114,9 +125,21 @@ export class DatabaseCluster {
     this._replicaCount += 1;
   }
 
+  /** Legacy aggregate capacity retained for backwards compatibility. */
   get capacity(): number {
     const database = DatabaseDefinition.byId(this.databaseId);
     return DB_SIZE[this._size].capacity * (1 + 0.6 * this._replicaCount) * database.capacityModifier;
+  }
+
+  /** Read replicas distribute query CPU as well, but remain stronger for I/O. */
+  get cpuCapacity(): number {
+    const database = DatabaseDefinition.byId(this.databaseId);
+    return DB_SIZE[this._size].capacity * (1 + 0.55 * this._replicaCount) * database.capacityModifier;
+  }
+
+  get ioCapacity(): number {
+    const database = DatabaseDefinition.byId(this.databaseId);
+    return DB_SIZE[this._size].capacity * (1 + 0.75 * this._replicaCount) * database.capacityModifier;
   }
 
   get monthlyCost(): number {
@@ -187,9 +210,12 @@ export interface LoadCalculationContext {
   databaseProficiencyLevel?: number;
   technologyProficiencyLevels?: Partial<Record<TechnologyId, number>>;
   nodeHealth?: Partial<Record<RequestNodeKind, number>>;
+  /** Temporary request-volume multiplier such as a viral traffic spike. */
+  trafficMultiplier?: number;
 }
 
 export interface LoadSnapshot {
+  /** Legacy aggregate demand/capacity fields. Ratios use the worst CPU/I/O bottleneck. */
   appDemand: number;
   dbDemand: number;
   asyncDemand: number;
@@ -205,6 +231,24 @@ export interface LoadSnapshot {
   dbRatio: number;
   asyncRatio: number;
   storageRatio: number;
+
+  appCpuDemand: number;
+  appIoDemand: number;
+  dbCpuDemand: number;
+  dbIoDemand: number;
+  rawAppCpuCapacity: number;
+  rawAppIoCapacity: number;
+  rawDbCpuCapacity: number;
+  rawDbIoCapacity: number;
+  appCpuCapacity: number;
+  appIoCapacity: number;
+  dbCpuCapacity: number;
+  dbIoCapacity: number;
+  appCpuRatio: number;
+  appIoRatio: number;
+  dbCpuRatio: number;
+  dbIoRatio: number;
+
   failureRate: number;
   requestFlows: readonly RequestFlowResult[];
 }
@@ -224,6 +268,10 @@ function demand(weight: number, dau: number, curve: { coefficient: number; expon
 function queueRequirement(feature: FeatureDefinition): 'REQUIRED' | 'OPTIONAL' | null {
   const queueStep = feature.requestRoute.find((step) => step.node === 'QUEUE');
   return queueStep ? queueStep.requirement ?? 'REQUIRED' : null;
+}
+
+function ratio(value: number, capacity: number): number {
+  return capacity > 0 ? value / capacity : 0;
 }
 
 export class LoadCalculator {
@@ -248,22 +296,39 @@ export class LoadCalculator {
       health: context.nodeHealth,
     }));
 
-    let appDemand = 0;
-    let dbDemand = 0;
+    let appCpuDemand = 0;
+    let appIoDemand = 0;
+    let dbCpuDemand = 0;
+    let dbIoDemand = 0;
     let asyncDemand = 0;
     let storageDemand = 0;
     let weightedSuccess = 0;
     let totalTrafficWeight = 0;
 
+    const cacheHealth = Math.max(0, Math.min(1, context.nodeHealth?.CACHE ?? 1));
+    const redisActive = infrastructure.hasTechnology('REDIS');
+    const trafficMultiplier = Math.max(0.1, context.trafficMultiplier ?? 1);
+
     features.forEach((feature, index) => {
       const flow = requestFlows[index];
-      const appBase = demand(feature.load.app, dau, LOAD_CURVE.app);
-      const dbBase = demand(feature.load.db, dau, LOAD_CURVE.db);
-      const asyncBase = demand(feature.load.async, dau, LOAD_CURVE.async);
-      const storageBase = demand(feature.load.storage, dau, LOAD_CURVE.storage);
+      const appCpuBase = demand(feature.resourceLoad.app.cpu, dau, LOAD_CURVE.app) * trafficMultiplier;
+      const appIoBase = demand(feature.resourceLoad.app.io, dau, LOAD_CURVE.app) * trafficMultiplier;
+      let dbCpuBase = demand(feature.resourceLoad.db.cpu, dau, LOAD_CURVE.db) * trafficMultiplier;
+      let dbIoBase = demand(feature.resourceLoad.db.io, dau, LOAD_CURVE.db) * trafficMultiplier;
+      const asyncBase = demand(feature.load.async, dau, LOAD_CURVE.async) * trafficMultiplier;
+      const storageBase = demand(feature.load.storage, dau, LOAD_CURVE.storage) * trafficMultiplier;
 
-      appDemand += appBase * flow.arrivalRatio('APP');
-      dbDemand += dbBase * flow.arrivalRatio('DB');
+      // Redis is deliberately a targeted Read-heavy I/O solution rather than a
+      // generic DB capacity upgrade. Cache incidents weaken the benefit.
+      if (redisActive && feature.tags.has('READ_HEAVY')) {
+        dbCpuBase *= 1 - 0.12 * cacheHealth;
+        dbIoBase *= 1 - 0.40 * cacheHealth;
+      }
+
+      appCpuDemand += appCpuBase * flow.arrivalRatio('APP');
+      appIoDemand += appIoBase * flow.arrivalRatio('APP');
+      dbCpuDemand += dbCpuBase * flow.arrivalRatio('DB');
+      dbIoDemand += dbIoBase * flow.arrivalRatio('DB');
       storageDemand += storageBase * flow.arrivalRatio('STORAGE');
 
       const requirement = queueRequirement(feature);
@@ -271,7 +336,11 @@ export class LoadCalculator {
         const kafkaModifier = queue === 'KAFKA' && feature.tags.has('EVENT_HEAVY') ? 0.85 : 1;
         asyncDemand += asyncBase * flow.arrivalRatio('QUEUE') * kafkaModifier;
       } else if (requirement === 'OPTIONAL') {
-        appDemand += asyncBase * flow.arrivalRatio('APP');
+        // Without a queue, optional async work falls back into the APP process.
+        // Waiting/network work is intentionally much more I/O-heavy than CPU-heavy.
+        const fallback = asyncBase * flow.arrivalRatio('APP');
+        appCpuDemand += fallback * 0.25;
+        appIoDemand += fallback;
       }
 
       const trafficWeight = Math.max(
@@ -282,26 +351,36 @@ export class LoadCalculator {
       weightedSuccess += trafficWeight * flow.successRatio;
     });
 
-    if (infrastructure.hasTechnology('REDIS')) {
-      const hasReadHeavy = features.some((feature) => feature.tags.has('READ_HEAVY'));
-      const cacheHealth = Math.max(0, Math.min(1, context.nodeHealth?.CACHE ?? 1));
-      const reduction = (hasReadHeavy ? 0.30 : 0.25) * cacheHealth;
-      dbDemand *= 1 - reduction;
-    }
-
     const rawAppCapacity = infrastructure.app.capacity;
     const rawDbCapacity = infrastructure.database.capacity;
     const rawAsyncCapacity = infrastructure.asyncCapacity;
-    const appCapacity = rawAppCapacity * capacityTuningMultiplier(context.appProficiencyLevel ?? 1);
-    const dbCapacity = rawDbCapacity * capacityTuningMultiplier(context.databaseProficiencyLevel ?? 1);
+    const tuningApp = capacityTuningMultiplier(context.appProficiencyLevel ?? 1);
+    const tuningDb = capacityTuningMultiplier(context.databaseProficiencyLevel ?? 1);
+    const appCapacity = rawAppCapacity * tuningApp;
+    const dbCapacity = rawDbCapacity * tuningDb;
+
+    const rawAppCpuCapacity = infrastructure.app.cpuCapacity;
+    const rawAppIoCapacity = infrastructure.app.ioCapacity;
+    const rawDbCpuCapacity = infrastructure.database.cpuCapacity;
+    const rawDbIoCapacity = infrastructure.database.ioCapacity;
+    const appCpuCapacity = rawAppCpuCapacity * tuningApp;
+    const appIoCapacity = rawAppIoCapacity * tuningApp;
+    const dbCpuCapacity = rawDbCpuCapacity * tuningDb;
+    const dbIoCapacity = rawDbIoCapacity * tuningDb;
+
     const queueLevel = queue ? context.technologyProficiencyLevels?.[queue] ?? 1 : 1;
     const asyncCapacity = rawAsyncCapacity * capacityTuningMultiplier(queueLevel);
     const storageCapacity = infrastructure.storageCapacity;
+
+    const appCpuRatio = ratio(appCpuDemand, appCpuCapacity);
+    const appIoRatio = ratio(appIoDemand, appIoCapacity);
+    const dbCpuRatio = ratio(dbCpuDemand, dbCpuCapacity);
+    const dbIoRatio = ratio(dbIoDemand, dbIoCapacity);
     const failureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
 
     return {
-      appDemand,
-      dbDemand,
+      appDemand: Math.max(appCpuDemand, appIoDemand),
+      dbDemand: Math.max(dbCpuDemand, dbIoDemand),
       asyncDemand,
       storageDemand,
       rawAppCapacity,
@@ -311,10 +390,26 @@ export class LoadCalculator {
       dbCapacity,
       asyncCapacity,
       storageCapacity,
-      appRatio: appCapacity > 0 ? appDemand / appCapacity : 0,
-      dbRatio: dbCapacity > 0 ? dbDemand / dbCapacity : 0,
+      appRatio: Math.max(appCpuRatio, appIoRatio),
+      dbRatio: Math.max(dbCpuRatio, dbIoRatio),
       asyncRatio: queue && asyncCapacity > 0 ? asyncDemand / asyncCapacity : 0,
       storageRatio: storageCapacity > 0 ? storageDemand / storageCapacity : 0,
+      appCpuDemand,
+      appIoDemand,
+      dbCpuDemand,
+      dbIoDemand,
+      rawAppCpuCapacity,
+      rawAppIoCapacity,
+      rawDbCpuCapacity,
+      rawDbIoCapacity,
+      appCpuCapacity,
+      appIoCapacity,
+      dbCpuCapacity,
+      dbIoCapacity,
+      appCpuRatio,
+      appIoRatio,
+      dbCpuRatio,
+      dbIoRatio,
       failureRate: Math.max(0, Math.min(1, failureRate)),
       requestFlows,
     };

@@ -3,7 +3,7 @@ import { DatabaseDefinition, DatabaseId } from './database';
 import { ExperienceAccrualService } from './experience';
 import { FeatureDefinition, FeatureDevelopmentTask, FrameworkDefinition, FrameworkId } from './feature';
 import { FinanceAccount, MonthlyEconomyLedger, RevenuePolicy } from './finance';
-import { GrowthEvent, GrowthPolicy, RandomSource } from './growth';
+import { GrowthEvent, GrowthPolicy, RandomSource, TrafficSpikeResponse } from './growth';
 import { IncidentGenerator, IncidentManager } from './incident-manager';
 import { IncidentTopology } from './incident-topology';
 import {
@@ -18,6 +18,7 @@ import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } fro
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
 import { requestNodeForIncident, RequestNodeKind, trafficHealthForSeverity } from './request-flow';
+import { TechDebtState } from './tech-debt';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
 
 export type GameStatus = 'RUNNING' | 'BANKRUPT' | 'WON';
@@ -62,6 +63,23 @@ export interface GameSnapshot {
     elapsedDays: number;
     estimatedRemainingDays: number;
   };
+  growthEvent: null | {
+    type: GrowthEvent['type'];
+    remainingDays: number;
+    trafficMultiplier: number;
+    loadMultiplier: number;
+    growthModifier: number;
+    response: GrowthEvent['response'];
+    burstCost: number;
+  };
+  techDebt: {
+    value: number;
+    refactoring: boolean;
+    remainingRefactorDays: number;
+    developmentModifier: number;
+    incidentRiskMultiplier: number;
+    canFastTrack: boolean;
+  };
   load: LoadSnapshot;
   incidents: readonly {
     id: string;
@@ -82,6 +100,7 @@ export class GameEngine {
   readonly learning = new LearningSlot();
   readonly technologyBuild = new TechnologyBuildSlot();
   readonly incidents = new IncidentManager();
+  readonly techDebt = new TechDebtState();
   readonly finance: FinanceAccount;
 
   private readonly random: RandomSource;
@@ -112,6 +131,12 @@ export class GameEngine {
   get launched(): boolean { return this._launched; }
   get status(): GameStatus { return this._status; }
   get lastMonthlyRevenue(): number { return this._lastMonthlyRevenue; }
+  get trafficSpikeBurstCost(): number {
+    // Expensive enough to remain a choice at scale, but not so punitive that a
+    // healthy cash buffer becomes meaningless. Rounded for game-readable UI.
+    const raw = Math.max(150_000, this.infrastructure.monthlyCost * 0.75);
+    return Math.ceil(raw / 10_000) * 10_000;
+  }
 
   get snapshot(): GameSnapshot {
     const learningTask = this.learning.current;
@@ -119,6 +144,12 @@ export class GameEngine {
     const buildTechnologyLevel = buildTask
       ? this.developer.get(skillRef.technology(buildTask.definition.id)).level
       : 1;
+    const featureCanFastTrack = Boolean(
+      this._launched
+      && this.featureTask
+      && this.featureTask.feature.id !== COMMUNITY_BOOTSTRAP.id
+      && this.techDebt.canFastTrack(this.featureTask.feature.id),
+    );
     return {
       day: this._day,
       status: this._status,
@@ -147,6 +178,25 @@ export class GameEngine {
             estimatedRemainingDays: buildTask.estimatedRemainingDays(buildTechnologyLevel, this.incidents.developmentModifier),
           }
         : null,
+      growthEvent: this.growthEvent?.active
+        ? {
+            type: this.growthEvent.type,
+            remainingDays: this.growthEvent.remainingDays,
+            trafficMultiplier: this.growthEvent.trafficMultiplier,
+            loadMultiplier: this.growthEvent.loadMultiplier,
+            growthModifier: this.growthEvent.modifier,
+            response: this.growthEvent.response,
+            burstCost: this.growthEvent.type === 'VIRAL' ? this.trafficSpikeBurstCost : 0,
+          }
+        : null,
+      techDebt: {
+        value: this.techDebt.value,
+        refactoring: this.techDebt.refactoring,
+        remainingRefactorDays: this.techDebt.remainingRefactorDays,
+        developmentModifier: this.techDebt.developmentModifier,
+        incidentRiskMultiplier: this.techDebt.incidentRiskMultiplier,
+        canFastTrack: featureCanFastTrack,
+      },
       load: this._load,
       incidents: this.incidents.incidents.map((incident) => ({
         id: incident.id,
@@ -204,7 +254,11 @@ export class GameEngine {
     }
 
     this.incidents.advanceResponseDay();
-    this.advanceFeatureDevelopment(incidentDevelopmentModifier);
+    const refactoringToday = this.techDebt.refactoring;
+    this.techDebt.advanceDay();
+    if (!refactoringToday) {
+      this.advanceFeatureDevelopment(incidentDevelopmentModifier * this.techDebt.developmentModifier);
+    }
     this.autoStartRequirementIfEligible();
 
     if (this.growthEvent?.active) this.growthEvent.advanceDay();
@@ -258,6 +312,63 @@ export class GameEngine {
     this.infrastructure.database.addReplica();
   }
 
+  fastTrackCurrentFeature(): { addedWork: number; addedDebt: number } {
+    this.ensureRunning();
+    const task = this.featureTask;
+    if (!this._launched || !task || task.feature.id === COMMUNITY_BOOTSTRAP.id) {
+      throw new Error('No releasable feature to fast-track');
+    }
+    const addedDebt = this.techDebt.fastTrack(task.feature.id, task.feature.complexity);
+    const addedWork = task.accelerate(task.requiredWork * 0.3);
+    this.finishFeatureIfComplete();
+    return { addedWork, addedDebt };
+  }
+
+  startRefactor(): void {
+    this.ensureRunning();
+    if (!this._launched) throw new Error('Service must be online before refactoring');
+    this.techDebt.startRefactor();
+  }
+
+  respondToTrafficSpike(response: TrafficSpikeResponse): { cost: number } {
+    this.ensureRunning();
+    const event = this.growthEvent;
+    if (!event?.active || event.type !== 'VIRAL') throw new Error('No active viral traffic spike');
+    if (!event.canRespond) throw new Error('Traffic spike response already selected');
+
+    const cost = response === 'BURST' ? this.trafficSpikeBurstCost : 0;
+    if (cost > 0 && this.finance.cash < cost) throw new Error('Insufficient cash for emergency burst');
+
+    event.respond(response);
+    if (cost > 0) this.finance.spendImmediately(cost);
+
+    // The decision should be visible immediately instead of waiting for next day.
+    this._load = LoadCalculator.calculate(
+      this._dau,
+      this.activeFeaturesForLoad(),
+      this.infrastructure,
+      this.loadCalculationContext(),
+    );
+    return { cost };
+  }
+
+  /**
+   * Preview the load that would exist immediately after a not-yet-released feature ships.
+   * The same proficiency, incidents, technologies and temporary traffic conditions are used.
+   */
+  previewLoadWithFeature(feature: FeatureDefinition): LoadSnapshot {
+    const active = this.activeFeaturesForLoad();
+    const projectedFeatures = active.some((candidate) => candidate.id === feature.id)
+      ? active
+      : [...active, feature];
+    return LoadCalculator.calculate(
+      this._dau,
+      projectedFeatures,
+      this.infrastructure,
+      this.loadCalculationContext(),
+    );
+  }
+
   private ensureRunning(): void {
     if (this._status !== 'RUNNING') throw new Error(`Game is ${this._status}`);
   }
@@ -283,19 +394,21 @@ export class GameEngine {
     this._dau = GrowthPolicy.nextDau(this._dau, result.totalModifier);
   }
 
-  private advanceFeatureDevelopment(incidentModifier: number): void {
+  private advanceFeatureDevelopment(developmentModifier: number): void {
     if (!this.featureTask) return;
     const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
-    this.featureTask.advanceDay({ frameworkLevel, incidentModifier });
+    this.featureTask.advanceDay({ frameworkLevel, incidentModifier: developmentModifier });
     this.finishFeatureIfComplete();
   }
 
   private estimatedFeatureRemainingDays(task: FeatureDevelopmentTask): number {
     const frameworkLevel = this.developer.get(skillRef.framework(this.config.frameworkId)).level;
     const currentDailyProgress = task.framework.productivity(frameworkLevel, task.feature.complexity)
-      * this.incidents.developmentModifier;
+      * this.incidents.developmentModifier
+      * this.techDebt.developmentModifier;
     if (currentDailyProgress <= 0) return 0;
-    return Math.max(0, Math.ceil((task.requiredWork - task.completedWork) / currentDailyProgress));
+    const activeWorkDays = Math.max(0, Math.ceil((task.requiredWork - task.completedWork) / currentDailyProgress));
+    return activeWorkDays + (this.techDebt.refactoring ? this.techDebt.remainingRefactorDays : 0);
   }
 
   private createFeatureTask(feature: FeatureDefinition): FeatureDevelopmentTask {
@@ -325,7 +438,7 @@ export class GameEngine {
   }
 
   private autoStartRequirementIfEligible(): void {
-    if (this.featureTask || !this._launched || this.progression.finished) return;
+    if (this.featureTask || !this._launched || this.progression.finished || this.techDebt.refactoring) return;
     const requirement = this.progression.tryUnlock(this._dau);
     if (!requirement) return;
     this.featureTask = this.createFeatureTask(COMMUNITY_FEATURES[requirement.featureId]);
@@ -372,6 +485,7 @@ export class GameEngine {
       IncidentTopology.candidates(this.incidentTopologyContext()),
       this.incidents.activeNodeIds,
       this.random,
+      this.techDebt.incidentRiskMultiplier,
     );
     if (incident) this.incidents.add(incident);
   }
@@ -394,6 +508,7 @@ export class GameEngine {
       databaseProficiencyLevel: this.developer.get(skillRef.technology(this.config.databaseId)).level,
       technologyProficiencyLevels,
       nodeHealth,
+      trafficMultiplier: this.growthEvent?.active ? this.growthEvent.loadMultiplier : 1,
     };
   }
 

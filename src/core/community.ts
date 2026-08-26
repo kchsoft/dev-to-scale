@@ -7,6 +7,10 @@ export const COMMUNITY_BOOTSTRAP = new FeatureDefinition({
   baseWork: 12,
   complexity: 'NORMAL',
   load: { app: 2, db: 2, async: 0, storage: 0 },
+  resourceLoad: {
+    app: { cpu: 1.4, io: 2.2 },
+    db: { cpu: 1.0, io: 2.4 },
+  },
   requestRoute: [{ node: 'APP' }, { node: 'DB' }],
   tags: ['CORE', 'CONTENT'],
   growthBonus: 0,
@@ -16,36 +20,61 @@ export const COMMUNITY_FEATURES: Record<CommunityFeatureId, FeatureDefinition> =
   COMMENT: new FeatureDefinition({
     id: 'COMMENT', name: 'Comment', baseWork: 7, complexity: 'SIMPLE',
     load: { app: 1, db: 2, async: 0, storage: 0 },
+    resourceLoad: {
+      app: { cpu: 0.7, io: 1.2 },
+      db: { cpu: 0.8, io: 2.3 },
+    },
     requestRoute: [{ node: 'APP' }, { node: 'DB' }],
     tags: ['WRITE_HEAVY'],
   }),
   LIKE: new FeatureDefinition({
     id: 'LIKE', name: 'Like', baseWork: 6, complexity: 'SIMPLE',
     load: { app: 1, db: 2, async: 0, storage: 0 },
+    resourceLoad: {
+      app: { cpu: 0.5, io: 1.1 },
+      db: { cpu: 0.5, io: 2.0 },
+    },
     requestRoute: [{ node: 'APP' }, { node: 'DB' }],
     tags: ['READ_HEAVY'],
   }),
   IMAGE_UPLOAD: new FeatureDefinition({
     id: 'IMAGE_UPLOAD', name: 'Image Upload', baseWork: 10, complexity: 'NORMAL',
     load: { app: 1, db: 1, async: 0, storage: 3 },
+    resourceLoad: {
+      app: { cpu: 0.5, io: 2.3 },
+      db: { cpu: 0.3, io: 0.9 },
+    },
     requestRoute: [{ node: 'APP' }, { node: 'DB' }, { node: 'STORAGE' }],
     tags: ['STORAGE'],
   }),
   SEARCH: new FeatureDefinition({
     id: 'SEARCH', name: 'Search', baseWork: 12, complexity: 'NORMAL',
     load: { app: 1, db: 3, async: 0, storage: 0 },
+    resourceLoad: {
+      app: { cpu: 1.0, io: 1.2 },
+      db: { cpu: 1.4, io: 3.4 },
+    },
     requestRoute: [{ node: 'APP' }, { node: 'DB' }],
     tags: ['READ_HEAVY', 'SEARCH'],
   }),
   NOTIFICATION: new FeatureDefinition({
     id: 'NOTIFICATION', name: 'Notification', baseWork: 14, complexity: 'NORMAL',
     load: { app: 1, db: 1, async: 3, storage: 0 },
+    resourceLoad: {
+      app: { cpu: 0.6, io: 1.7 },
+      db: { cpu: 0.4, io: 1.1 },
+    },
     requestRoute: [{ node: 'APP' }, { node: 'DB' }, { node: 'QUEUE', requirement: 'REQUIRED' }],
     tags: ['ASYNC'],
   }),
   AI_RECOMMENDATION: new FeatureDefinition({
     id: 'AI_RECOMMENDATION', name: 'AI Personalized Recommendation', baseWork: 20, complexity: 'COMPLEX',
     load: { app: 2, db: 2, async: 3, storage: 0 },
+    resourceLoad: {
+      // External model/API integration: comparatively little local CPU, lots of waiting/network I/O.
+      app: { cpu: 0.8, io: 3.2 },
+      db: { cpu: 0.7, io: 2.4 },
+    },
     requestRoute: [
       { node: 'APP' },
       { node: 'DB' },
@@ -57,24 +86,40 @@ export const COMMUNITY_FEATURES: Record<CommunityFeatureId, FeatureDefinition> =
   POPULAR_POSTS: new FeatureDefinition({
     id: 'POPULAR_POSTS', name: 'Popular Posts', baseWork: 16, complexity: 'NORMAL',
     load: { app: 1, db: 3, async: 0, storage: 0 },
+    resourceLoad: {
+      app: { cpu: 1.4, io: 1.0 },
+      db: { cpu: 1.5, io: 3.0 },
+    },
     requestRoute: [{ node: 'APP' }, { node: 'DB' }],
     tags: ['READ_HEAVY'],
   }),
   FOLLOW_FEED: new FeatureDefinition({
     id: 'FOLLOW_FEED', name: 'Follow Feed', baseWork: 22, complexity: 'COMPLEX',
     load: { app: 2, db: 3, async: 2, storage: 0 },
+    resourceLoad: {
+      app: { cpu: 1.4, io: 2.7 },
+      db: { cpu: 1.4, io: 3.5 },
+    },
     requestRoute: [{ node: 'APP' }, { node: 'DB' }, { node: 'QUEUE', requirement: 'REQUIRED' }],
     tags: ['READ_HEAVY', 'EVENT_HEAVY'],
   }),
   ADS: new FeatureDefinition({
     id: 'ADS', name: 'Advertising', baseWork: 10, complexity: 'NORMAL',
     load: { app: 1, db: 1, async: 0, storage: 0 },
+    resourceLoad: {
+      app: { cpu: 0.5, io: 0.9 },
+      db: { cpu: 0.3, io: 0.8 },
+    },
     requestRoute: [{ node: 'APP' }, { node: 'DB' }],
     tags: ['MONETIZATION'], revenueModifier: 0.3,
   }),
   PREMIUM: new FeatureDefinition({
     id: 'PREMIUM', name: 'Premium Membership', baseWork: 18, complexity: 'COMPLEX',
     load: { app: 1, db: 2, async: 1, storage: 0 },
+    resourceLoad: {
+      app: { cpu: 0.9, io: 1.5 },
+      db: { cpu: 0.9, io: 2.2 },
+    },
     requestRoute: [
       { node: 'APP' },
       { node: 'DB' },
