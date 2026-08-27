@@ -15,3 +15,4 @@ export * from './random';
 export * from './request-flow';
 export * from './tech-debt';
 export * from './technology';
+export * from './topology';
