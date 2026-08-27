@@ -117,8 +117,16 @@ export class TopologyGraph {
     return this.nodesById.get(id);
   }
 
-  edge(from: InfrastructureNodeId, to: InfrastructureNodeId): TopologyEdge | undefined {
-    return this.edges.find((edge) => edge.from === from && edge.to === to);
+  edge(
+    from: InfrastructureNodeId,
+    to: InfrastructureNodeId,
+    mode?: TopologyEdgeMode,
+  ): TopologyEdge | undefined {
+    return this.edges.find((edge) => (
+      edge.from === from
+      && edge.to === to
+      && (mode === undefined || edge.mode === mode)
+    ));
   }
 
   hasEdge(from: InfrastructureNodeId, to: InfrastructureNodeId): boolean {
