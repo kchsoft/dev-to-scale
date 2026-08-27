@@ -84,16 +84,15 @@ export class GameProgressionProjector {
         deployed,
         available: !deployed && !reason,
         reason,
-        preview: this.previewTechnology(id),
+        preview: this.previewTechnology(id, snapshot),
         benefits: tech.benefits,
         tradeoffs: tech.tradeoffs,
       };
     });
   }
 
-  private previewTechnology(id: BuildableTechnologyId): string {
+  private previewTechnology(id: BuildableTechnologyId, snapshot: GameSnapshot): string {
     if (this.#engine.infrastructure.hasTechnology(id)) return '이미 서비스에 연결됨';
-    const snapshot = this.#engine.snapshot;
     const after = this.#engine.previewLoadWithTechnology(id);
     if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
       return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
