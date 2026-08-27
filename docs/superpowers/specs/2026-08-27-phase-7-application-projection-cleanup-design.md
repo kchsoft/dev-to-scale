@@ -76,12 +76,14 @@ UI는 canonical topology만 사용하지만 `GameViewProjector`는 매 projectio
 
 ```ts
 export class GameViewProjector {
-  constructor(engine: GameEngine);
+  constructor(engine: GameEngine, serviceProjector?: GameServiceProjector);
   project(): GameView;
 }
 ```
 
 `project()`는 engine에서 snapshot을 한 번 읽고 월 예상 매출·비용·순이익을 계산한다. 같은 snapshot과 파생 재무 값을 세 하위 projector에 전달하고 결과를 하나의 `GameView`로 조합한다. Framework ID, Database ID, 현재 App/DB size와 count 같은 최상위 primitive도 여기서 결합한다.
+
+`GameController`는 하나의 `GameServiceProjector`를 만들어 `GameViewProjector`와 `GameEventProjector`에 함께 주입한다. 직접 사용하는 테스트나 다른 Application consumer를 위해 `GameViewProjector`는 service projector 인자를 생략하면 같은 engine으로 기본 인스턴스를 만든다.
 
 하위 projector가 서로를 호출하지 않도록 한다. 공유할 값은 명시적 입력 DTO로 전달한다.
 
