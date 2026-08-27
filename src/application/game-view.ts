@@ -180,6 +180,10 @@ export interface ServiceHealthView {
 export interface ServiceOperationsView {
   readonly observability: ObservabilityView;
   readonly health: ServiceHealthView;
+  readonly summary: {
+    readonly headline: string;
+    readonly detail: string;
+  };
   readonly visibleLoads: readonly LoadMetricView[];
   readonly failurePercent: number;
 }

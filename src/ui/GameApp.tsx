@@ -291,12 +291,8 @@ function ServiceDashboard({ view, observability, onNode, onTab }: { view: GameVi
         {view.hud.launched ? (
           <div className="settlement-summary service-health-summary">
             <span>SERVICE HEALTH · {health.status} · {observability.label}</span>
-            <strong>{observability.level === 'BASIC' ? `LOAD ${Math.max(...view.service.visibleLoads.map((metric) => metric.percent))}%` : `P95 ${health.p95LatencyMs.toLocaleString()}ms`}</strong>
-            <small>{observability.level === 'APM'
-              ? `TOP BOTTLENECK · ${health.bottleneckLabel} ${health.bottleneckPercent}% · 요청 경로와 출시 영향까지 추적 가능합니다.`
-              : observability.level === 'METRICS'
-                ? `CPU / I/O와 P95가 해금되었습니다. ${observability.nextUnlock}`
-                : `현재는 서비스 상태와 전체 Load만 보입니다. ${observability.nextUnlock}`}</small>
+            <strong>{view.service.summary.headline}</strong>
+            <small>{view.service.summary.detail}</small>
           </div>
         ) : (
           <div className="settlement-summary service-health-summary"><span>SERVICE HEALTH · PRE-LAUNCH</span><strong>OBS · {observability.level}</strong><small>{observability.nextUnlock ?? 'APM까지 해금됨'}</small></div>

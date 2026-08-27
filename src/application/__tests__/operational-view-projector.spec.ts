@@ -25,6 +25,17 @@ describe('operational view projector', () => {
     expect(service.visibleLoads.map((metric) => metric.label)).toEqual(['APP', 'DB', 'ASYNC', 'STORAGE']);
   });
 
+  it('owns the BASIC service summary and preserves the app/database headline', () => {
+    const service = OperationalViewProjector.project(snapshot({
+      appRatio: 0.4,
+      dbRatio: 0.8,
+      asyncRatio: 1.2,
+    }), new DeveloperProfile());
+
+    expect(service.summary.headline).toBe('LOAD 80%');
+    expect(service.summary.detail).toContain('전체 Load');
+  });
+
   it('projects the hottest resource into service health', () => {
     const service = OperationalViewProjector.project(snapshot({
       appCpuRatio: 0.42,

@@ -160,8 +160,9 @@ function diagnose(nodeId: string, snapshot: GameSnapshot): Diagnosis {
 }
 
 export class OperationalViewProjector {
-  static project(snapshot: GameSnapshot, _developer: DeveloperProfile): ServiceOperationsView {
-    const observability = projectObservability(_developer);
+  static project(snapshot: GameSnapshot, developer: DeveloperProfile): ServiceOperationsView {
+    const observability = projectObservability(developer);
+    const health = projectHealth(snapshot.load);
     const visibleLoads = observability.level === 'BASIC'
       ? [
           metric('APP', snapshot.load.appRatio),
@@ -179,7 +180,17 @@ export class OperationalViewProjector {
         ];
     return {
       observability,
-      health: projectHealth(snapshot.load),
+      health,
+      summary: {
+        headline: observability.level === 'BASIC'
+          ? `LOAD ${percent(Math.max(snapshot.load.appRatio, snapshot.load.dbRatio))}%`
+          : `P95 ${health.p95LatencyMs.toLocaleString()}ms`,
+        detail: observability.level === 'APM'
+          ? `TOP BOTTLENECK · ${health.bottleneckLabel} ${health.bottleneckPercent}% · 요청 경로와 출시 영향까지 추적 가능합니다.`
+          : observability.level === 'METRICS'
+            ? `CPU / I/O와 P95가 해금되었습니다. ${observability.nextUnlock}`
+            : `현재는 서비스 상태와 전체 Load만 보입니다. ${observability.nextUnlock}`,
+      },
       visibleLoads,
       failurePercent: percent(snapshot.load.failureRate),
     };
