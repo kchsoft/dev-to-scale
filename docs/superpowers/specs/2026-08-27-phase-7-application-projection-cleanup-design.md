@@ -35,6 +35,7 @@ Core 호환 필드는 성장 압력, 장애 진단, 기술 preview와 기존 Dom
 - React View는 Application 계약만 import하고 Core를 직접 참조하지 않는다.
 - `GameController`는 mutable `GameEngine`을 외부에 노출하지 않는다.
 - `GameViewProjector.project()`는 하나의 현재 `GameSnapshot`을 캡처하고 모든 하위 projector에 같은 snapshot을 전달한다.
+- `GameProgressionProjector`는 기술 availability/preview와 skill 정책이 live Core API에 의존하므로 현재 engine snapshot만 허용하고 stale snapshot은 명시적으로 거부한다.
 - 하위 projector는 Application DTO만 반환하며 React나 브라우저 API를 알지 못한다.
 - `TopologyView`가 node, edge, trace의 유일한 Service Map 계약이다.
 - 명령 성공 후 Controller는 현재 `GameView`를 정확히 한 번 emit한다.
@@ -152,7 +153,7 @@ export class GameProgressionProjector {
 }
 ```
 
-이 projector는 기술 구축 가능 여부와 preview, 학습 트리, 기능 로드맵만 담당한다. `FeatureCardView.route`는 로드맵에서 현재 경로 tag를 표시하므로 이번 단계에서 유지한다.
+이 projector는 기술 구축 가능 여부와 preview, 학습 트리, 기능 로드맵만 담당한다. 기술 availability/preview와 skill 정책은 live Core API를 사용하므로 composition root가 방금 캡처한 현재 snapshot만 입력으로 허용하고 stale snapshot은 거부한다. `FeatureCardView.route`는 로드맵에서 현재 경로 tag를 표시하므로 이번 단계에서 유지한다.
 
 ## 6. GameView contract after cleanup
 
@@ -224,6 +225,7 @@ GameController.advanceDay()
 - Domain command 오류는 기존과 같이 `GameController` 호출자에게 전달되고 UI composition root가 toast로 변환한다.
 - 내부 topology catalog 오류는 계속 fail-fast 한다.
 - `GameEventProjector`가 현재 engine state와 다른 `after` snapshot을 받으면 명시적 오류를 발생시킨다.
+- `GameProgressionProjector`가 현재 engine state와 다른 snapshot을 받으면 mixed live-state projection 대신 명시적 오류를 발생시킨다.
 - Projector는 누락된 표시 ID에 대해 기존 presentation catalog fallback을 사용한다.
 - legacy View 제거를 임시 `undefined`나 빈 배열로 호환하지 않는다. 계약에서 완전히 삭제해 잘못된 소비자가 typecheck에서 실패하게 한다.
 
@@ -240,6 +242,7 @@ GameController.advanceDay()
 
 - `GameOverviewProjector`는 초기 HUD, feature work slot, operations를 투영한다.
 - `GameProgressionProjector`는 기술 6개, 전체 skill tree와 기능 10개를 투영한다.
+- `GameProgressionProjector`는 stale snapshot을 거부한다.
 - `GameServiceProjector`는 초기 독립 storage node, observability, alert와 infrastructure cost를 투영한다.
 - 출시 후 `GameServiceProjector`는 canonical request trace를 보존한다.
 - `GameEventProjector`는 requirement event에 service projector의 기능 영향 summary를 포함한다.

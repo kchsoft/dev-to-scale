@@ -15,7 +15,7 @@ describe('GameProgressionProjector', () => {
     expect(result.features).toHaveLength(10);
   });
 
-  it('uses the captured snapshot as the technology preview baseline after engine state changes', () => {
+  it('rejects a stale snapshot before reading live progression state', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
     for (let day = 0; day < 30 && !engine.launched; day += 1) engine.advanceDay();
     const captured = engine.snapshot;
@@ -23,7 +23,7 @@ describe('GameProgressionProjector', () => {
     engine.scaleDatabase(ServerSize.XLARGE);
 
     expect(engine.snapshot.load.dbRatio).not.toBe(captured.load.dbRatio);
-    expect(new GameProgressionProjector(engine).project(captured).technologies.find(({ id }) => id === 'REDIS')?.preview)
-      .toMatch(new RegExp(`^DB ${Math.round(captured.load.dbRatio * 100)}% → \\d+%$`));
+    expect(() => new GameProgressionProjector(engine).project(captured))
+      .toThrow('GameProgressionProjector requires the current engine snapshot');
   });
 });

@@ -55,6 +55,10 @@ export class GameProgressionProjector {
   }
 
   project(snapshot: GameSnapshot): GameProgressionProjection {
+    const current = this.#engine.snapshot;
+    if (current.day !== snapshot.day || current.load !== snapshot.load) {
+      throw new Error('GameProgressionProjector requires the current engine snapshot');
+    }
     return {
       technologies: this.technologyOptions(snapshot),
       skills: this.skillNodes(),
