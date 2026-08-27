@@ -394,7 +394,10 @@ export class GameEngine {
     );
     const result = GrowthPolicy.calculate({
       phase,
-      completedFeatureCount: this.completedFeatureDefinitions.length,
+      completedFeatureGrowthBonus: this.completedFeatureDefinitions.reduce(
+        (sum, feature) => sum + feature.growthBonus,
+        0,
+      ),
       event: this.growthEvent,
       incidents: this.incidents.severities,
       failureRate: this._load.failureRate,

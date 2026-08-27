@@ -62,7 +62,7 @@ const POSITIVE_PROBABILITY: Record<1 | 2 | 3, number> = {
 
 export interface DailyGrowthInput {
   phase: 1 | 2 | 3;
-  completedFeatureCount: number;
+  completedFeatureGrowthBonus: number;
   event: GrowthEvent | null;
   incidents: readonly IncidentSeverity[];
   failureRate?: number;
@@ -82,7 +82,6 @@ export interface DailyGrowthResult {
 }
 
 export class GrowthPolicy {
-  static readonly FEATURE_BONUS = 0.005;
   static readonly EVENT_CHANCE = 0.02;
   static readonly MAX_AVAILABILITY_PENALTY = 0.08;
   static readonly MAX_OPERATIONAL_PENALTY = 0.1;
@@ -92,7 +91,7 @@ export class GrowthPolicy {
     const magnitude = Math.floor(input.random.next() * 5) + 1;
     const positive = input.random.next() < POSITIVE_PROBABILITY[input.phase];
     const rawBaseModifier = (positive ? magnitude : -magnitude) / 100;
-    const rawFeatureModifier = input.completedFeatureCount * this.FEATURE_BONUS;
+    const rawFeatureModifier = input.completedFeatureGrowthBonus;
     const rawEventModifier = input.event?.active ? input.event.modifier : 0;
     const incidentActive = input.incidents.length > 0;
 

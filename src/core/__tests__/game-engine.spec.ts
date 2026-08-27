@@ -35,6 +35,33 @@ function launchedGame(seed = 10, random: RandomSource = new SafePositiveRandom()
 }
 
 describe('game engine orchestration', () => {
+  it('uses the completed feature definition growth bonus on the following day', () => {
+    function dauAfterFirstFeature(growthBonus: number): number {
+      const game = new GameEngine({
+        frameworkId: 'SPRING_BOOT',
+        databaseId: 'POSTGRESQL',
+        seed: 42,
+        random: new SafePositiveRandom(),
+      });
+      const firstFeature = COMMUNITY_FEATURES[game.progression.featureOrder[0]];
+      const originalBonus = firstFeature.growthBonus;
+      Object.defineProperty(firstFeature, 'growthBonus', { value: growthBonus, configurable: true });
+
+      try {
+        for (let day = 0; day < 180 && game.snapshot.completedFeatures.length === 0; day += 1) {
+          game.advanceDay();
+        }
+        expect(game.snapshot.completedFeatures).toContain(firstFeature.id);
+        game.advanceDay();
+        return game.dau;
+      } finally {
+        Object.defineProperty(firstFeature, 'growthBonus', { value: originalBonus, configurable: true });
+      }
+    }
+
+    expect(dauAfterFirstFeature(0.05)).toBeGreaterThan(dauAfterFirstFeature(0.005));
+  });
+
   it('publishes the launched service load and request flow in the launch snapshot', () => {
     const game = launchedGame();
     const snapshot = game.snapshot;

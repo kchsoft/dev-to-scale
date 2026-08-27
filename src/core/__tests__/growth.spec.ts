@@ -12,10 +12,25 @@ class SequenceRandom implements RandomSource {
 }
 
 describe('growth', () => {
+  it.each([
+    { completedFeatureGrowthBonus: 0.002, expected: 0.002 },
+    { completedFeatureGrowthBonus: 0.020, expected: 0.020 },
+  ])('uses the supplied feature growth contribution $completedFeatureGrowthBonus', ({ completedFeatureGrowthBonus, expected }) => {
+    const result = GrowthPolicy.calculate({
+      phase: 1,
+      completedFeatureGrowthBonus,
+      event: null,
+      incidents: [],
+      random: new SequenceRandom([0, 0]),
+    });
+
+    expect(result.featureModifier).toBe(expected);
+  });
+
   it('adds +0.5 percentage points per completed feature', () => {
     const result = GrowthPolicy.calculate({
       phase: 1,
-      completedFeatureCount: 4,
+      completedFeatureGrowthBonus: 0.02,
       event: null,
       incidents: [],
       random: new SequenceRandom([0, 0]),
@@ -72,7 +87,7 @@ describe('growth', () => {
   it('caps stacked incident growth penalties at -10 percentage points', () => {
     const result = GrowthPolicy.calculate({
       phase: 3,
-      completedFeatureCount: 0,
+      completedFeatureGrowthBonus: 0,
       event: null,
       incidents: ['CRITICAL', 'CRITICAL', 'MAJOR'],
       random: new SequenceRandom([0, 0]),
@@ -84,7 +99,7 @@ describe('growth', () => {
   it('turns failed service requests into DAU pressure without exceeding the operational penalty cap', () => {
     const result = GrowthPolicy.calculate({
       phase: 1,
-      completedFeatureCount: 0,
+      completedFeatureGrowthBonus: 0,
       event: null,
       incidents: ['CRITICAL'],
       failureRate: 1,
@@ -100,7 +115,7 @@ describe('growth', () => {
   it('suppresses all positive growth while an incident is active, even during a viral event', () => {
     const result = GrowthPolicy.calculate({
       phase: 1,
-      completedFeatureCount: 8,
+      completedFeatureGrowthBonus: 0.04,
       event: new GrowthEvent('VIRAL'),
       incidents: ['MINOR'],
       random: new SequenceRandom([0.99, 0]),
@@ -116,7 +131,7 @@ describe('growth', () => {
   it('keeps negative market movement on top of incident churn', () => {
     const result = GrowthPolicy.calculate({
       phase: 1,
-      completedFeatureCount: 8,
+      completedFeatureGrowthBonus: 0.04,
       event: new GrowthEvent('NEGATIVE_BUZZ'),
       incidents: ['MAJOR'],
       random: new SequenceRandom([0, 0.99]),
@@ -131,7 +146,7 @@ describe('growth', () => {
   it('drops DAU by the amount capacity exceeds 100%, capped at 30 percentage points per day', () => {
     const overloaded = GrowthPolicy.calculate({
       phase: 1,
-      completedFeatureCount: 0,
+      completedFeatureGrowthBonus: 0,
       event: null,
       incidents: [],
       maxLoadRatio: 1.2,
@@ -139,7 +154,7 @@ describe('growth', () => {
     });
     const severelyOverloaded = GrowthPolicy.calculate({
       phase: 1,
-      completedFeatureCount: 0,
+      completedFeatureGrowthBonus: 0,
       event: null,
       incidents: [],
       maxLoadRatio: 1.8,
