@@ -1,16 +1,16 @@
 import { COMMUNITY_BOOTSTRAP, GameEngine, GameSnapshot } from '../core';
 import type { GameEventView } from './game-view';
-import { GameViewProjector } from './game-view-projector';
+import { GameServiceProjector } from './game-service-projector';
 import { OperationalViewProjector } from './operational-view-projector';
 import { presentationCatalog } from './presentation-catalog';
 
 export class GameEventProjector {
   readonly #engine: GameEngine;
-  readonly #viewProjector: GameViewProjector;
+  readonly #serviceProjector: GameServiceProjector;
 
-  constructor(engine: GameEngine, viewProjector: GameViewProjector) {
+  constructor(engine: GameEngine, serviceProjector: GameServiceProjector) {
     this.#engine = engine;
-    this.#viewProjector = viewProjector;
+    this.#serviceProjector = serviceProjector;
   }
 
   project(before: GameSnapshot, after: GameSnapshot): readonly GameEventView[] {
@@ -23,7 +23,7 @@ export class GameEventProjector {
       events.push({ id: `launch-${after.day}`, kind: 'launch', title: 'SERVICE ONLINE', message: '커뮤니티 서비스가 공개되었습니다. DAU 80에서 시작합니다.', autoPause: false });
     }
     if (after.currentFeature && after.currentFeature.id !== before.currentFeature?.id && after.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
-      const impact = this.#viewProjector.featureImpact(after.currentFeature.id);
+      const impact = this.#serviceProjector.featureImpact(after.currentFeature.id);
       events.push({
         id: `req-${after.day}-${after.currentFeature.id}`,
         kind: 'requirement',

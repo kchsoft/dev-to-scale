@@ -4,7 +4,7 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 describe('React/Application boundary', () => {
-  it('keeps every UI source dependent on Application instead of Core', () => {
+  it('keeps every UI source dependent on Application instead of Core or projector internals', () => {
     const uiRoot = resolve(process.cwd(), 'src/ui');
     const sources = readdirSync(uiRoot, { recursive: true, withFileTypes: true })
       .filter((entry) => entry.isFile() && /\.(ts|tsx)$/.test(entry.name))
@@ -18,6 +18,7 @@ describe('React/Application boundary', () => {
     });
 
     expect(imports.filter((path) => path.includes('/core'))).toEqual([]);
+    expect(imports.filter((path) => path.includes('projector'))).toEqual([]);
   });
 
   it('keeps the controller facade in the GameApp composition root', () => {

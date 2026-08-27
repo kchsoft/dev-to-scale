@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GameEngine } from '../../core';
 import { GameEventProjector } from '../game-event-projector';
-import { GameViewProjector } from '../game-view-projector';
+import { GameServiceProjector } from '../game-service-projector';
 
 describe('GameEventProjector', () => {
   it('projects the launch transition exactly once from before and after snapshots', () => {
@@ -10,8 +10,8 @@ describe('GameEventProjector', () => {
       databaseId: 'POSTGRESQL',
       seed: 10,
     });
-    const viewProjector = new GameViewProjector(engine);
-    const eventProjector = new GameEventProjector(engine, viewProjector);
+    const serviceProjector = new GameServiceProjector(engine);
+    const eventProjector = new GameEventProjector(engine, serviceProjector);
     let launchEvents = 0;
 
     for (let day = 0; day < 30 && !engine.launched; day += 1) {
@@ -35,10 +35,31 @@ describe('GameEventProjector', () => {
     expect(launchEvents).toBe(1);
   });
 
+  it('includes the service impact preview in a new requirement event', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 10 });
+    const serviceProjector = new GameServiceProjector(engine);
+    const eventProjector = new GameEventProjector(engine, serviceProjector);
+    let requirementEvent;
+
+    for (let day = 0; day < 180 && !requirementEvent; day += 1) {
+      const before = engine.snapshot;
+      const after = engine.advanceDay();
+      requirementEvent = eventProjector.project(before, after).find((event) => event.kind === 'requirement');
+    }
+
+    expect(requirementEvent).toMatchObject({
+      kind: 'requirement',
+      title: 'NEW REQUIREMENT',
+      autoPause: true,
+    });
+    expect(requirementEvent?.message).toContain('개발이 자동으로 시작되었습니다. 출시 예상 ·');
+    expect(requirementEvent?.message).toContain('현재 Capacity 안쪽');
+  });
+
   it('rejects stale snapshots instead of mixing them with current engine state', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 12 });
-    const viewProjector = new GameViewProjector(engine);
-    const eventProjector = new GameEventProjector(engine, viewProjector);
+    const serviceProjector = new GameServiceProjector(engine);
+    const eventProjector = new GameEventProjector(engine, serviceProjector);
     const before = engine.snapshot;
     const after = engine.advanceDay();
     engine.advanceDay();

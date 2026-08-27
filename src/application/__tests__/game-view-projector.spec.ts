@@ -36,5 +36,10 @@ describe('GameViewProjector', () => {
       showsResourceSignature: false,
       tracesRequests: false,
     });
+    expect(view.technologies.map(({ id }) => id)).toEqual([
+      'REDIS', 'SQS', 'RABBITMQ', 'KAFKA', 'ALB', 'OBJECT_STORAGE',
+    ]);
+    expect(view.skills.some(({ key }) => key === 'fundamental:NETWORK')).toBe(true);
+    expect(view.features).toHaveLength(10);
   });
 });

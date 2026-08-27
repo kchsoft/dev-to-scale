@@ -24,6 +24,7 @@ import type {
   TopologyView,
   TrafficResponseChoice,
 } from './game-view';
+import { GameServiceProjector } from './game-service-projector';
 import { GameViewProjector } from './game-view-projector';
 
 export type {
@@ -48,8 +49,9 @@ export class GameController {
 
   constructor(config: GameStartConfig) {
     this.#engine = new GameEngine(config);
-    this.#viewProjector = new GameViewProjector(this.#engine);
-    this.#eventProjector = new GameEventProjector(this.#engine, this.#viewProjector);
+    const serviceProjector = new GameServiceProjector(this.#engine);
+    this.#viewProjector = new GameViewProjector(this.#engine, serviceProjector);
+    this.#eventProjector = new GameEventProjector(this.#engine, serviceProjector);
   }
 
   subscribe(listener: (view: GameView) => void): () => void {
