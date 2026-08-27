@@ -30,9 +30,14 @@ import {
   LoadTone,
   ObservabilityView,
   RequestFlowView,
+  ServerSizeView,
   ServiceNodeView,
+  SkillRefView,
   SkillNodeView,
+  TechnologyIdView,
   TechnologyOptionView,
+  TrafficResponseChoice,
+  WorkSlotView,
 } from './game-view';
 import { OperationalViewProjector } from './operational-view-projector';
 
@@ -176,7 +181,7 @@ export class GameController {
         status: snapshot.status,
         launched: snapshot.launched,
       },
-      nodes: this.serviceNodes(snapshot),
+      nodes: this.serviceNodes(snapshot, service.observability),
       workSlots: this.workSlots(snapshot),
       alerts: this.alerts(snapshot, monthlyRevenue - monthlyCost, service.observability),
       technologies: this.technologyOptions(snapshot),
@@ -187,7 +192,9 @@ export class GameController {
       service,
       operations: {
         currentFeature: snapshot.currentFeature,
-        currentTechnologyBuild: snapshot.currentTechnologyBuild,
+        currentTechnologyBuild: snapshot.currentTechnologyBuild
+          ? { ...snapshot.currentTechnologyBuild, id: snapshot.currentTechnologyBuild.id as TechnologyIdView }
+          : null,
         techDebt: snapshot.techDebt,
         trafficSpike: snapshot.growthEvent?.type === 'VIRAL'
           ? { burstCost: snapshot.growthEvent.burstCost }
@@ -210,16 +217,16 @@ export class GameController {
     return events;
   }
 
-  startTechnologyBuild(id: BuildableTechnologyId): void { this.#engine.startTechnologyBuild(id); this.emit(); }
-  startLearning(ref: SkillRef): void { this.#engine.startLearning(ref); this.emit(); }
+  startTechnologyBuild(id: TechnologyIdView): void { this.#engine.startTechnologyBuild(id as BuildableTechnologyId); this.emit(); }
+  startLearning(ref: SkillRefView): void { this.#engine.startLearning(ref as SkillRef); this.emit(); }
   startIncidentResponse(id: string): void { this.#engine.startIncidentResponse(id); this.emit(); }
-  scaleApplication(size: ServerSize): void { this.#engine.scaleApplication(size); this.emit(); }
+  scaleApplication(size: ServerSizeView): void { this.#engine.scaleApplication(size as ServerSize); this.emit(); }
   addApplicationServer(): void { this.#engine.addApplicationServer(); this.emit(); }
-  scaleDatabase(size: ServerSize): void { this.#engine.scaleDatabase(size); this.emit(); }
+  scaleDatabase(size: ServerSizeView): void { this.#engine.scaleDatabase(size as ServerSize); this.emit(); }
   addDatabaseReplica(): void { this.#engine.addDatabaseReplica(); this.emit(); }
   fastTrackCurrentFeature(): void { this.#engine.fastTrackCurrentFeature(); this.emit(); }
   startRefactor(): void { this.#engine.startRefactor(); this.emit(); }
-  respondTrafficSpike(response: TrafficSpikeResponse): void { this.#engine.respondToTrafficSpike(response); this.emit(); }
+  respondTrafficSpike(response: TrafficResponseChoice): void { this.#engine.respondToTrafficSpike(response as TrafficSpikeResponse); this.emit(); }
 
   private emit(): void {
     const view = this.getView();
@@ -285,7 +292,7 @@ export class GameController {
     return events;
   }
 
-  private serviceNodes(snapshot: GameSnapshot): ServiceNodeView[] {
+  private serviceNodes(snapshot: GameSnapshot, observability: ObservabilityView): ServiceNodeView[] {
     const incidentByNode = new Map(snapshot.incidents.map((incident) => [incident.nodeId, incident]));
     const appIncident = incidentByNode.get(`framework:${this.#engine.config.frameworkId}`);
     const dbIncident = incidentByNode.get(`database:${this.#engine.config.databaseId}`);
@@ -300,6 +307,11 @@ export class GameController {
         loadPercent: percent(snapshot.load.appRatio),
         tone: loadTone(snapshot.load.appRatio, Boolean(appIncident)),
         detail: `${this.#engine.infrastructure.app.size} ×${this.#engine.infrastructure.app.count} · CAP ${Math.round(appCap)}`,
+        resourceDetail: observability.level === 'BASIC'
+          ? undefined
+          : observability.level === 'APM'
+            ? `CPU ${percent(snapshot.load.appCpuRatio)}% (${Math.round(snapshot.load.appCpuDemand)}/${Math.round(snapshot.load.appCpuCapacity)}) · I/O ${percent(snapshot.load.appIoRatio)}% (${Math.round(snapshot.load.appIoDemand)}/${Math.round(snapshot.load.appIoCapacity)})`
+            : `CPU ${percent(snapshot.load.appCpuRatio)}% · I/O ${percent(snapshot.load.appIoRatio)}%`,
         incidentId: appIncident?.id,
         incidentSeverity: appIncident?.severity,
       },
@@ -311,6 +323,11 @@ export class GameController {
         loadPercent: percent(snapshot.load.dbRatio),
         tone: loadTone(snapshot.load.dbRatio, Boolean(dbIncident)),
         detail: `${this.#engine.infrastructure.database.size} · Replica ${this.#engine.infrastructure.database.replicaCount} · CAP ${Math.round(dbCap)}`,
+        resourceDetail: observability.level === 'BASIC'
+          ? undefined
+          : observability.level === 'APM'
+            ? `CPU ${percent(snapshot.load.dbCpuRatio)}% (${Math.round(snapshot.load.dbCpuDemand)}/${Math.round(snapshot.load.dbCpuCapacity)}) · I/O ${percent(snapshot.load.dbIoRatio)}% (${Math.round(snapshot.load.dbIoDemand)}/${Math.round(snapshot.load.dbIoCapacity)})`
+            : `CPU ${percent(snapshot.load.dbCpuRatio)}% · I/O ${percent(snapshot.load.dbIoRatio)}%`,
         incidentId: dbIncident?.id,
         incidentSeverity: dbIncident?.severity,
       },
@@ -581,6 +598,8 @@ export class GameController {
         available: !deployed && !reason,
         reason,
         preview: this.previewTechnology(id),
+        benefits: tech.benefits,
+        tradeoffs: tech.tradeoffs,
       };
     });
   }

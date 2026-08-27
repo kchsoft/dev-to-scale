@@ -68,6 +68,7 @@ export interface ServiceNodeView {
   readonly loadPercent: number;
   readonly tone: LoadTone;
   readonly detail: string;
+  readonly resourceDetail?: string;
   readonly incidentId?: string;
   readonly incidentSeverity?: string;
 }
@@ -100,6 +101,8 @@ export interface TechnologyOptionView {
   readonly available: boolean;
   readonly reason: string | null;
   readonly preview: string;
+  readonly benefits: readonly string[];
+  readonly tradeoffs: readonly string[];
 }
 
 export interface SkillNodeView {
