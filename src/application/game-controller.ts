@@ -14,6 +14,7 @@ import {
   RequestNodeKind,
   RevenuePolicy,
   ServerSize,
+  SingleServiceTopology,
   SkillRef,
   TECHNOLOGIES,
   TechnologySkillId,
@@ -32,16 +33,21 @@ import {
   LoadTone,
   ObservabilityView,
   RequestFlowView,
+  RequestTraceView,
   ServerSizeView,
   ServiceNodeView,
   SkillRefView,
   SkillNodeView,
   TechnologyIdView,
   TechnologyOptionView,
+  TopologyEdgeView,
+  TopologyNodeView,
+  TopologyView,
   TrafficResponseChoice,
   WorkSlotView,
 } from './game-view';
 import { OperationalViewProjector } from './operational-view-projector';
+import { TopologyViewProjector } from './topology-view-projector';
 
 export type {
   AlertView,
@@ -50,9 +56,13 @@ export type {
   GameView,
   InfrastructureCostView,
   RequestFlowView,
+  RequestTraceView,
   ServiceNodeView,
   SkillNodeView,
   TechnologyOptionView,
+  TopologyEdgeView,
+  TopologyNodeView,
+  TopologyView,
 } from './game-view';
 
 const FRAMEWORK_LANGUAGE: Record<FrameworkId, LanguageId> = {
@@ -167,6 +177,23 @@ export class GameController {
     const monthlyCost = this.#engine.infrastructure.monthlyCost + RevenuePolicy.monthlyAiCost(snapshot.dau, aiActive);
     const calendar = calendarForDay(snapshot.day);
     const service = OperationalViewProjector.project(snapshot, this.#engine.developer);
+    const activeFeatureDefinitions = snapshot.launched
+      ? [
+          COMMUNITY_BOOTSTRAP,
+          ...snapshot.completedFeatures.flatMap((featureId) => {
+            const feature = COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES];
+            return feature ? [feature] : [];
+          }),
+        ]
+      : [];
+    const topology = SingleServiceTopology.from(this.#engine.infrastructure, activeFeatureDefinitions);
+    const topologyView = TopologyViewProjector.project({
+      graph: topology.graph,
+      nodeLoads: snapshot.load.nodeLoads,
+      traces: snapshot.load.requestTraces,
+      incidents: snapshot.incidents,
+      dau: snapshot.dau,
+    });
 
     return {
       hud: {
@@ -190,6 +217,7 @@ export class GameController {
       skills: this.skillNodes(),
       features: this.featureCards(snapshot),
       requestFlows: this.requestFlowViews(snapshot),
+      topology: topologyView,
       infrastructureCosts: this.infrastructureCostView(),
       service,
       operations: {

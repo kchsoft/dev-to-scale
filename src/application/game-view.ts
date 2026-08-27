@@ -148,6 +148,49 @@ export interface RequestFlowView {
   readonly trafficUnit: number;
 }
 
+export interface TopologyNodeView {
+  readonly id: string;
+  readonly kind: 'load-balancer' | 'server-group' | 'database' | 'cache' | 'queue' | 'object-storage' | 'worker' | 'external-service';
+  readonly name: string;
+  readonly icon: string;
+  readonly loadPercent: number;
+  readonly tone: LoadTone;
+  readonly detail: string;
+  readonly incidentId?: string;
+  readonly incidentSeverity?: string;
+}
+
+export interface TopologyEdgeView {
+  readonly id: string;
+  readonly fromNodeId: string;
+  readonly toNodeId: string;
+  readonly mode: 'sync' | 'async';
+}
+
+export interface RequestTraceView {
+  readonly id: string;
+  readonly name: string;
+  readonly nodes: readonly {
+    readonly nodeId: string | null;
+    readonly arrivalPercent: number;
+    readonly status: 'healthy' | 'slow' | 'failed' | 'missing';
+  }[];
+  readonly edges: readonly {
+    readonly edgeId: string;
+    readonly trafficPercent: number;
+  }[];
+  readonly successPercent: number;
+  readonly failureNodeId: string | null;
+  readonly particleCount: number;
+  readonly trafficUnit: number;
+}
+
+export interface TopologyView {
+  readonly nodes: readonly TopologyNodeView[];
+  readonly edges: readonly TopologyEdgeView[];
+  readonly traces: readonly RequestTraceView[];
+}
+
 export interface InfrastructureCostView {
   readonly appSizeMonthlyCosts: Readonly<Record<ServerSizeView, number>>;
   readonly dbSizeMonthlyCosts: Readonly<Record<ServerSizeView, number>>;
@@ -223,6 +266,7 @@ export interface GameView {
   readonly skills: readonly SkillNodeView[];
   readonly features: readonly FeatureCardView[];
   readonly requestFlows: readonly RequestFlowView[];
+  readonly topology: TopologyView;
   readonly infrastructureCosts: InfrastructureCostView;
   readonly service: ServiceOperationsView;
   readonly operations: FeatureOperationsView;

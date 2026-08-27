@@ -23,6 +23,13 @@ describe('application layer', () => {
     expect(view.operations.currentFeature?.elapsedDays).toBe(0);
     expect(view.operations.currentFeature?.estimatedRemainingDays).toBeGreaterThan(0);
     expect(view.nodes.map((node) => node.id)).toEqual(['application', 'database']);
+    expect(view.topology.nodes.map((node) => node.id)).toEqual([
+      'v1:app:SPRING_BOOT',
+      'v1:database:POSTGRESQL',
+      'v1:storage:OBJECT_STORAGE',
+    ]);
+    expect(view.topology.edges).toEqual([]);
+    expect(view.topology.traces).toEqual([]);
     expect(view.features).toHaveLength(10);
   });
 
