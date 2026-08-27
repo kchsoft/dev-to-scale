@@ -18,6 +18,8 @@ import {
   TECHNOLOGIES,
   TechnologySkillId,
   TrafficSpikeResponse,
+  V1_NODE_IDS,
+  v1NodeIdForTechnology,
   skillRef,
 } from '../core';
 import {
@@ -294,8 +296,8 @@ export class GameController {
 
   private serviceNodes(snapshot: GameSnapshot, observability: ObservabilityView): ServiceNodeView[] {
     const incidentByNode = new Map(snapshot.incidents.map((incident) => [incident.nodeId, incident]));
-    const appIncident = incidentByNode.get(`framework:${this.#engine.config.frameworkId}`);
-    const dbIncident = incidentByNode.get(`database:${this.#engine.config.databaseId}`);
+    const appIncident = incidentByNode.get(V1_NODE_IDS.app(this.#engine.config.frameworkId));
+    const dbIncident = incidentByNode.get(V1_NODE_IDS.database(this.#engine.config.databaseId));
     const appCap = snapshot.load.appCapacity;
     const dbCap = snapshot.load.dbCapacity;
     const nodes: ServiceNodeView[] = [
@@ -334,7 +336,7 @@ export class GameController {
     ];
 
     for (const technology of this.#engine.infrastructure.deployedTechnologies) {
-      const nodeId = `technology:${technology}`;
+      const nodeId = v1NodeIdForTechnology(technology);
       const incident = incidentByNode.get(nodeId);
       const kind: ServiceNodeView['kind'] = technology === 'REDIS'
         ? 'cache'

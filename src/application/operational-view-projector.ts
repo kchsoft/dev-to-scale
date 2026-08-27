@@ -1,4 +1,4 @@
-import { DeveloperProfile, GameSnapshot, LoadSnapshot } from '../core';
+import { DeveloperProfile, GameSnapshot, LoadSnapshot, V1_NODE_IDS } from '../core';
 import { BottleneckView, LoadMetricView, ObservabilityView, ServiceHealthView, ServiceOperationsView } from './game-view';
 
 const BOTTLENECKS: Array<[BottleneckView, keyof LoadSnapshot]> = [
@@ -107,7 +107,7 @@ function diagnose(nodeId: string, snapshot: GameSnapshot): Diagnosis {
   };
   let suggestions: string[] = ['현재 병목을 확인한 뒤 Capacity 또는 구조 변경'];
 
-  if (nodeId.startsWith('framework:')) {
+  if (nodeId.startsWith('v1:app:')) {
     primary = strongest([
       { label: 'APP CPU', ratio: load.appCpuRatio },
       { label: 'APP I/O', ratio: load.appIoRatio },
@@ -115,7 +115,7 @@ function diagnose(nodeId: string, snapshot: GameSnapshot): Diagnosis {
     suggestions = primary.label === 'APP CPU'
       ? ['APP Scale-up', 'ALB + Scale-out', '개발자 숙련도 향상']
       : ['ALB + Scale-out', 'Queue로 비동기 I/O 분리', '요청량 급증 여부 확인'];
-  } else if (nodeId.startsWith('database:')) {
+  } else if (nodeId.startsWith('v1:database:')) {
     primary = strongest([
       { label: 'DB CPU', ratio: load.dbCpuRatio },
       { label: 'DB I/O', ratio: load.dbIoRatio },
@@ -123,16 +123,16 @@ function diagnose(nodeId: string, snapshot: GameSnapshot): Diagnosis {
     suggestions = primary.label === 'DB I/O'
       ? ['Redis로 Read I/O 절감', 'Read Replica 추가', 'DB Size-up']
       : ['DB Size-up', 'Replica로 Query 분산', 'DB 숙련도 향상'];
-  } else if (nodeId === 'technology:REDIS') {
+  } else if (nodeId === V1_NODE_IDS.cache) {
     primary = { label: 'DB I/O', ratio: load.dbIoRatio };
     suggestions = ['Cache 의존도를 확인', 'DB Capacity 확보', '장애 복구 우선'];
-  } else if (nodeId === 'technology:SQS' || nodeId === 'technology:RABBITMQ' || nodeId === 'technology:KAFKA') {
+  } else if (nodeId.startsWith('v1:queue:')) {
     primary = { label: 'ASYNC', ratio: load.asyncRatio };
     suggestions = ['Queue Capacity 상향', '상위 Queue 기술 검토', 'Event-heavy 기능 부하 확인'];
-  } else if (nodeId === 'technology:OBJECT_STORAGE') {
+  } else if (nodeId === V1_NODE_IDS.storage) {
     primary = { label: 'STORAGE', ratio: load.storageRatio };
     suggestions = ['Storage Capacity 확인', '이미지/파일 기능 부하 확인', '장애 복구 우선'];
-  } else if (nodeId === 'technology:ALB') {
+  } else if (nodeId === V1_NODE_IDS.gateway) {
     primary = { label: 'APP', ratio: load.appRatio };
     suggestions = ['APP 서버 상태 확인', 'Scale-out 구성 확인', '트래픽 급증 여부 확인'];
   }
@@ -150,7 +150,7 @@ function diagnose(nodeId: string, snapshot: GameSnapshot): Diagnosis {
 
   if (trafficMultiplier > 1 && primary.ratio >= 0.85) {
     likelyCause = `Traffic Spike가 ${primary.label} 병목을 드러낸 가능성이 높습니다.`;
-  } else if (snapshot.techDebt.value >= 60 && nodeId.startsWith('framework:')) {
+  } else if (snapshot.techDebt.value >= 60 && nodeId.startsWith('v1:app:')) {
     likelyCause = `높은 Tech Debt와 ${primary.label} 압력이 함께 장애 위험을 높였습니다.`;
   } else if (load.failureRate >= 0.1) {
     likelyCause = `요청 실패율이 높습니다. ${primary.label}와 Request Flow를 함께 확인해야 합니다.`;

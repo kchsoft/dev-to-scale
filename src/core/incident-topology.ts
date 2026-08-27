@@ -1,8 +1,10 @@
 import { FrameworkId } from './feature';
 import { IncidentCandidate } from './incident-manager';
-import { DatabaseId, InfrastructureState, LoadSnapshot, TechnologyId } from './infrastructure';
+import { DatabaseId, InfrastructureState, LoadSnapshot } from './infrastructure';
 import { DeveloperProfile, FundamentalSkillId, skillRef, TechnologySkillId } from './learning';
 import { BuildableTechnologyId, TECHNOLOGIES } from './technology';
+import { TopologyGraph } from './topology';
+import { V1_NODE_IDS, v1NodeIdForTechnology } from './v1-topology';
 
 const DB_INCIDENT: Record<DatabaseId, { risk: 1 | 2 | 3 | 4 | 5; difficulty: number }> = {
   POSTGRESQL: { risk: 2, difficulty: 5 },
@@ -15,6 +17,7 @@ export interface IncidentTopologyContext {
   databaseId: DatabaseId;
   developer: DeveloperProfile;
   infrastructure: InfrastructureState;
+  topology: TopologyGraph;
   load: LoadSnapshot;
 }
 
@@ -30,35 +33,36 @@ function average(values: number[]): number {
 export class IncidentTopology {
   static candidates(context: IncidentTopologyContext): IncidentCandidate[] {
     const candidates: IncidentCandidate[] = [];
-    const frameworkNodeId = `framework:${context.frameworkId}`;
+    const frameworkNodeId = V1_NODE_IDS.app(context.frameworkId);
     const frameworkSkill = this.skillContext(frameworkNodeId, context);
     candidates.push({
       nodeId: frameworkNodeId,
       baseRisk: 2,
       difficulty: 4,
-      loadRatio: context.load.appRatio,
+      loadRatio: this.nodeLoadRatio(frameworkNodeId, context.load),
       ...frameworkSkill,
     });
 
-    const databaseNodeId = `database:${context.databaseId}`;
+    const databaseNodeId = V1_NODE_IDS.database(context.databaseId);
     const databaseSkill = this.skillContext(databaseNodeId, context);
     const databaseIncident = DB_INCIDENT[context.databaseId];
     candidates.push({
       nodeId: databaseNodeId,
       baseRisk: databaseIncident.risk,
       difficulty: databaseIncident.difficulty,
-      loadRatio: context.load.dbRatio,
+      loadRatio: this.nodeLoadRatio(databaseNodeId, context.load),
       ...databaseSkill,
     });
 
     for (const technologyId of context.infrastructure.deployedTechnologies) {
       const definition = TECHNOLOGIES[technologyId];
+      const nodeId = v1NodeIdForTechnology(technologyId);
       candidates.push({
-        nodeId: `technology:${technologyId}`,
+        nodeId,
         baseRisk: definition.incidentRisk,
         difficulty: definition.incidentDifficulty,
-        loadRatio: this.technologyLoadRatio(technologyId, context.load),
-        ...this.skillContext(`technology:${technologyId}`, context),
+        loadRatio: this.nodeLoadRatio(nodeId, context.load),
+        ...this.skillContext(nodeId, context),
       });
     }
 
@@ -66,21 +70,26 @@ export class IncidentTopology {
   }
 
   static skillContext(nodeId: string, context: IncidentTopologyContext): IncidentSkillContext {
-    if (nodeId.startsWith('framework:')) {
+    const node = context.topology.node(nodeId);
+    if (!node) throw new Error(`Incident node does not exist in topology: ${nodeId}`);
+
+    if (node.kind === 'SERVER_GROUP') {
       return {
-        proficiencyLevel: context.developer.get(skillRef.framework(context.frameworkId)).level,
+        proficiencyLevel: context.developer.get(skillRef.framework(node.productId as FrameworkId)).level,
         fundamentalAverage: this.fundamentalAverage(context.developer, ['NETWORK', 'OS_RUNTIME', 'SOFTWARE_DESIGN']),
       };
     }
 
-    if (nodeId.startsWith('database:')) {
+    if (node.kind === 'DATABASE') {
       return {
-        proficiencyLevel: context.developer.get(skillRef.technology(context.databaseId as TechnologySkillId)).level,
+        proficiencyLevel: context.developer.get(skillRef.technology(node.productId as TechnologySkillId)).level,
         fundamentalAverage: this.fundamentalAverage(context.developer, ['DATABASE', 'OS_RUNTIME', 'SOFTWARE_DESIGN']),
       };
     }
 
-    const technologyId = nodeId.split(':')[1] as BuildableTechnologyId;
+    const technologyId = node.productId as BuildableTechnologyId;
+    const definition = TECHNOLOGIES[technologyId];
+    if (!definition) throw new Error(`Incident node has no technology definition: ${nodeId}`);
     const fundamentals = Object.keys(TECHNOLOGIES[technologyId].prerequisites) as FundamentalSkillId[];
     return {
       proficiencyLevel: context.developer.get(skillRef.technology(technologyId)).level,
@@ -88,15 +97,8 @@ export class IncidentTopology {
     };
   }
 
-  private static technologyLoadRatio(id: TechnologyId, load: LoadSnapshot): number {
-    switch (id) {
-      case 'REDIS': return load.dbRatio;
-      case 'SQS':
-      case 'RABBITMQ':
-      case 'KAFKA': return load.asyncRatio;
-      case 'ALB': return load.appRatio;
-      case 'OBJECT_STORAGE': return load.storageRatio;
-    }
+  private static nodeLoadRatio(nodeId: string, load: LoadSnapshot): number {
+    return load.nodeLoads.find((nodeLoad) => nodeLoad.nodeId === nodeId)?.loadRatio ?? 0;
   }
 
   private static fundamentalAverage(developer: DeveloperProfile, ids: FundamentalSkillId[]): number {

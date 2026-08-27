@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DeveloperProfile, GameEngine, GameSnapshot, LoadSnapshot } from '../../core';
+import { DeveloperProfile, GameEngine, GameSnapshot, LoadSnapshot, V1_NODE_IDS } from '../../core';
 import { OperationalViewProjector } from '../operational-view-projector';
 
 function snapshot(loadOverrides: Partial<LoadSnapshot>): GameSnapshot {
@@ -85,7 +85,7 @@ describe('operational view projector', () => {
   it('keeps incident diagnosis hidden at BASIC observability', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 23 });
     const text = OperationalViewProjector.diagnosisText(
-      'framework:SPRING_BOOT',
+      V1_NODE_IDS.app('SPRING_BOOT'),
       snapshot({ appCpuRatio: 1.1, appIoRatio: 0.5 }),
       engine.developer,
     );
@@ -98,7 +98,7 @@ describe('operational view projector', () => {
     engine.developer.get({ category: 'fundamental', id: 'OS_RUNTIME' }).setLevel(2);
 
     const text = OperationalViewProjector.diagnosisText(
-      'database:POSTGRESQL',
+      V1_NODE_IDS.database('POSTGRESQL'),
       snapshot({ dbCpuRatio: 0.55, dbIoRatio: 0.96 }),
       engine.developer,
     );
@@ -114,7 +114,11 @@ describe('operational view projector', () => {
     const base = snapshot({ appCpuRatio: 0.72, appIoRatio: 0.51 });
     const state = { ...base, techDebt: { ...base.techDebt, value: 72 } };
 
-    const text = OperationalViewProjector.diagnosisText('framework:SPRING_BOOT', state, engine.developer);
+    const text = OperationalViewProjector.diagnosisText(
+      V1_NODE_IDS.app('SPRING_BOOT'),
+      state,
+      engine.developer,
+    );
 
     expect(text).toContain('높은 Tech Debt');
     expect(text).toContain('Tech Debt 72/100');

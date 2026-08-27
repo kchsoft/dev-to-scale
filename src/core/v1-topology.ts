@@ -1,6 +1,6 @@
 import type { FeatureDefinition, FrameworkId } from './feature';
 import type { DatabaseId } from './database';
-import type { InfrastructureState, QueueTechnologyId } from './infrastructure';
+import type { InfrastructureState, QueueTechnologyId, TechnologyId } from './infrastructure';
 import type { RequestNodeKind } from './request-flow';
 import {
   ModuleDeployment,
@@ -30,6 +30,17 @@ export const V1_NODE_IDS = Object.freeze({
   storage: 'v1:storage:OBJECT_STORAGE',
   externalAi: 'external:ai',
 });
+
+export function v1NodeIdForTechnology(technologyId: TechnologyId): InfrastructureNodeId {
+  switch (technologyId) {
+    case 'ALB': return V1_NODE_IDS.gateway;
+    case 'REDIS': return V1_NODE_IDS.cache;
+    case 'SQS': return V1_NODE_IDS.queue('SQS');
+    case 'RABBITMQ': return V1_NODE_IDS.queue('RABBITMQ');
+    case 'KAFKA': return V1_NODE_IDS.queue('KAFKA');
+    case 'OBJECT_STORAGE': return V1_NODE_IDS.storage;
+  }
+}
 
 const ROLE_BY_LEGACY_NODE: Readonly<Record<RequestNodeKind, ResourceRole>> = {
   ALB: 'ENTRY_GATEWAY',

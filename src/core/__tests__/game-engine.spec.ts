@@ -5,6 +5,7 @@ import { RandomSource } from '../growth';
 import { Incident } from '../incident-manager';
 import { ServerSize } from '../infrastructure';
 import { skillRef } from '../learning';
+import { V1_NODE_IDS } from '../v1-topology';
 
 class SafePositiveRandom implements RandomSource {
   private index = 0;
@@ -83,16 +84,19 @@ describe('game engine orchestration', () => {
 
   it('publishes a healthy request flow in the same snapshot that completes incident recovery', () => {
     const game = launchedGame(13, new NoIncidentRandom());
-    const incident = new Incident('db-outage', 'database:POSTGRESQL', 'CRITICAL', 1);
+    const databaseNodeId = V1_NODE_IDS.database('POSTGRESQL');
+    const incident = new Incident('db-outage', databaseNodeId, 'CRITICAL', 1);
     game.incidents.add(incident);
     game.scaleApplication(game.infrastructure.app.size);
     expect(game.snapshot.load.failureRate).toBe(1);
+    expect(game.snapshot.load.requestTraces[0]?.failureNodeId).toBe(databaseNodeId);
 
     game.startIncidentResponse(incident.id);
     for (let day = 0; day < 10 && game.snapshot.incidents.length > 0; day += 1) game.advanceDay();
 
     expect(game.snapshot.load.failureRate).toBe(0);
     expect(game.snapshot.load.requestFlows[0]?.successRatio).toBe(1);
+    expect(game.snapshot.load.requestTraces[0]?.successRatio).toBe(1);
   });
 
   it('launches the community after bootstrap work completes', () => {
@@ -147,7 +151,12 @@ describe('game engine orchestration', () => {
   it('preserves proficiency and incident health when previewing a technology', () => {
     const game = launchedGame(14);
     game.developer.get(skillRef.technology('POSTGRESQL')).setLevel(10);
-    const incident = new Incident('preview-db-outage', 'database:POSTGRESQL', 'CRITICAL', 1);
+    const incident = new Incident(
+      'preview-db-outage',
+      V1_NODE_IDS.database('POSTGRESQL'),
+      'CRITICAL',
+      1,
+    );
     game.incidents.add(incident);
     game.scaleApplication(game.infrastructure.app.size);
     const current = game.snapshot.load;
@@ -156,6 +165,30 @@ describe('game engine orchestration', () => {
 
     expect(preview.dbCapacity).toBeCloseTo(current.dbCapacity);
     expect(preview.failureRate).toBe(current.failureRate);
+  });
+
+  it('removes the retired queue incident when a replacement build completes', () => {
+    const game = new GameEngine({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 15,
+      random: new NoIncidentRandom(),
+    });
+    game.developer.get(skillRef.fundamental('NETWORK')).setLevel(4);
+    game.developer.get(skillRef.fundamental('OS_RUNTIME')).setLevel(4);
+    game.developer.get(skillRef.fundamental('SOFTWARE_DESIGN')).setLevel(3);
+    game.startTechnologyBuild('SQS');
+    for (let day = 0; day < 20 && game.snapshot.currentTechnologyBuild; day += 1) game.advanceDay();
+
+    const retiredNodeId = V1_NODE_IDS.queue('SQS');
+    game.incidents.add(new Incident('sqs-outage', retiredNodeId, 'MAJOR', 2));
+    game.startTechnologyBuild('KAFKA');
+    for (let day = 0; day < 40 && game.snapshot.currentTechnologyBuild; day += 1) game.advanceDay();
+
+    expect(game.infrastructure.queueTechnology).toBe('KAFKA');
+    expect(game.snapshot.incidents.some(({ nodeId }) => nodeId === retiredNodeId)).toBe(false);
+    expect(game.snapshot.load.nodeLoads.some(({ nodeId }) => nodeId === V1_NODE_IDS.queue('SQS'))).toBe(false);
+    expect(game.snapshot.load.nodeLoads.some(({ nodeId }) => nodeId === V1_NODE_IDS.queue('KAFKA'))).toBe(true);
   });
 
   it('trades feature speed for tech debt and lets refactoring pay that debt down', () => {

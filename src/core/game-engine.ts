@@ -17,9 +17,10 @@ import {
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
-import { requestNodeForIncident, RequestNodeKind, trafficHealthForSeverity } from './request-flow';
+import { trafficHealthForSeverity } from './request-flow';
 import { TechDebtState } from './tech-debt';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
+import { SingleServiceTopology, v1NodeIdForTechnology } from './v1-topology';
 
 export type GameStatus = 'RUNNING' | 'BANKRUPT' | 'WON';
 
@@ -245,7 +246,7 @@ export class GameEngine {
     if (builtTechnology) {
       const retiredTechnologies = this.infrastructure.deployTechnology(builtTechnology);
       for (const retiredTechnology of retiredTechnologies) {
-        this.incidents.removeForNode(`technology:${retiredTechnology}`);
+        this.incidents.removeForNode(v1NodeIdForTechnology(retiredTechnology));
       }
     }
 
@@ -369,7 +370,7 @@ export class GameEngine {
     const infrastructure = this.infrastructure.clone();
     const retired = infrastructure.deployTechnology(id);
     const ignoredIncidentNodeIds = new Set(
-      retired.map((technology) => `technology:${technology}`),
+      retired.map((technology) => v1NodeIdForTechnology(technology)),
     );
     return this.calculateCurrentLoad(
       infrastructure,
@@ -525,12 +526,10 @@ export class GameEngine {
       technologyProficiencyLevels[technology] = this.developer.get(skillRef.technology(technology)).level;
     }
 
-    const nodeHealth: Partial<Record<RequestNodeKind, number>> = {};
+    const nodeHealth: Record<string, number> = {};
     for (const incident of this.incidents.incidents) {
       if (ignoredIncidentNodeIds.has(incident.nodeId)) continue;
-      const node = requestNodeForIncident(incident.nodeId);
-      if (!node) continue;
-      nodeHealth[node] = trafficHealthForSeverity(incident.severity);
+      nodeHealth[incident.nodeId] = trafficHealthForSeverity(incident.severity);
     }
 
     return {
@@ -548,6 +547,10 @@ export class GameEngine {
       databaseId: this.config.databaseId,
       developer: this.developer,
       infrastructure: this.infrastructure,
+      topology: SingleServiceTopology.from(
+        this.infrastructure,
+        this.activeFeaturesForLoad(),
+      ).graph,
       load: this._load,
     };
   }

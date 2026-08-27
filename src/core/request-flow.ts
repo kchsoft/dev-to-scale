@@ -89,13 +89,3 @@ export function trafficHealthForSeverity(severity: IncidentSeverity): number {
     case 'CRITICAL': return 0;
   }
 }
-
-export function requestNodeForIncident(nodeId: string): RequestNodeKind | null {
-  if (nodeId.startsWith('framework:')) return 'APP';
-  if (nodeId.startsWith('database:')) return 'DB';
-  if (nodeId === 'technology:REDIS') return 'CACHE';
-  if (nodeId === 'technology:ALB') return 'ALB';
-  if (nodeId === 'technology:OBJECT_STORAGE') return 'STORAGE';
-  if (nodeId === 'technology:SQS' || nodeId === 'technology:RABBITMQ' || nodeId === 'technology:KAFKA') return 'QUEUE';
-  return null;
-}
