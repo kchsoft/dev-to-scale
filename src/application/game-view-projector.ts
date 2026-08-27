@@ -18,8 +18,6 @@ import {
   SkillRef,
   TECHNOLOGIES,
   TechnologySkillId,
-  V1_NODE_IDS,
-  v1NodeIdForTechnology,
   skillRef,
 } from '../core';
 import {
@@ -29,8 +27,6 @@ import {
   InfrastructureCostView,
   LoadTone,
   ObservabilityView,
-  RequestFlowView,
-  ServiceNodeView,
   SkillNodeView,
   TechnologyIdView,
   TechnologyOptionView,
@@ -72,13 +68,6 @@ function phaseForSlot(index: number): 1 | 2 | 3 {
 
 function sameSkill(left: SkillRef, right: SkillRef): boolean {
   return left.category === right.category && left.id === right.id;
-}
-
-function trafficUnitForDau(dau: number): number {
-  if (dau <= 100_000) return 10_000;
-  if (dau <= 1_000_000) return 100_000;
-  if (dau <= 10_000_000) return 1_000_000;
-  return 5_000_000;
 }
 
 function nodeIdForRequestNode(node: RequestNodeKind | null): string | undefined {
@@ -156,13 +145,11 @@ export class GameViewProjector {
         status: snapshot.status,
         launched: snapshot.launched,
       },
-      nodes: this.serviceNodes(snapshot, service.observability),
       workSlots: this.workSlots(snapshot),
       alerts: this.alerts(snapshot, monthlyRevenue - monthlyCost, service.observability),
       technologies: this.technologyOptions(snapshot),
       skills: this.skillNodes(),
       features: this.featureCards(snapshot),
-      requestFlows: this.requestFlowViews(snapshot),
       topology: topologyView,
       infrastructureCosts: this.infrastructureCostView(),
       service,
@@ -183,82 +170,6 @@ export class GameViewProjector {
       dbSize: this.#engine.infrastructure.database.size,
       dbReplicaCount: this.#engine.infrastructure.database.replicaCount,
     };
-  }
-
-  private serviceNodes(snapshot: GameSnapshot, observability: ObservabilityView): ServiceNodeView[] {
-    const incidentByNode = new Map(snapshot.incidents.map((incident) => [incident.nodeId, incident]));
-    const appIncident = incidentByNode.get(V1_NODE_IDS.app(this.#engine.config.frameworkId));
-    const dbIncident = incidentByNode.get(V1_NODE_IDS.database(this.#engine.config.databaseId));
-    const appCap = snapshot.load.appCapacity;
-    const dbCap = snapshot.load.dbCapacity;
-    const nodes: ServiceNodeView[] = [
-      {
-        id: 'application',
-        kind: 'application',
-        name: presentationCatalog.label(this.#engine.config.frameworkId),
-        icon: presentationCatalog.serviceNodeIcon('application'),
-        loadPercent: percent(snapshot.load.appRatio),
-        tone: loadTone(snapshot.load.appRatio, Boolean(appIncident)),
-        detail: `${this.#engine.infrastructure.app.size} ×${this.#engine.infrastructure.app.count} · CAP ${Math.round(appCap)}`,
-        resourceDetail: observability.level === 'BASIC'
-          ? undefined
-          : observability.level === 'APM'
-            ? `CPU ${percent(snapshot.load.appCpuRatio)}% (${Math.round(snapshot.load.appCpuDemand)}/${Math.round(snapshot.load.appCpuCapacity)}) · I/O ${percent(snapshot.load.appIoRatio)}% (${Math.round(snapshot.load.appIoDemand)}/${Math.round(snapshot.load.appIoCapacity)})`
-            : `CPU ${percent(snapshot.load.appCpuRatio)}% · I/O ${percent(snapshot.load.appIoRatio)}%`,
-        incidentId: appIncident?.id,
-        incidentSeverity: appIncident?.severity,
-      },
-      {
-        id: 'database',
-        kind: 'database',
-        name: presentationCatalog.label(this.#engine.config.databaseId),
-        icon: presentationCatalog.serviceNodeIcon('database'),
-        loadPercent: percent(snapshot.load.dbRatio),
-        tone: loadTone(snapshot.load.dbRatio, Boolean(dbIncident)),
-        detail: `${this.#engine.infrastructure.database.size} · Replica ${this.#engine.infrastructure.database.replicaCount} · CAP ${Math.round(dbCap)}`,
-        resourceDetail: observability.level === 'BASIC'
-          ? undefined
-          : observability.level === 'APM'
-            ? `CPU ${percent(snapshot.load.dbCpuRatio)}% (${Math.round(snapshot.load.dbCpuDemand)}/${Math.round(snapshot.load.dbCpuCapacity)}) · I/O ${percent(snapshot.load.dbIoRatio)}% (${Math.round(snapshot.load.dbIoDemand)}/${Math.round(snapshot.load.dbIoCapacity)})`
-            : `CPU ${percent(snapshot.load.dbCpuRatio)}% · I/O ${percent(snapshot.load.dbIoRatio)}%`,
-        incidentId: dbIncident?.id,
-        incidentSeverity: dbIncident?.severity,
-      },
-    ];
-
-    for (const technology of this.#engine.infrastructure.deployedTechnologies) {
-      const nodeId = v1NodeIdForTechnology(technology);
-      const incident = incidentByNode.get(nodeId);
-      const kind: ServiceNodeView['kind'] = technology === 'REDIS'
-        ? 'cache'
-        : technology === 'ALB'
-          ? 'load-balancer'
-          : technology === 'OBJECT_STORAGE'
-            ? 'storage'
-            : 'queue';
-      const ratio = technology === 'REDIS'
-        ? snapshot.load.dbRatio
-        : technology === 'ALB'
-          ? snapshot.load.appRatio
-          : technology === 'OBJECT_STORAGE'
-            ? snapshot.load.storageRatio
-            : snapshot.load.asyncRatio;
-      const detail = kind === 'queue'
-        ? `ACTIVE · CAP ${Math.round(snapshot.load.asyncCapacity)}`
-        : 'ACTIVE';
-      nodes.push({
-        id: technology,
-        kind,
-        name: presentationCatalog.label(technology),
-        icon: presentationCatalog.technologyIcon(technology),
-        loadPercent: percent(ratio),
-        tone: loadTone(ratio, Boolean(incident)),
-        detail,
-        incidentId: incident?.id,
-        incidentSeverity: incident?.severity,
-      });
-    }
-    return nodes;
   }
 
   private workSlots(snapshot: GameSnapshot): WorkSlotView[] {
@@ -594,42 +505,6 @@ export class GameViewProjector {
         state: completed ? 'completed' : developing ? 'developing' : revealed ? 'revealed' : 'hidden',
         load: revealed ? feature.load : null,
         route: revealed ? feature.requestRoute.map((step) => step.node) : null,
-      };
-    });
-  }
-
-  private requestFlowViews(snapshot: GameSnapshot): RequestFlowView[] {
-    if (!snapshot.launched || snapshot.load.requestFlows.length === 0) return [];
-
-    const definitions = snapshot.load.requestFlows.map((flow) => {
-      const feature = flow.featureId === COMMUNITY_BOOTSTRAP.id
-        ? COMMUNITY_BOOTSTRAP
-        : COMMUNITY_FEATURES[flow.featureId as keyof typeof COMMUNITY_FEATURES];
-      const weight = feature
-        ? Math.max(1, feature.load.app + feature.load.db + feature.load.async + feature.load.storage)
-        : 1;
-      return { flow, feature, weight };
-    });
-    const totalWeight = definitions.reduce((sum, item) => sum + item.weight, 0) || 1;
-    const trafficUnit = trafficUnitForDau(snapshot.dau);
-
-    return definitions.slice(-5).map(({ flow, feature, weight }) => {
-      const estimatedTraffic = snapshot.dau * (weight / totalWeight);
-      const particleCount = snapshot.dau <= 0
-        ? 0
-        : Math.max(1, Math.min(4, Math.ceil(estimatedTraffic / trafficUnit)));
-      return {
-        id: flow.featureId,
-        name: presentationCatalog.label(flow.featureId),
-        nodes: flow.nodes.map((node) => ({
-          node: node.node,
-          arrivalPercent: percent(node.arrivalRatio),
-          available: node.available,
-        })),
-        successPercent: percent(flow.successRatio),
-        failureNode: flow.failureNode,
-        particleCount,
-        trafficUnit,
       };
     });
   }

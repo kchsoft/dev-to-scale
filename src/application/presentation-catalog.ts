@@ -8,7 +8,7 @@ import type {
   LanguageId,
   TechnologySkillId,
 } from '../core';
-import type { RequestNodeViewKind, ServiceNodeView } from './game-view';
+import type { RequestNodeViewKind } from './game-view';
 
 const WORKLOAD_LABELS = {
   COMMUNITY_MVP: '게시글',
@@ -112,15 +112,6 @@ const TECHNOLOGY_SKILL_ICONS = {
   OBJECT_STORAGE: 'OS',
 } satisfies Readonly<Record<TechnologySkillId, string>>;
 
-const SERVICE_NODE_ICONS = {
-  application: '◈',
-  database: '◉',
-  cache: '◆',
-  queue: '⇢',
-  storage: '▣',
-  'load-balancer': '⎇',
-} satisfies Readonly<Record<ServiceNodeView['kind'], string>>;
-
 const TECHNOLOGY_ICONS = {
   REDIS: '◆',
   SQS: '⇢',
@@ -175,9 +166,6 @@ export const presentationCatalog = Object.freeze({
   },
   icon(id: string): string {
     return ICONS[id] ?? '•';
-  },
-  serviceNodeIcon(kind: ServiceNodeView['kind']): string {
-    return SERVICE_NODE_ICONS[kind];
   },
   technologyIcon(id: BuildableTechnologyId): string {
     return TECHNOLOGY_ICONS[id];

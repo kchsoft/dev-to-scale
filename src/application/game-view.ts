@@ -60,19 +60,6 @@ export interface HudView {
   readonly launched: boolean;
 }
 
-export interface ServiceNodeView {
-  readonly id: string;
-  readonly kind: 'application' | 'database' | 'cache' | 'queue' | 'storage' | 'load-balancer';
-  readonly name: string;
-  readonly icon: string;
-  readonly loadPercent: number;
-  readonly tone: LoadTone;
-  readonly detail: string;
-  readonly resourceDetail?: string;
-  readonly incidentId?: string;
-  readonly incidentSeverity?: string;
-}
-
 export interface WorkSlotView {
   readonly id: 'feature' | 'technology' | 'learning' | 'incident';
   readonly label: string;
@@ -132,20 +119,6 @@ export interface FeatureCardView {
   readonly state: 'completed' | 'developing' | 'revealed' | 'hidden';
   readonly load: { readonly app: number; readonly db: number; readonly async: number; readonly storage: number } | null;
   readonly route: readonly RequestNodeViewKind[] | null;
-}
-
-export interface RequestFlowView {
-  readonly id: string;
-  readonly name: string;
-  readonly nodes: readonly {
-    readonly node: RequestNodeViewKind;
-    readonly arrivalPercent: number;
-    readonly available: boolean;
-  }[];
-  readonly successPercent: number;
-  readonly failureNode: RequestNodeViewKind | null;
-  readonly particleCount: number;
-  readonly trafficUnit: number;
 }
 
 export interface TopologyNodeView {
@@ -259,13 +232,11 @@ export interface FeatureOperationsView {
 
 export interface GameView {
   readonly hud: HudView;
-  readonly nodes: readonly ServiceNodeView[];
   readonly workSlots: readonly WorkSlotView[];
   readonly alerts: readonly AlertView[];
   readonly technologies: readonly TechnologyOptionView[];
   readonly skills: readonly SkillNodeView[];
   readonly features: readonly FeatureCardView[];
-  readonly requestFlows: readonly RequestFlowView[];
   readonly topology: TopologyView;
   readonly infrastructureCosts: InfrastructureCostView;
   readonly service: ServiceOperationsView;

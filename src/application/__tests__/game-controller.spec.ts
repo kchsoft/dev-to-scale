@@ -22,7 +22,8 @@ describe('application layer', () => {
     expect(view.operations.currentFeature?.id).toBe('COMMUNITY_MVP');
     expect(view.operations.currentFeature?.elapsedDays).toBe(0);
     expect(view.operations.currentFeature?.estimatedRemainingDays).toBeGreaterThan(0);
-    expect(view.nodes.map((node) => node.id)).toEqual(['application', 'database']);
+    expect(Object.hasOwn(view, 'nodes')).toBe(false);
+    expect(Object.hasOwn(view, 'requestFlows')).toBe(false);
     expect(view.topology.nodes.map((node) => node.id)).toEqual([
       'v1:app:SPRING_BOOT',
       'v1:database:POSTGRESQL',
