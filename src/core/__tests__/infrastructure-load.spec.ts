@@ -8,6 +8,7 @@ import {
   ServerSize,
 } from '../infrastructure';
 import { FeatureDefinition } from '../feature';
+import { V1_NODE_IDS } from '../v1-topology';
 
 describe('infrastructure and load', () => {
   it('requires ALB before application scale-out', () => {
@@ -156,7 +157,7 @@ describe('infrastructure and load', () => {
 
     const healthy = LoadCalculator.calculate(100_000, [feature], infra);
     const appDown = LoadCalculator.calculate(100_000, [feature], infra, {
-      nodeHealth: { APP: 0 },
+      nodeHealth: { [V1_NODE_IDS.app('SPRING_BOOT')]: 0 },
     });
 
     expect(appDown.appDemand).toBeCloseTo(healthy.appDemand);

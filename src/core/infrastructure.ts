@@ -1,7 +1,15 @@
 import { DatabaseDefinition, DatabaseId } from './database';
 import { FeatureDefinition, FrameworkDefinition, FrameworkId } from './feature';
-import { RequestFlowResult, RequestFlowSimulator, RequestNodeKind } from './request-flow';
+import { RequestFlowResult } from './request-flow';
+import {
+  LegacyRequestFlowProjector,
+  NodeHealth,
+  RequestTrace,
+  RequestTraceSimulator,
+} from './request-trace';
 import { BuildableTechnologyId, TECHNOLOGIES } from './technology';
+import { InfrastructureNodeId } from './topology';
+import { SingleServiceTopology, V1_NODE_IDS } from './v1-topology';
 
 export enum ServerSize {
   SMALL = 'SMALL',
@@ -218,7 +226,7 @@ export interface LoadCalculationContext {
   appProficiencyLevel?: number;
   databaseProficiencyLevel?: number;
   technologyProficiencyLevels?: Partial<Record<TechnologyId, number>>;
-  nodeHealth?: Partial<Record<RequestNodeKind, number>>;
+  nodeHealth?: NodeHealth;
   /** Temporary request-volume multiplier such as a viral traffic spike. */
   trafficMultiplier?: number;
 }
@@ -259,7 +267,19 @@ export interface LoadSnapshot {
   dbIoRatio: number;
 
   failureRate: number;
+  nodeLoads: readonly NodeLoadSnapshot[];
+  requestTraces: readonly RequestTrace[];
   requestFlows: readonly RequestFlowResult[];
+}
+
+export interface NodeLoadSnapshot {
+  readonly nodeId: InfrastructureNodeId;
+  readonly cpuDemand?: number;
+  readonly ioDemand?: number;
+  readonly throughputDemand?: number;
+  readonly storageDemand?: number;
+  readonly capacity: number;
+  readonly loadRatio: number;
 }
 
 const LOAD_CURVE = {
@@ -283,6 +303,10 @@ function ratio(value: number, capacity: number): number {
   return capacity > 0 ? value / capacity : 0;
 }
 
+function traceArrival(trace: RequestTrace, nodeId: InfrastructureNodeId): number {
+  return trace.nodes.find((node) => node.nodeId === nodeId)?.arrivalRatio ?? 0;
+}
+
 export class LoadCalculator {
   static calculate(
     dau: number,
@@ -291,19 +315,15 @@ export class LoadCalculator {
     context: LoadCalculationContext = {},
   ): LoadSnapshot {
     const queue = infrastructure.queueTechnology;
-    const requestFlows = features.map((feature) => RequestFlowSimulator.simulate(feature, {
-      prependAlb: infrastructure.hasTechnology('ALB'),
-      available: {
-        ALB: infrastructure.hasTechnology('ALB'),
-        APP: true,
-        DB: true,
-        CACHE: infrastructure.hasTechnology('REDIS'),
-        QUEUE: Boolean(queue),
-        STORAGE: true,
-        AI: true,
-      },
-      health: context.nodeHealth,
-    }));
+    const topology = SingleServiceTopology.from(infrastructure, features);
+    const requestTraces = features.map((feature) => RequestTraceSimulator.simulate(
+      topology.resolveForTrace(feature.id),
+      context.nodeHealth,
+    ));
+    const requestFlows = requestTraces.map((trace) => LegacyRequestFlowProjector.fromTrace(trace));
+    const appNodeId = V1_NODE_IDS.app(infrastructure.app.frameworkId);
+    const databaseNodeId = V1_NODE_IDS.database(infrastructure.database.databaseId);
+    const queueNodeId = queue ? V1_NODE_IDS.queue(queue) : null;
 
     let appCpuDemand = 0;
     let appIoDemand = 0;
@@ -314,12 +334,12 @@ export class LoadCalculator {
     let weightedSuccess = 0;
     let totalTrafficWeight = 0;
 
-    const cacheHealth = Math.max(0, Math.min(1, context.nodeHealth?.CACHE ?? 1));
+    const cacheHealth = Math.max(0, Math.min(1, context.nodeHealth?.[V1_NODE_IDS.cache] ?? 1));
     const redisActive = infrastructure.hasTechnology('REDIS');
     const trafficMultiplier = Math.max(0.1, context.trafficMultiplier ?? 1);
 
     features.forEach((feature, index) => {
-      const flow = requestFlows[index];
+      const trace = requestTraces[index];
       const appCpuBase = demand(feature.resourceLoad.app.cpu, dau, LOAD_CURVE.app) * trafficMultiplier;
       const appIoBase = demand(feature.resourceLoad.app.io, dau, LOAD_CURVE.app) * trafficMultiplier;
       let dbCpuBase = demand(feature.resourceLoad.db.cpu, dau, LOAD_CURVE.db) * trafficMultiplier;
@@ -334,20 +354,20 @@ export class LoadCalculator {
         dbIoBase *= 1 - 0.40 * cacheHealth;
       }
 
-      appCpuDemand += appCpuBase * flow.arrivalRatio('APP');
-      appIoDemand += appIoBase * flow.arrivalRatio('APP');
-      dbCpuDemand += dbCpuBase * flow.arrivalRatio('DB');
-      dbIoDemand += dbIoBase * flow.arrivalRatio('DB');
-      storageDemand += storageBase * flow.arrivalRatio('STORAGE');
+      appCpuDemand += appCpuBase * traceArrival(trace, appNodeId);
+      appIoDemand += appIoBase * traceArrival(trace, appNodeId);
+      dbCpuDemand += dbCpuBase * traceArrival(trace, databaseNodeId);
+      dbIoDemand += dbIoBase * traceArrival(trace, databaseNodeId);
+      storageDemand += storageBase * traceArrival(trace, V1_NODE_IDS.storage);
 
       const requirement = queueRequirement(feature);
       if (queue) {
         const kafkaModifier = queue === 'KAFKA' && feature.tags.has('EVENT_HEAVY') ? 0.85 : 1;
-        asyncDemand += asyncBase * flow.arrivalRatio('QUEUE') * kafkaModifier;
+        asyncDemand += asyncBase * traceArrival(trace, queueNodeId!) * kafkaModifier;
       } else if (requirement === 'OPTIONAL') {
         // Without a queue, optional async work falls back into the APP process.
         // Waiting/network work is intentionally much more I/O-heavy than CPU-heavy.
-        const fallback = asyncBase * flow.arrivalRatio('APP');
+        const fallback = asyncBase * traceArrival(trace, appNodeId);
         appCpuDemand += fallback * 0.25;
         appIoDemand += fallback;
       }
@@ -357,7 +377,7 @@ export class LoadCalculator {
         feature.load.app + feature.load.db + feature.load.async + feature.load.storage,
       );
       totalTrafficWeight += trafficWeight;
-      weightedSuccess += trafficWeight * flow.successRatio;
+      weightedSuccess += trafficWeight * trace.successRatio;
     });
 
     const rawAppCapacity = infrastructure.app.capacity;
@@ -386,10 +406,71 @@ export class LoadCalculator {
     const dbCpuRatio = ratio(dbCpuDemand, dbCpuCapacity);
     const dbIoRatio = ratio(dbIoDemand, dbIoCapacity);
     const failureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
+    const appDemand = Math.max(appCpuDemand, appIoDemand);
+    const dbDemand = Math.max(dbCpuDemand, dbIoDemand);
+    const appRatio = Math.max(appCpuRatio, appIoRatio);
+    const dbRatio = Math.max(dbCpuRatio, dbIoRatio);
+    const asyncRatio = queue && asyncCapacity > 0 ? asyncDemand / asyncCapacity : 0;
+    const storageRatio = storageCapacity > 0 ? storageDemand / storageCapacity : 0;
+    const appBottleneckCapacity = appCpuRatio >= appIoRatio ? appCpuCapacity : appIoCapacity;
+    const dbBottleneckCapacity = dbCpuRatio >= dbIoRatio ? dbCpuCapacity : dbIoCapacity;
+    const nodeLoads = topology.graph.nodes.map((node): NodeLoadSnapshot => {
+      if (node.id === appNodeId) {
+        return Object.freeze({
+          nodeId: node.id,
+          cpuDemand: appCpuDemand,
+          ioDemand: appIoDemand,
+          capacity: appBottleneckCapacity,
+          loadRatio: appRatio,
+        });
+      }
+      if (node.id === databaseNodeId) {
+        return Object.freeze({
+          nodeId: node.id,
+          cpuDemand: dbCpuDemand,
+          ioDemand: dbIoDemand,
+          capacity: dbBottleneckCapacity,
+          loadRatio: dbRatio,
+        });
+      }
+      if (node.kind === 'QUEUE') {
+        return Object.freeze({
+          nodeId: node.id,
+          throughputDemand: asyncDemand,
+          capacity: asyncCapacity,
+          loadRatio: asyncRatio,
+        });
+      }
+      if (node.kind === 'OBJECT_STORAGE') {
+        return Object.freeze({
+          nodeId: node.id,
+          storageDemand,
+          capacity: storageCapacity,
+          loadRatio: storageRatio,
+        });
+      }
+      if (node.kind === 'LOAD_BALANCER') {
+        return Object.freeze({
+          nodeId: node.id,
+          throughputDemand: appDemand,
+          capacity: appRatio > 0 ? appDemand / appRatio : appBottleneckCapacity,
+          loadRatio: appRatio,
+        });
+      }
+      if (node.kind === 'CACHE') {
+        return Object.freeze({
+          nodeId: node.id,
+          throughputDemand: dbDemand,
+          capacity: dbRatio > 0 ? dbDemand / dbRatio : dbBottleneckCapacity,
+          loadRatio: dbRatio,
+        });
+      }
+      return Object.freeze({ nodeId: node.id, capacity: 0, loadRatio: 0 });
+    });
 
     return {
-      appDemand: Math.max(appCpuDemand, appIoDemand),
-      dbDemand: Math.max(dbCpuDemand, dbIoDemand),
+      appDemand,
+      dbDemand,
       asyncDemand,
       storageDemand,
       rawAppCapacity,
@@ -399,10 +480,10 @@ export class LoadCalculator {
       dbCapacity,
       asyncCapacity,
       storageCapacity,
-      appRatio: Math.max(appCpuRatio, appIoRatio),
-      dbRatio: Math.max(dbCpuRatio, dbIoRatio),
-      asyncRatio: queue && asyncCapacity > 0 ? asyncDemand / asyncCapacity : 0,
-      storageRatio: storageCapacity > 0 ? storageDemand / storageCapacity : 0,
+      appRatio,
+      dbRatio,
+      asyncRatio,
+      storageRatio,
       appCpuDemand,
       appIoDemand,
       dbCpuDemand,
@@ -420,7 +501,9 @@ export class LoadCalculator {
       dbCpuRatio,
       dbIoRatio,
       failureRate: Math.max(0, Math.min(1, failureRate)),
-      requestFlows,
+      nodeLoads: Object.freeze(nodeLoads),
+      requestTraces: Object.freeze(requestTraces),
+      requestFlows: Object.freeze(requestFlows),
     };
   }
 }
