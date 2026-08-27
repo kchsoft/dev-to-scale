@@ -86,6 +86,18 @@ describe('application layer', () => {
     const view = controller.getView();
     expect(view.hud.launched).toBe(true);
     expect(view.hud.dau).toBeGreaterThanOrEqual(80);
+    expect(view.topology.traces[0]).toMatchObject({
+      id: 'COMMUNITY_MVP',
+      nodes: [
+        { nodeId: 'v1:app:SPRING_BOOT', status: 'healthy' },
+        { nodeId: 'v1:database:POSTGRESQL', status: 'healthy' },
+      ],
+      successPercent: 100,
+      failureNodeId: null,
+    });
+    expect(view.topology.traces[0].edges.map((edge) => edge.edgeId)).toEqual([
+      'v1:edge:v1:app:SPRING_BOOT:v1:database:POSTGRESQL:SYNC',
+    ]);
   });
 
   it('derives technology availability from developer prerequisites', () => {
