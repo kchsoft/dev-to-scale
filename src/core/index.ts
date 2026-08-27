@@ -17,3 +17,4 @@ export * from './service-topology';
 export * from './tech-debt';
 export * from './technology';
 export * from './topology';
+export * from './v1-topology';
