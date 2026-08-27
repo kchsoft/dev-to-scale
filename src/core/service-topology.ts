@@ -213,6 +213,7 @@ function activeBlueprintConnections(
           });
           continue;
         }
+        if (target?.requirement !== 'OPTIONAL') continue;
         walk(
           edge.toStepId,
           nextEdgeIds,
@@ -228,7 +229,12 @@ function activeBlueprintConnections(
 }
 
 export class RouteResolver {
-  static resolve(blueprint: RouteBlueprint, deployment: ModuleDeployment, graph: TopologyGraph): ResolvedRoute {
+  private static resolveRoute(
+    blueprint: RouteBlueprint,
+    deployment: ModuleDeployment,
+    graph: TopologyGraph,
+    preserveMissingRequired: boolean,
+  ): ResolvedRoute {
     if (deployment.moduleId !== blueprint.moduleId) {
       throw new TopologyValidationError(
         'MISSING_ENTRY_MODULE',
@@ -240,7 +246,7 @@ export class RouteResolver {
     const resolvedSteps = blueprint.steps.map((step): ResolvedRouteStep => {
       const nodeId = deployment.bindingFor(step.role);
       if (nodeId === undefined) {
-        if (step.requirement === 'REQUIRED') {
+        if (step.requirement === 'REQUIRED' && !preserveMissingRequired) {
           throw new TopologyValidationError(
             'MISSING_REQUIRED_BINDING',
             `Module ${deployment.moduleId} has no ${step.role} binding required by ${blueprint.workloadId}`,
@@ -294,5 +300,17 @@ export class RouteResolver {
       steps: Object.freeze(resolvedSteps),
       edges: Object.freeze(resolvedEdges),
     });
+  }
+
+  static resolve(blueprint: RouteBlueprint, deployment: ModuleDeployment, graph: TopologyGraph): ResolvedRoute {
+    return this.resolveRoute(blueprint, deployment, graph, false);
+  }
+
+  static resolveForTrace(
+    blueprint: RouteBlueprint,
+    deployment: ModuleDeployment,
+    graph: TopologyGraph,
+  ): ResolvedRoute {
+    return this.resolveRoute(blueprint, deployment, graph, true);
   }
 }

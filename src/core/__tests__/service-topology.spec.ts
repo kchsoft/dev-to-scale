@@ -77,6 +77,13 @@ describe('RouteResolver validation', () => {
     expect(() => RouteResolver.resolve(requestBlueprint(), deployment, graph)).toThrowError(
       expect.objectContaining({ code: 'MISSING_REQUIRED_BINDING' }),
     );
+    expect(RouteResolver.resolveForTrace(requestBlueprint(), deployment, graph).steps.at(-1)).toEqual(
+      expect.objectContaining({
+        role: 'PRIMARY_DATABASE',
+        requirement: 'REQUIRED',
+        nodeId: null,
+      }),
+    );
   });
 
   it('keeps an unbound optional step without treating it as an error', () => {

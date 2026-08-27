@@ -1,6 +1,6 @@
 import type { FeatureDefinition, FrameworkId } from './feature';
 import type { DatabaseId } from './database';
-import { InfrastructureState, QueueTechnologyId } from './infrastructure';
+import type { InfrastructureState, QueueTechnologyId } from './infrastructure';
 import type { RequestNodeKind } from './request-flow';
 import {
   ModuleDeployment,
@@ -8,6 +8,7 @@ import {
   RouteBlueprint,
   RouteBlueprintEdge,
   RouteResolver,
+  ResolvedRoute,
   ServiceModule,
   WorkloadAssignment,
 } from './service-topology';
@@ -216,5 +217,45 @@ export class SingleServiceTopology {
     }
     assignment.validate([this.deployment]);
     return RouteResolver.resolve(blueprint, this.deployment, this.graph);
+  }
+
+  resolveForTrace(workloadId: string): ResolvedRoute {
+    const blueprint = this.module.blueprints.find((candidate) => candidate.workloadId === workloadId);
+    if (!blueprint) throw new Error(`Unknown V1 workload: ${workloadId}`);
+
+    const internalRoute = RouteResolver.resolveForTrace(blueprint, this.deployment, this.graph);
+    const gatewayNodeId = this.deployment.bindingFor('ENTRY_GATEWAY');
+    if (!gatewayNodeId || internalRoute.steps[0]?.role === 'ENTRY_GATEWAY') return internalRoute;
+
+    const firstNodeId = internalRoute.steps.find((step) => step.nodeId !== null)?.nodeId;
+    if (!firstNodeId) return internalRoute;
+    const ingressEdge = this.graph.edge(gatewayNodeId, firstNodeId, 'SYNC');
+    if (!ingressEdge) {
+      throw new Error(`V1 gateway is disconnected from module entry: ${gatewayNodeId} -> ${firstNodeId}`);
+    }
+
+    return Object.freeze({
+      workloadId: internalRoute.workloadId,
+      moduleId: internalRoute.moduleId,
+      steps: Object.freeze([
+        Object.freeze({
+          stepId: `${workloadId}:ingress:gateway`,
+          role: 'ENTRY_GATEWAY' as const,
+          requirement: 'REQUIRED' as const,
+          nodeId: gatewayNodeId,
+        }),
+        ...internalRoute.steps,
+      ]),
+      edges: Object.freeze([
+        Object.freeze({
+          blueprintEdgeId: `${workloadId}:ingress`,
+          topologyEdgeId: ingressEdge.id,
+          fromNodeId: gatewayNodeId,
+          toNodeId: firstNodeId,
+          mode: ingressEdge.mode,
+        }),
+        ...internalRoute.edges,
+      ]),
+    });
   }
 }

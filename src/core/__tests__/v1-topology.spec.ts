@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { COMMUNITY_FEATURES } from '../community';
 import { InfrastructureState } from '../infrastructure';
+import { RequestTraceSimulator } from '../request-trace';
 import {
   SingleServiceTopology,
   V1_NODE_IDS,
@@ -116,5 +117,38 @@ describe('SingleServiceTopology', () => {
       capacity: { throughput: 1_000 },
       monthlyCost: 350_000,
     }));
+  });
+
+  it('composes ALB ingress into runtime traces without changing the module blueprint', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    const feature = COMMUNITY_FEATURES.COMMENT;
+    const before = SingleServiceTopology.from(infrastructure, [feature]);
+    infrastructure.deployTechnology('ALB');
+    const after = SingleServiceTopology.from(infrastructure, [feature]);
+
+    const trace = RequestTraceSimulator.simulate(after.resolveForTrace(feature.id));
+
+    expect(before.module.blueprints).toEqual(after.module.blueprints);
+    expect(trace.nodes.map(({ nodeId }) => nodeId)).toEqual([
+      V1_NODE_IDS.gateway,
+      V1_NODE_IDS.app('SPRING_BOOT'),
+      V1_NODE_IDS.database('POSTGRESQL'),
+    ]);
+    expect(trace.edges[0]?.edgeId).toContain(`${V1_NODE_IDS.gateway}:${V1_NODE_IDS.app('SPRING_BOOT')}`);
+  });
+
+  it('preserves a missing required queue as a failed runtime trace step', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    const feature = COMMUNITY_FEATURES.NOTIFICATION;
+    const topology = SingleServiceTopology.from(infrastructure, [feature]);
+
+    const trace = RequestTraceSimulator.simulate(topology.resolveForTrace(feature.id));
+
+    expect(trace.nodes.at(-1)).toEqual(expect.objectContaining({
+      role: 'EVENT_BUS',
+      nodeId: null,
+      status: 'MISSING',
+    }));
+    expect(trace.successRatio).toBe(0);
   });
 });

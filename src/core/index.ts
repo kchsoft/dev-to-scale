@@ -13,6 +13,7 @@ export * from './learning';
 export * from './progression';
 export * from './random';
 export * from './request-flow';
+export * from './request-trace';
 export * from './service-topology';
 export * from './tech-debt';
 export * from './technology';
