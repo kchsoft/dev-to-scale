@@ -19,4 +19,18 @@ describe('React/Application boundary', () => {
 
     expect(imports.filter((path) => path.includes('/core'))).toEqual([]);
   });
+
+  it('keeps the controller facade in the GameApp composition root', () => {
+    const uiRoot = resolve(process.cwd(), 'src/ui');
+    const componentSources = readdirSync(uiRoot, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.tsx$/.test(entry.name))
+      .map((entry) => resolve(entry.parentPath, entry.name))
+      .filter((sourcePath) => !sourcePath.includes('/__tests__/') && !sourcePath.endsWith('/GameApp.tsx'));
+
+    const controllerImports = componentSources.filter((sourcePath) => (
+      readFileSync(sourcePath, 'utf8').includes('/game-controller')
+    ));
+
+    expect(controllerImports).toEqual([]);
+  });
 });
