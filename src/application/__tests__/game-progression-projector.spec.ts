@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GameEngine, ServerSize } from '../../core';
+import { GameEngine, ServerSize, skillRef } from '../../core';
 import { GameProgressionProjector } from '../game-progression-projector';
 
 describe('GameProgressionProjector', () => {
@@ -23,6 +23,31 @@ describe('GameProgressionProjector', () => {
     engine.scaleDatabase(ServerSize.XLARGE);
 
     expect(engine.snapshot.load.dbRatio).not.toBe(captured.load.dbRatio);
+    expect(() => new GameProgressionProjector(engine).project(captured))
+      .toThrow('GameProgressionProjector requires the current engine snapshot');
+  });
+
+  it('rejects a stale snapshot after same-day learning starts without refreshing load', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
+    for (let day = 0; day < 10; day += 1) engine.advanceDay();
+    const captured = engine.snapshot;
+
+    engine.startLearning(skillRef.fundamental('NETWORK'));
+
+    expect(engine.snapshot.load).toBe(captured.load);
+    expect(() => new GameProgressionProjector(engine).project(captured))
+      .toThrow('GameProgressionProjector requires the current engine snapshot');
+  });
+
+  it('rejects a stale snapshot after same-day technology construction starts without refreshing load', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
+    engine.developer.get(skillRef.fundamental('NETWORK')).setLevel(2);
+    engine.developer.get(skillRef.fundamental('DATABASE')).setLevel(2);
+    const captured = engine.snapshot;
+
+    engine.startTechnologyBuild('REDIS');
+
+    expect(engine.snapshot.load).toBe(captured.load);
     expect(() => new GameProgressionProjector(engine).project(captured))
       .toThrow('GameProgressionProjector requires the current engine snapshot');
   });

@@ -14,7 +14,7 @@
 
 - React View imports Application contracts only; no production file under `src/ui` imports Core.
 - Capture one `GameSnapshot` per `GameViewProjector.project()` call and pass that exact snapshot to every child projector.
-- `GameProgressionProjector` accepts only that current engine snapshot and rejects stale input before applying live Core availability, preview, or skill policies.
+- `GameProgressionProjector` accepts only that current engine snapshot and rejects stale input before applying live Core availability, preview, or skill policies through whole-snapshot equivalence plus load identity.
 - `TopologyView` is the only Application node, edge, and request-trace contract.
 - Do not remove Core `appRatio`, `dbRatio`, `asyncRatio`, `storageRatio`, or `LoadSnapshot.requestFlows` in this phase.
 - Keep `FeatureCardView.route` and `RequestNodeViewKind`; the roadmap still displays route tags.
@@ -233,7 +233,7 @@ rtk git commit -m "refactor: extract game overview projection"
 **Interfaces:**
 - Produces: `GameProgressionProjection` and `GameProgressionProjector.project(snapshot)`.
 - Owns: technology availability/preview, skill-tree projection, and feature-roadmap projection.
-- Requires: the current engine snapshot; stale snapshots are rejected because availability/preview/skill policies depend on live Core state.
+- Requires: the current engine snapshot; stale snapshots are rejected by whole `GameSnapshot` equivalence plus load identity because availability/preview/skill policies depend on live Core state.
 
 - [ ] **Step 1: Write the failing direct-projector test**
 

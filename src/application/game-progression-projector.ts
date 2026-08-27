@@ -41,6 +41,15 @@ function sameSkill(left: SkillRef, right: SkillRef): boolean {
   return left.category === right.category && left.id === right.id;
 }
 
+/**
+ * GameSnapshot is a small JSON-safe DTO. Comparing its serialized value keeps
+ * this guard complete as fields are added, while load identity detects a
+ * refreshed load snapshot even when its serialized values happen to match.
+ */
+function isCurrentSnapshot(current: GameSnapshot, snapshot: GameSnapshot): boolean {
+  return current.load === snapshot.load && JSON.stringify(current) === JSON.stringify(snapshot);
+}
+
 export interface GameProgressionProjection {
   readonly technologies: readonly TechnologyOptionView[];
   readonly skills: readonly SkillNodeView[];
@@ -56,7 +65,7 @@ export class GameProgressionProjector {
 
   project(snapshot: GameSnapshot): GameProgressionProjection {
     const current = this.#engine.snapshot;
-    if (current.day !== snapshot.day || current.load !== snapshot.load) {
+    if (!isCurrentSnapshot(current, snapshot)) {
       throw new Error('GameProgressionProjector requires the current engine snapshot');
     }
     return {
