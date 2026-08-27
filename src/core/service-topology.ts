@@ -174,6 +174,59 @@ function validateNoSynchronousCycle(blueprint: RouteBlueprint): void {
   for (const step of blueprint.steps) visit(step.id);
 }
 
+interface ActiveBlueprintConnection {
+  readonly edgeIds: readonly string[];
+  readonly fromStepId: string;
+  readonly toStepId: string;
+  readonly mode: TopologyEdgeMode;
+}
+
+function activeBlueprintConnections(
+  blueprint: RouteBlueprint,
+  resolvedByStepId: ReadonlyMap<string, ResolvedRouteStep>,
+): ActiveBlueprintConnection[] {
+  const outgoing = new Map<string, RouteBlueprintEdge[]>();
+  for (const step of blueprint.steps) outgoing.set(step.id, []);
+  for (const edge of blueprint.edges) outgoing.get(edge.fromStepId)?.push(edge);
+
+  const connections: ActiveBlueprintConnection[] = [];
+  for (const source of blueprint.steps) {
+    if (!resolvedByStepId.get(source.id)?.nodeId) continue;
+
+    function walk(
+      currentStepId: string,
+      edgeIds: readonly string[],
+      mode: TopologyEdgeMode,
+      visitedEdgeIds: ReadonlySet<string>,
+    ): void {
+      for (const edge of outgoing.get(currentStepId) ?? []) {
+        if (visitedEdgeIds.has(edge.id)) continue;
+        const nextEdgeIds = [...edgeIds, edge.id];
+        const nextMode = mode === 'ASYNC' || edge.mode === 'ASYNC' ? 'ASYNC' : 'SYNC';
+        const target = resolvedByStepId.get(edge.toStepId);
+        if (target?.nodeId) {
+          connections.push({
+            edgeIds: nextEdgeIds,
+            fromStepId: source.id,
+            toStepId: edge.toStepId,
+            mode: nextMode,
+          });
+          continue;
+        }
+        walk(
+          edge.toStepId,
+          nextEdgeIds,
+          nextMode,
+          new Set([...visitedEdgeIds, edge.id]),
+        );
+      }
+    }
+
+    walk(source.id, [], 'SYNC', new Set());
+  }
+  return connections;
+}
+
 export class RouteResolver {
   static resolve(blueprint: RouteBlueprint, deployment: ModuleDeployment, graph: TopologyGraph): ResolvedRoute {
     if (deployment.moduleId !== blueprint.moduleId) {
@@ -214,20 +267,20 @@ export class RouteResolver {
 
     const resolvedByStepId = new Map(resolvedSteps.map((step) => [step.stepId, step]));
     const resolvedEdges: ResolvedRouteEdge[] = [];
-    for (const blueprintEdge of blueprint.edges) {
-      const fromNodeId = resolvedByStepId.get(blueprintEdge.fromStepId)?.nodeId;
-      const toNodeId = resolvedByStepId.get(blueprintEdge.toStepId)?.nodeId;
+    for (const connection of activeBlueprintConnections(blueprint, resolvedByStepId)) {
+      const fromNodeId = resolvedByStepId.get(connection.fromStepId)?.nodeId;
+      const toNodeId = resolvedByStepId.get(connection.toStepId)?.nodeId;
       if (!fromNodeId || !toNodeId) continue;
 
-      const topologyEdge = graph.edge(fromNodeId, toNodeId, blueprintEdge.mode);
+      const topologyEdge = graph.edge(fromNodeId, toNodeId, connection.mode);
       if (!topologyEdge) {
         throw new TopologyValidationError(
           'DISCONNECTED_ROUTE',
-          `Blueprint edge ${blueprintEdge.id} is not connected in topology: ${fromNodeId} -> ${toNodeId}`,
+          `Blueprint edge ${connection.edgeIds.join('+')} is not connected in topology: ${fromNodeId} -> ${toNodeId}`,
         );
       }
       resolvedEdges.push(Object.freeze({
-        blueprintEdgeId: blueprintEdge.id,
+        blueprintEdgeId: connection.edgeIds.join('+'),
         topologyEdgeId: topologyEdge.id,
         fromNodeId,
         toNodeId,

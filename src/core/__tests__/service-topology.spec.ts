@@ -97,6 +97,33 @@ describe('RouteResolver validation', () => {
     expect(route.edges).toEqual([]);
   });
 
+  it('bypasses an unbound optional middle step through a valid topology edge', () => {
+    const blueprint = new RouteBlueprint('search', 'community', [
+      { id: 'app', role: 'ENTRY_APP', requirement: 'REQUIRED' },
+      { id: 'cache', role: 'CACHE', requirement: 'OPTIONAL' },
+      { id: 'db', role: 'PRIMARY_DATABASE', requirement: 'REQUIRED' },
+    ], [
+      { id: 'app-cache', fromStepId: 'app', toStepId: 'cache', mode: 'SYNC' },
+      { id: 'cache-db', fromStepId: 'cache', toStepId: 'db', mode: 'SYNC' },
+    ]);
+    const deployment = new ModuleDeployment('community', [
+      ['ENTRY_APP', 'app'],
+      ['PRIMARY_DATABASE', 'db'],
+    ]);
+
+    const route = RouteResolver.resolve(blueprint, deployment, graph);
+
+    expect(route.steps[1]).toEqual(expect.objectContaining({ nodeId: null }));
+    expect(route.edges).toEqual([
+      expect.objectContaining({
+        blueprintEdgeId: 'app-cache+cache-db',
+        topologyEdgeId: 'app-db',
+        fromNodeId: 'app',
+        toNodeId: 'db',
+      }),
+    ]);
+  });
+
   it.each([
     {
       name: 'a binding to a missing node',
