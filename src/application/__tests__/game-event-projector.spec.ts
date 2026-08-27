@@ -34,4 +34,15 @@ describe('GameEventProjector', () => {
     expect(engine.launched).toBe(true);
     expect(launchEvents).toBe(1);
   });
+
+  it('rejects stale snapshots instead of mixing them with current engine state', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 12 });
+    const viewProjector = new GameViewProjector(engine);
+    const eventProjector = new GameEventProjector(engine, viewProjector);
+    const before = engine.snapshot;
+    const after = engine.advanceDay();
+    engine.advanceDay();
+
+    expect(() => eventProjector.project(before, after)).toThrow('current engine transition');
+  });
 });

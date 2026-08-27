@@ -14,12 +14,16 @@ export class GameEventProjector {
   }
 
   project(before: GameSnapshot, after: GameSnapshot): readonly GameEventView[] {
+    const current = this.#engine.snapshot;
+    if (current.day !== after.day || current.load !== after.load) {
+      throw new Error('GameEventProjector requires the current engine transition');
+    }
     const events: GameEventView[] = [];
     if (!before.launched && after.launched) {
       events.push({ id: `launch-${after.day}`, kind: 'launch', title: 'SERVICE ONLINE', message: '커뮤니티 서비스가 공개되었습니다. DAU 80에서 시작합니다.', autoPause: false });
     }
     if (after.currentFeature && after.currentFeature.id !== before.currentFeature?.id && after.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
-      const impact = this.#viewProjector.featureImpact(after, after.currentFeature.id);
+      const impact = this.#viewProjector.featureImpact(after.currentFeature.id);
       events.push({
         id: `req-${after.day}-${after.currentFeature.id}`,
         kind: 'requirement',

@@ -357,7 +357,7 @@ export class GameViewProjector {
     }
 
     if (snapshot.currentFeature && snapshot.currentFeature.id !== COMMUNITY_BOOTSTRAP.id) {
-      const impact = this.featureImpact(snapshot, snapshot.currentFeature.id);
+      const impact = this.featureImpact(snapshot.currentFeature.id);
       if (impact) {
         alerts.push({
           id: `feature-impact-${snapshot.currentFeature.id}`,
@@ -433,7 +433,8 @@ export class GameViewProjector {
     });
   }
 
-  featureImpact(snapshot: GameSnapshot, featureId: string): FeatureImpactPreview | null {
+  featureImpact(featureId: string): FeatureImpactPreview | null {
+    const snapshot = this.#engine.snapshot;
     const feature = COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES];
     if (!feature || !snapshot.launched) return null;
     const projected = this.#engine.previewLoadWithFeature(feature);
@@ -619,7 +620,7 @@ export class GameViewProjector {
         : Math.max(1, Math.min(4, Math.ceil(estimatedTraffic / trafficUnit)));
       return {
         id: flow.featureId,
-        name: presentationCatalog.label(flow.featureId) ?? feature?.name ?? flow.featureId,
+        name: presentationCatalog.label(flow.featureId),
         nodes: flow.nodes.map((node) => ({
           node: node.node,
           arrivalPercent: percent(node.arrivalRatio),
