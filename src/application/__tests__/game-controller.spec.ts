@@ -49,6 +49,19 @@ describe('application layer', () => {
     expect(Object.keys(controller)).not.toContain('engine');
   });
 
+  it('emits exactly one current view after each successful command', () => {
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 25 });
+    const listener = vi.fn();
+    const unsubscribe = controller.subscribe(listener);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    controller.scaleApplication(ServerSize.MEDIUM);
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener.mock.lastCall?.[0].appSize).toBe(ServerSize.MEDIUM);
+    unsubscribe();
+  });
+
   it('rolls M1 D30 into M2 D1 with a visible settlement event', () => {
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 17 });
     let settlement: GameEventView | undefined;
