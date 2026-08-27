@@ -136,11 +136,11 @@ interface FeatureImpactPreview {
 }
 
 export class GameController {
-  readonly engine: GameEngine;
+  readonly #engine: GameEngine;
   private readonly listeners = new Set<(view: GameView) => void>();
 
   constructor(config: GameStartConfig) {
-    this.engine = new GameEngine(config);
+    this.#engine = new GameEngine(config);
   }
 
   subscribe(listener: (view: GameView) => void): () => void {
@@ -150,16 +150,16 @@ export class GameController {
   }
 
   getView(): GameView {
-    const snapshot = this.engine.snapshot;
+    const snapshot = this.#engine.snapshot;
     const revenueModifier = snapshot.completedFeatures.reduce(
       (sum, id) => sum + (COMMUNITY_FEATURES[id as keyof typeof COMMUNITY_FEATURES]?.revenueModifier ?? 0),
       0,
     );
     const aiActive = snapshot.completedFeatures.includes('AI_RECOMMENDATION');
     const monthlyRevenue = RevenuePolicy.monthlyRevenue(snapshot.dau, revenueModifier);
-    const monthlyCost = this.engine.infrastructure.monthlyCost + RevenuePolicy.monthlyAiCost(snapshot.dau, aiActive);
+    const monthlyCost = this.#engine.infrastructure.monthlyCost + RevenuePolicy.monthlyAiCost(snapshot.dau, aiActive);
     const calendar = calendarForDay(snapshot.day);
-    const service = OperationalViewProjector.project(snapshot, this.engine.developer);
+    const service = OperationalViewProjector.project(snapshot, this.#engine.developer);
 
     return {
       hud: {
@@ -193,33 +193,33 @@ export class GameController {
           ? { burstCost: snapshot.growthEvent.burstCost }
           : null,
       },
-      frameworkId: this.engine.config.frameworkId,
-      databaseId: this.engine.config.databaseId,
-      appSize: this.engine.infrastructure.app.size,
-      appCount: this.engine.infrastructure.app.count,
-      dbSize: this.engine.infrastructure.database.size,
-      dbReplicaCount: this.engine.infrastructure.database.replicaCount,
+      frameworkId: this.#engine.config.frameworkId,
+      databaseId: this.#engine.config.databaseId,
+      appSize: this.#engine.infrastructure.app.size,
+      appCount: this.#engine.infrastructure.app.count,
+      dbSize: this.#engine.infrastructure.database.size,
+      dbReplicaCount: this.#engine.infrastructure.database.replicaCount,
     };
   }
 
   advanceDay(): GameEventView[] {
-    const before = this.engine.snapshot;
-    const after = this.engine.advanceDay();
+    const before = this.#engine.snapshot;
+    const after = this.#engine.advanceDay();
     const events = this.detectEvents(before, after);
     this.emit();
     return events;
   }
 
-  startTechnologyBuild(id: BuildableTechnologyId): void { this.engine.startTechnologyBuild(id); this.emit(); }
-  startLearning(ref: SkillRef): void { this.engine.startLearning(ref); this.emit(); }
-  startIncidentResponse(id: string): void { this.engine.startIncidentResponse(id); this.emit(); }
-  scaleApplication(size: ServerSize): void { this.engine.scaleApplication(size); this.emit(); }
-  addApplicationServer(): void { this.engine.addApplicationServer(); this.emit(); }
-  scaleDatabase(size: ServerSize): void { this.engine.scaleDatabase(size); this.emit(); }
-  addDatabaseReplica(): void { this.engine.addDatabaseReplica(); this.emit(); }
-  fastTrackCurrentFeature(): void { this.engine.fastTrackCurrentFeature(); this.emit(); }
-  startRefactor(): void { this.engine.startRefactor(); this.emit(); }
-  respondTrafficSpike(response: TrafficSpikeResponse): void { this.engine.respondToTrafficSpike(response); this.emit(); }
+  startTechnologyBuild(id: BuildableTechnologyId): void { this.#engine.startTechnologyBuild(id); this.emit(); }
+  startLearning(ref: SkillRef): void { this.#engine.startLearning(ref); this.emit(); }
+  startIncidentResponse(id: string): void { this.#engine.startIncidentResponse(id); this.emit(); }
+  scaleApplication(size: ServerSize): void { this.#engine.scaleApplication(size); this.emit(); }
+  addApplicationServer(): void { this.#engine.addApplicationServer(); this.emit(); }
+  scaleDatabase(size: ServerSize): void { this.#engine.scaleDatabase(size); this.emit(); }
+  addDatabaseReplica(): void { this.#engine.addDatabaseReplica(); this.emit(); }
+  fastTrackCurrentFeature(): void { this.#engine.fastTrackCurrentFeature(); this.emit(); }
+  startRefactor(): void { this.#engine.startRefactor(); this.emit(); }
+  respondTrafficSpike(response: TrafficSpikeResponse): void { this.#engine.respondToTrafficSpike(response); this.emit(); }
 
   private emit(): void {
     const view = this.getView();
@@ -272,7 +272,7 @@ export class GameController {
         message: `${this.nodeLabel(incident.nodeId)}에서 장애가 발생했습니다.`,
         severity: incident.severity,
         nodeId: incident.nodeId,
-        diagnosis: OperationalViewProjector.diagnosisText(incident.nodeId, after, this.engine.developer),
+        diagnosis: OperationalViewProjector.diagnosisText(incident.nodeId, after, this.#engine.developer),
         autoPause,
       });
     }
@@ -287,36 +287,36 @@ export class GameController {
 
   private serviceNodes(snapshot: GameSnapshot): ServiceNodeView[] {
     const incidentByNode = new Map(snapshot.incidents.map((incident) => [incident.nodeId, incident]));
-    const appIncident = incidentByNode.get(`framework:${this.engine.config.frameworkId}`);
-    const dbIncident = incidentByNode.get(`database:${this.engine.config.databaseId}`);
+    const appIncident = incidentByNode.get(`framework:${this.#engine.config.frameworkId}`);
+    const dbIncident = incidentByNode.get(`database:${this.#engine.config.databaseId}`);
     const appCap = snapshot.load.appCapacity;
     const dbCap = snapshot.load.dbCapacity;
     const nodes: ServiceNodeView[] = [
       {
         id: 'application',
         kind: 'application',
-        name: LABELS[this.engine.config.frameworkId],
+        name: LABELS[this.#engine.config.frameworkId],
         icon: ICONS.application,
         loadPercent: percent(snapshot.load.appRatio),
         tone: loadTone(snapshot.load.appRatio, Boolean(appIncident)),
-        detail: `${this.engine.infrastructure.app.size} ×${this.engine.infrastructure.app.count} · CAP ${Math.round(appCap)}`,
+        detail: `${this.#engine.infrastructure.app.size} ×${this.#engine.infrastructure.app.count} · CAP ${Math.round(appCap)}`,
         incidentId: appIncident?.id,
         incidentSeverity: appIncident?.severity,
       },
       {
         id: 'database',
         kind: 'database',
-        name: LABELS[this.engine.config.databaseId],
+        name: LABELS[this.#engine.config.databaseId],
         icon: ICONS.database,
         loadPercent: percent(snapshot.load.dbRatio),
         tone: loadTone(snapshot.load.dbRatio, Boolean(dbIncident)),
-        detail: `${this.engine.infrastructure.database.size} · Replica ${this.engine.infrastructure.database.replicaCount} · CAP ${Math.round(dbCap)}`,
+        detail: `${this.#engine.infrastructure.database.size} · Replica ${this.#engine.infrastructure.database.replicaCount} · CAP ${Math.round(dbCap)}`,
         incidentId: dbIncident?.id,
         incidentSeverity: dbIncident?.severity,
       },
     ];
 
-    for (const technology of this.engine.infrastructure.deployedTechnologies) {
+    for (const technology of this.#engine.infrastructure.deployedTechnologies) {
       const nodeId = `technology:${technology}`;
       const incident = incidentByNode.get(nodeId);
       const kind: ServiceNodeView['kind'] = technology === 'REDIS'
@@ -354,7 +354,7 @@ export class GameController {
   private workSlots(snapshot: GameSnapshot): WorkSlotView[] {
     const feature = snapshot.currentFeature;
     const tech = snapshot.currentTechnologyBuild;
-    const learning = this.engine.learning.current;
+    const learning = this.#engine.learning.current;
     const responding = snapshot.incidents.find((incident) => incident.remainingResponseDays !== null);
     const featureTotal = feature ? feature.elapsedDays + feature.estimatedRemainingDays : 0;
     const techTotal = tech ? tech.elapsedDays + tech.estimatedRemainingDays : 0;
@@ -526,7 +526,7 @@ export class GameController {
   private featureImpact(snapshot: GameSnapshot, featureId: string): FeatureImpactPreview | null {
     const feature = COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES];
     if (!feature || !snapshot.launched) return null;
-    const projected = this.engine.previewLoadWithFeature(feature);
+    const projected = this.#engine.previewLoadWithFeature(feature);
     const axes = [
       { label: 'APP CPU', before: snapshot.load.appCpuRatio, after: projected.appCpuRatio, nodeId: 'application' },
       { label: 'APP I/O', before: snapshot.load.appIoRatio, after: projected.appIoRatio, nodeId: 'application' },
@@ -561,12 +561,12 @@ export class GameController {
   private technologyOptions(snapshot: GameSnapshot): TechnologyOptionView[] {
     return (Object.keys(TECHNOLOGIES) as BuildableTechnologyId[]).map((id) => {
       const tech = TECHNOLOGIES[id];
-      const deployed = this.engine.infrastructure.hasTechnology(id);
+      const deployed = this.#engine.infrastructure.hasTechnology(id);
       let reason: string | null = null;
       if (snapshot.currentTechnologyBuild) reason = '다른 기술을 구축 중';
       if (snapshot.cash < tech.buildCost) reason = '현금 부족';
       for (const [fundamental, level] of Object.entries(tech.prerequisites)) {
-        if (this.engine.developer.get(skillRef.fundamental(fundamental as FundamentalSkillId)).level < (level ?? 1)) {
+        if (this.#engine.developer.get(skillRef.fundamental(fundamental as FundamentalSkillId)).level < (level ?? 1)) {
           reason = `${LABELS[fundamental]} Lv.${level} 필요`;
         }
       }
@@ -586,9 +586,9 @@ export class GameController {
   }
 
   private previewTechnology(id: BuildableTechnologyId): string {
-    if (this.engine.infrastructure.hasTechnology(id)) return '이미 서비스에 연결됨';
-    const snapshot = this.engine.snapshot;
-    const after = this.engine.previewLoadWithTechnology(id);
+    if (this.#engine.infrastructure.hasTechnology(id)) return '이미 서비스에 연결됨';
+    const snapshot = this.#engine.snapshot;
+    const after = this.#engine.previewLoadWithTechnology(id);
     if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
       return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
     }
@@ -604,15 +604,15 @@ export class GameController {
   private skillNodes(): SkillNodeView[] {
     const refs: SkillRef[] = [
       ...FUNDAMENTALS.map(skillRef.fundamental),
-      skillRef.language(FRAMEWORK_LANGUAGE[this.engine.config.frameworkId]),
-      skillRef.framework(this.engine.config.frameworkId),
-      skillRef.technology(this.engine.config.databaseId),
-      ...TECHNOLOGY_SKILLS.filter((id) => id !== this.engine.config.databaseId).map(skillRef.technology),
+      skillRef.language(FRAMEWORK_LANGUAGE[this.#engine.config.frameworkId]),
+      skillRef.framework(this.#engine.config.frameworkId),
+      skillRef.technology(this.#engine.config.databaseId),
+      ...TECHNOLOGY_SKILLS.filter((id) => id !== this.#engine.config.databaseId).map(skillRef.technology),
     ];
-    const currentLearning = this.engine.learning.current;
+    const currentLearning = this.#engine.learning.current;
 
     return refs.map((ref) => {
-      const proficiency = this.engine.developer.get(ref);
+      const proficiency = this.#engine.developer.get(ref);
       const studying = Boolean(currentLearning && sameSkill(currentLearning.skill, ref));
       let targetLevel: number | null = null;
       let requiredExperience: number | null = null;
@@ -637,9 +637,9 @@ export class GameController {
         } else if (proficiency.experienceDays < requirement.experienceDays) {
           reason = `경험 ${requirement.experienceDays - proficiency.experienceDays}일 부족`;
         } else {
-          const missing = requirement.prerequisites.find((item) => this.engine.developer.get(item.ref).level < item.level);
+          const missing = requirement.prerequisites.find((item) => this.#engine.developer.get(item.ref).level < item.level);
           if (missing) reason = `${LABELS[missing.ref.id]} Lv.${missing.level} 필요`;
-          else if (this.engine.finance.cash < requirement.cost) reason = '현금 부족';
+          else if (this.#engine.finance.cash < requirement.cost) reason = '현금 부족';
           else canStudy = true;
         }
       }
@@ -666,7 +666,7 @@ export class GameController {
   }
 
   private featureCards(snapshot: GameSnapshot): FeatureCardView[] {
-    return this.engine.progression.featureOrder.map((featureId, slotIndex) => {
+    return this.#engine.progression.featureOrder.map((featureId, slotIndex) => {
       const threshold = COMMUNITY_REQUIREMENT_THRESHOLDS[slotIndex];
       const phase = phaseForSlot(slotIndex);
       const completed = snapshot.completedFeatures.includes(featureId);
@@ -722,21 +722,21 @@ export class GameController {
   }
 
   private infrastructureCostView(): InfrastructureCostView {
-    const currentApp = this.engine.infrastructure.app;
-    const currentDb = this.engine.infrastructure.database;
-    const hasAlb = this.engine.infrastructure.hasTechnology('ALB');
+    const currentApp = this.#engine.infrastructure.app;
+    const currentDb = this.#engine.infrastructure.database;
+    const hasAlb = this.#engine.infrastructure.hasTechnology('ALB');
 
     const appSizeMonthlyCosts = {} as Record<ServerSize, number>;
     const dbSizeMonthlyCosts = {} as Record<ServerSize, number>;
     for (const size of SERVER_SIZES) {
       appSizeMonthlyCosts[size] = new AppCluster(
-        this.engine.config.frameworkId,
+        this.#engine.config.frameworkId,
         size,
         currentApp.count,
         hasAlb,
       ).monthlyCost;
       dbSizeMonthlyCosts[size] = new DatabaseCluster(
-        this.engine.config.databaseId,
+        this.#engine.config.databaseId,
         size,
         currentDb.replicaCount,
       ).monthlyCost;
@@ -745,7 +745,7 @@ export class GameController {
     let addAppServerMonthlyCostDelta: number | null = null;
     if (hasAlb && currentApp.count < 10) {
       const expanded = new AppCluster(
-        this.engine.config.frameworkId,
+        this.#engine.config.frameworkId,
         currentApp.size,
         currentApp.count,
         true,
@@ -757,7 +757,7 @@ export class GameController {
     let addDbReplicaMonthlyCostDelta: number | null = null;
     if (currentDb.replicaCount < 3) {
       const expanded = new DatabaseCluster(
-        this.engine.config.databaseId,
+        this.#engine.config.databaseId,
         currentDb.size,
         currentDb.replicaCount,
       );

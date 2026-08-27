@@ -6,6 +6,10 @@ import { GameController, GameEventView } from '../game-controller';
 describe('application layer', () => {
   afterEach(() => vi.useRealTimers());
 
+  function advance(controller: GameController, days: number): void {
+    for (let day = 0; day < days; day += 1) controller.advanceDay();
+  }
+
   it('projects the core engine into an initial UI view without duplicating game rules', () => {
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
     const view = controller.getView();
@@ -29,6 +33,13 @@ describe('application layer', () => {
     expect(Object.hasOwn(view, 'snapshot')).toBe(false);
     expect(view.operations.currentFeature?.id).toBe('COMMUNITY_MVP');
     expect(view.service.visibleLoads.map((metric) => metric.label)).toEqual(['APP', 'DB', 'ASYNC', 'STORAGE']);
+  });
+
+  it('does not expose the mutable domain engine through the command facade', () => {
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 24 });
+
+    expect(Object.hasOwn(controller, 'engine')).toBe(false);
+    expect(Object.keys(controller)).not.toContain('engine');
   });
 
   it('rolls M1 D30 into M2 D1 with a visible settlement event', () => {
@@ -74,30 +85,27 @@ describe('application layer', () => {
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 3 });
     expect(controller.getView().technologies.find((tech) => tech.id === 'REDIS')?.available).toBe(false);
 
-    controller.engine.developer.get(skillRef.fundamental('DATABASE')).setLevel(2);
-    controller.engine.developer.get(skillRef.fundamental('NETWORK')).setLevel(2);
+    advance(controller, 10);
+    controller.startLearning(skillRef.fundamental('NETWORK'));
+    advance(controller, 3);
+    controller.startLearning(skillRef.fundamental('DATABASE'));
+    advance(controller, 3);
 
     expect(controller.getView().technologies.find((tech) => tech.id === 'REDIS')?.available).toBe(true);
   });
 
-  it('projects a technology preview calculated with the current game context', () => {
+  it('projects technology previews through the public view contract', () => {
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 15 });
-    const current = controller.engine.snapshot.load;
-    const previewLoad = vi.spyOn(controller.engine, 'previewLoadWithTechnology').mockReturnValue({
-      ...current,
-      dbRatio: current.dbRatio + 0.42,
-    });
 
     const preview = controller.getView().technologies.find((technology) => technology.id === 'REDIS')?.preview;
 
-    expect(previewLoad).toHaveBeenCalledWith('REDIS');
-    expect(preview).toBe(`DB ${Math.round(current.dbRatio * 100)}% → ${Math.round((current.dbRatio + 0.42) * 100)}%`);
+    expect(preview).toMatch(/^DB \d+% → \d+%$/);
   });
 
   it('projects the active learning target and study progress into the UI', () => {
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 5 });
     const network = skillRef.fundamental('NETWORK');
-    controller.engine.developer.gainExperience(network, 10);
+    advance(controller, 10);
 
     controller.startLearning(network);
     let view = controller.getView();
