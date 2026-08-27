@@ -12,6 +12,7 @@ import {
   TrafficResponseChoice,
 } from '../application/game-view';
 import { GameClock, GameSpeed } from '../application/game-clock';
+import { presentationCatalog } from '../application/presentation-catalog';
 import {
   AlertView,
   GameController,
@@ -42,10 +43,6 @@ const SIZE_LABEL: Record<ServerSizeView, string> = { SMALL: 'S', MEDIUM: 'M', LA
 
 const CATEGORY_LABEL: Record<SkillRefView['category'], string> = {
   fundamental: 'FUNDAMENTALS', language: 'LANGUAGE', framework: 'FRAMEWORK', technology: 'TECHNOLOGY',
-};
-
-const REQUEST_NODE_LABEL: Record<string, string> = {
-  ALB: 'ALB', APP: 'APP', DB: 'DB', CACHE: 'REDIS', QUEUE: 'MQ', STORAGE: 'STORAGE', AI: 'AI',
 };
 
 function money(value: number): string {
@@ -423,7 +420,7 @@ function FeatureBoard({ view, observability, onFastTrack, onRefactor }: { view: 
         <small>{observability.nextUnlock ?? '요청 추적과 출시 영향 분석까지 모두 해금되었습니다.'}</small>
       </div>
       <div className="phase-board">{([1, 2, 3] as const).map((phase) => <div className="phase-lane" key={phase}><header><span>PHASE {phase}</span><strong>{phase === 1 ? 'EARLY' : phase === 2 ? 'GROWTH' : 'SCALE'}</strong></header><div>
-        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <div className="inline-progress"><div className="progress-track"><i style={{ width: `${pct(current.progress / current.requiredWork)}%` }} /></div><small>{current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일 · 약 {current.estimatedRemainingDays}일 남음</small></div>}{feature.route && <div className="feature-route-tags">{feature.route.map((node, nodeIndex) => <i key={`${node}-${nodeIndex}`}>{REQUEST_NODE_LABEL[node] ?? node}</i>)}</div>}{feature.load && showResourceSignature && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}{feature.load && !showResourceSignature && <small>Resource signature · METRICS에서 해금</small>}</article>)}
+        {view.features.filter((feature) => feature.phase === phase).map((feature, index) => <article className={`feature-card ${feature.state}`} key={feature.id}><div className="feature-index">{String(index + 1).padStart(2, '0')}</div><span>{feature.state === 'completed' ? '✓' : feature.state === 'developing' ? '●' : feature.state === 'hidden' ? '?' : '○'}</span><strong>{feature.name}</strong><small>DAU {number(feature.threshold)}</small>{feature.state === 'developing' && current && <div className="inline-progress"><div className="progress-track"><i style={{ width: `${pct(current.progress / current.requiredWork)}%` }} /></div><small>{current.elapsedDays}/~{current.elapsedDays + current.estimatedRemainingDays}일 · 약 {current.estimatedRemainingDays}일 남음</small></div>}{feature.route && <div className="feature-route-tags">{feature.route.map((node, nodeIndex) => <i key={`${node}-${nodeIndex}`}>{presentationCatalog.requestNodeLabel(node)}</i>)}</div>}{feature.load && showResourceSignature && <div><i>A {feature.load.app}</i><i>D {feature.load.db}</i><i>Q {feature.load.async}</i><i>S {feature.load.storage}</i></div>}{feature.load && !showResourceSignature && <small>Resource signature · METRICS에서 해금</small>}</article>)}
       </div></div>)}</div>
     </section>
   );

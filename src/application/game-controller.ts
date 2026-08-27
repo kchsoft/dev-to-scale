@@ -47,6 +47,7 @@ import {
   WorkSlotView,
 } from './game-view';
 import { OperationalViewProjector } from './operational-view-projector';
+import { presentationCatalog } from './presentation-catalog';
 import { TopologyViewProjector } from './topology-view-projector';
 
 export type {
@@ -71,28 +72,6 @@ const FRAMEWORK_LANGUAGE: Record<FrameworkId, LanguageId> = {
   GIN: 'GO',
   FASTAPI: 'PYTHON',
   ASPNET_CORE: 'CSHARP',
-};
-
-const LABELS: Record<string, string> = {
-  COMMUNITY_MVP: '게시글', COMMENT: '댓글', LIKE: '좋아요', IMAGE_UPLOAD: '이미지 업로드',
-  SEARCH: '검색', NOTIFICATION: '알림', AI_RECOMMENDATION: 'AI 개인화 추천', POPULAR_POSTS: '인기글',
-  FOLLOW_FEED: '팔로우 피드', ADS: '광고', PREMIUM: 'Premium',
-  NETWORK: 'Network', OS_RUNTIME: 'OS & Runtime', DATABASE: 'Database', DSA: 'DS&A', SECURITY: 'Security', SOFTWARE_DESIGN: 'Software Design',
-  JAVA: 'Java', TYPESCRIPT: 'TypeScript', GO: 'Go', PYTHON: 'Python', CSHARP: 'C#',
-  SPRING_BOOT: 'Spring Boot', NESTJS: 'NestJS', GIN: 'Gin', FASTAPI: 'FastAPI', ASPNET_CORE: 'ASP.NET Core',
-  POSTGRESQL: 'PostgreSQL', MYSQL: 'MySQL', MONGODB: 'MongoDB', REDIS: 'Redis', SQS: 'SQS', RABBITMQ: 'RabbitMQ', KAFKA: 'Kafka', ALB: 'ALB', OBJECT_STORAGE: 'Object Storage',
-};
-
-const ICONS: Record<string, string> = {
-  application: '◈', database: '◉', cache: '◆', queue: '⇢', storage: '▣', 'load-balancer': '⎇',
-  NETWORK: '⌁', OS_RUNTIME: '▤', DATABASE: '◉', DSA: '⌘', SECURITY: '◇', SOFTWARE_DESIGN: '⬡',
-  JAVA: 'J', TYPESCRIPT: 'TS', GO: 'GO', PYTHON: 'PY', CSHARP: 'C#',
-  SPRING_BOOT: 'S', NESTJS: 'N', GIN: 'G', FASTAPI: 'F', ASPNET_CORE: '.N',
-  POSTGRESQL: 'PG', MYSQL: 'MY', MONGODB: 'MO', REDIS: 'R', SQS: 'Q', RABBITMQ: 'RM', KAFKA: 'K', ALB: 'LB', OBJECT_STORAGE: 'OS',
-};
-
-const TECH_ICONS: Record<BuildableTechnologyId, string> = {
-  REDIS: '◆', SQS: '⇢', RABBITMQ: '⇄', KAFKA: '≋', ALB: '⎇', OBJECT_STORAGE: '▣',
 };
 
 const FUNDAMENTALS: FundamentalSkillId[] = ['NETWORK', 'OS_RUNTIME', 'DATABASE', 'DSA', 'SECURITY', 'SOFTWARE_DESIGN'];
@@ -274,7 +253,7 @@ export class GameController {
         id: `req-${after.day}-${after.currentFeature.id}`,
         kind: 'requirement',
         title: 'NEW REQUIREMENT',
-        message: `${LABELS[after.currentFeature.id] ?? after.currentFeature.id} 개발이 자동으로 시작되었습니다.${impact ? ` 출시 예상 · ${impact.summary}` : ''}`,
+        message: `${presentationCatalog.label(after.currentFeature.id)} 개발이 자동으로 시작되었습니다.${impact ? ` 출시 예상 · ${impact.summary}` : ''}`,
         autoPause: true,
       });
     }
@@ -332,8 +311,8 @@ export class GameController {
       {
         id: 'application',
         kind: 'application',
-        name: LABELS[this.#engine.config.frameworkId],
-        icon: ICONS.application,
+        name: presentationCatalog.label(this.#engine.config.frameworkId),
+        icon: presentationCatalog.serviceNodeIcon('application'),
         loadPercent: percent(snapshot.load.appRatio),
         tone: loadTone(snapshot.load.appRatio, Boolean(appIncident)),
         detail: `${this.#engine.infrastructure.app.size} ×${this.#engine.infrastructure.app.count} · CAP ${Math.round(appCap)}`,
@@ -348,8 +327,8 @@ export class GameController {
       {
         id: 'database',
         kind: 'database',
-        name: LABELS[this.#engine.config.databaseId],
-        icon: ICONS.database,
+        name: presentationCatalog.label(this.#engine.config.databaseId),
+        icon: presentationCatalog.serviceNodeIcon('database'),
         loadPercent: percent(snapshot.load.dbRatio),
         tone: loadTone(snapshot.load.dbRatio, Boolean(dbIncident)),
         detail: `${this.#engine.infrastructure.database.size} · Replica ${this.#engine.infrastructure.database.replicaCount} · CAP ${Math.round(dbCap)}`,
@@ -386,8 +365,8 @@ export class GameController {
       nodes.push({
         id: technology,
         kind,
-        name: LABELS[technology],
-        icon: TECH_ICONS[technology],
+        name: presentationCatalog.label(technology),
+        icon: presentationCatalog.technologyIcon(technology),
         loadPercent: percent(ratio),
         tone: loadTone(ratio, Boolean(incident)),
         detail,
@@ -423,7 +402,7 @@ export class GameController {
         : {
             id: 'feature',
             label: 'FEATURE',
-            title: feature ? (LABELS[feature.id] ?? feature.id) : '비어 있음',
+            title: feature ? presentationCatalog.label(feature.id) : '비어 있음',
             progress: feature ? feature.progress / feature.requiredWork : null,
             meta: feature ? `${feature.elapsedDays}/~${featureTotal}일 · 약 ${feature.estimatedRemainingDays}일 남음` : '다음 요구사항 대기',
             active: Boolean(feature),
@@ -431,7 +410,7 @@ export class GameController {
       {
         id: 'technology',
         label: 'TECHNOLOGY',
-        title: tech ? (LABELS[tech.id] ?? tech.id) : '비어 있음',
+        title: tech ? presentationCatalog.label(tech.id) : '비어 있음',
         progress: tech ? tech.progress / tech.requiredWork : null,
         meta: tech ? `${tech.elapsedDays}/~${techTotal}일 · 약 ${tech.estimatedRemainingDays}일 남음` : '기술을 선택하세요',
         active: Boolean(tech),
@@ -439,7 +418,7 @@ export class GameController {
       {
         id: 'learning',
         label: 'LEARNING',
-        title: learning ? `${LABELS[learning.skill.id] ?? learning.skill.id} → Lv.${learning.targetLevel}` : '비어 있음',
+        title: learning ? `${presentationCatalog.label(learning.skill.id)} → Lv.${learning.targetLevel}` : '비어 있음',
         progress: learning ? learning.progress : null,
         meta: learning ? `${learning.elapsedStudyDays}/${learning.requiredStudyDays}일 · ${Math.max(0, learning.requiredStudyDays - learning.elapsedStudyDays)}일 남음` : '학습을 선택하세요',
         active: Boolean(learning),
@@ -499,7 +478,7 @@ export class GameController {
         alerts.push({
           id: `feature-impact-${snapshot.currentFeature.id}`,
           tone: impact.tone,
-          title: `출시 영향 · ${LABELS[snapshot.currentFeature.id] ?? snapshot.currentFeature.id}`,
+          title: `출시 영향 · ${presentationCatalog.label(snapshot.currentFeature.id)}`,
           detail: impact.summary,
           nodeId: impact.nodeId,
         });
@@ -534,7 +513,7 @@ export class GameController {
         tone: 'danger',
         title: `Request Failure ${percent(snapshot.load.failureRate)}%`,
         detail: failed.length > 0
-          ? `${failed.slice(0, 2).map((flow) => LABELS[flow.featureId] ?? flow.featureId).join(', ')} 요청 경로 확인 필요`
+          ? `${failed.slice(0, 2).map((flow) => presentationCatalog.label(flow.featureId)).join(', ')} 요청 경로 확인 필요`
           : '요청 처리 성공률이 낮습니다.',
         nodeId: nodeIdForRequestNode(firstFailure),
       });
@@ -614,13 +593,13 @@ export class GameController {
       if (snapshot.cash < tech.buildCost) reason = '현금 부족';
       for (const [fundamental, level] of Object.entries(tech.prerequisites)) {
         if (this.#engine.developer.get(skillRef.fundamental(fundamental as FundamentalSkillId)).level < (level ?? 1)) {
-          reason = `${LABELS[fundamental]} Lv.${level} 필요`;
+          reason = `${presentationCatalog.label(fundamental)} Lv.${level} 필요`;
         }
       }
       return {
         id,
         name: tech.name,
-        icon: TECH_ICONS[id],
+        icon: presentationCatalog.technologyIcon(id),
         buildCost: tech.buildCost,
         monthlyCost: tech.monthlyCost,
         buildWork: tech.buildWork,
@@ -687,7 +666,7 @@ export class GameController {
           reason = `경험 ${requirement.experienceDays - proficiency.experienceDays}일 부족`;
         } else {
           const missing = requirement.prerequisites.find((item) => this.#engine.developer.get(item.ref).level < item.level);
-          if (missing) reason = `${LABELS[missing.ref.id]} Lv.${missing.level} 필요`;
+          if (missing) reason = `${presentationCatalog.label(missing.ref.id)} Lv.${missing.level} 필요`;
           else if (this.#engine.finance.cash < requirement.cost) reason = '현금 부족';
           else canStudy = true;
         }
@@ -696,8 +675,8 @@ export class GameController {
       return {
         key: `${ref.category}:${ref.id}`,
         ref,
-        name: LABELS[ref.id] ?? ref.id,
-        icon: ICONS[ref.id] ?? '•',
+        name: presentationCatalog.label(ref.id),
+        icon: presentationCatalog.icon(ref.id),
         level: proficiency.level,
         experienceDays: proficiency.experienceDays,
         targetLevel,
@@ -724,7 +703,7 @@ export class GameController {
       const feature = COMMUNITY_FEATURES[featureId];
       return {
         id: featureId,
-        name: revealed ? (LABELS[featureId] ?? feature.name) : '?',
+        name: revealed ? presentationCatalog.label(featureId) : '?',
         phase,
         threshold,
         state: completed ? 'completed' : developing ? 'developing' : revealed ? 'revealed' : 'hidden',
@@ -756,7 +735,7 @@ export class GameController {
         : Math.max(1, Math.min(4, Math.ceil(estimatedTraffic / trafficUnit)));
       return {
         id: flow.featureId,
-        name: LABELS[flow.featureId] ?? feature?.name ?? flow.featureId,
+        name: presentationCatalog.label(flow.featureId) ?? feature?.name ?? flow.featureId,
         nodes: flow.nodes.map((node) => ({
           node: node.node,
           arrivalPercent: percent(node.arrivalRatio),
@@ -824,6 +803,6 @@ export class GameController {
 
   private nodeLabel(nodeId: string): string {
     const id = nodeId.split(':').pop() ?? nodeId;
-    return LABELS[id] ?? id;
+    return presentationCatalog.label(id);
   }
 }
