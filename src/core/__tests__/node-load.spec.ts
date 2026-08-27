@@ -113,8 +113,23 @@ describe('node-specific load calculation', () => {
       V1_NODE_IDS.gateway,
       V1_NODE_IDS.queue('SQS'),
     ]);
-    expect(load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.gateway)?.loadRatio).toBeCloseTo(
-      load.appRatio,
-    );
+    const gateway = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.gateway)!;
+    expect(gateway.loadRatio).toBeCloseTo(gateway.throughputDemand! / gateway.capacity);
+  });
+
+  it('keeps ingress demand on a failed ALB while removing downstream APP demand', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    infrastructure.deployTechnology('ALB');
+
+    const load = LoadCalculator.calculate(100_000, [posts], infrastructure, {
+      nodeHealth: { [V1_NODE_IDS.gateway]: 0 },
+    });
+    const gateway = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.gateway)!;
+    const app = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.app('SPRING_BOOT'))!;
+
+    expect(gateway.throughputDemand).toBeGreaterThan(0);
+    expect(app.cpuDemand).toBe(0);
+    expect(app.ioDemand).toBe(0);
+    expect(load.requestTraces[0].failureNodeId).toBe(V1_NODE_IDS.gateway);
   });
 });

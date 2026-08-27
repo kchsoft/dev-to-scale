@@ -324,6 +324,7 @@ export class LoadCalculator {
     const appNodeId = V1_NODE_IDS.app(infrastructure.app.frameworkId);
     const databaseNodeId = V1_NODE_IDS.database(infrastructure.database.databaseId);
     const queueNodeId = queue ? V1_NODE_IDS.queue(queue) : null;
+    const gatewayNodeId = infrastructure.hasTechnology('ALB') ? V1_NODE_IDS.gateway : null;
 
     let appCpuDemand = 0;
     let appIoDemand = 0;
@@ -331,6 +332,7 @@ export class LoadCalculator {
     let dbIoDemand = 0;
     let asyncDemand = 0;
     let storageDemand = 0;
+    let gatewayDemand = 0;
     let weightedSuccess = 0;
     let totalTrafficWeight = 0;
 
@@ -346,6 +348,10 @@ export class LoadCalculator {
       let dbIoBase = demand(feature.resourceLoad.db.io, dau, LOAD_CURVE.db) * trafficMultiplier;
       const asyncBase = demand(feature.load.async, dau, LOAD_CURVE.async) * trafficMultiplier;
       const storageBase = demand(feature.load.storage, dau, LOAD_CURVE.storage) * trafficMultiplier;
+
+      if (gatewayNodeId) {
+        gatewayDemand += Math.max(appCpuBase, appIoBase) * traceArrival(trace, gatewayNodeId);
+      }
 
       // Redis is deliberately a targeted Read-heavy I/O solution rather than a
       // generic DB capacity upgrade. Cache incidents weaken the benefit.
@@ -450,11 +456,12 @@ export class LoadCalculator {
         });
       }
       if (node.kind === 'LOAD_BALANCER') {
+        const gatewayCapacity = (node.capacity.throughput ?? rawAppCapacity) * tuningApp;
         return Object.freeze({
           nodeId: node.id,
-          throughputDemand: appDemand,
-          capacity: appRatio > 0 ? appDemand / appRatio : appBottleneckCapacity,
-          loadRatio: appRatio,
+          throughputDemand: gatewayDemand,
+          capacity: gatewayCapacity,
+          loadRatio: ratio(gatewayDemand, gatewayCapacity),
         });
       }
       if (node.kind === 'CACHE') {
