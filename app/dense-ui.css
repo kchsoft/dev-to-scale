@@ -60,7 +60,7 @@
 .runway-box strong { font-size: 12px; }
 .runway-box small { font-size: 9px; line-height: 1.35; }
 
-.service-map { grid-template-rows: 50px auto auto auto; }
+.service-map { grid-template-rows: 50px auto minmax(400px, 1fr) auto; }
 .architecture-canvas { min-height: 475px; padding-top: 25px; }
 .users-node { height: 61px; }
 .infra-node { min-height: 100px; padding: 10px; }

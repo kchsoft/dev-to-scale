@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import "./request-flow.css";
+import "./topology-map.css";
 import "./dense-ui.css";
 import "./mobile.css";
 
