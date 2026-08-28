@@ -231,6 +231,7 @@ rtk git commit -m "feat: define node resource load contract"
 
 **Files:**
 - Modify: `src/core/infrastructure.ts`
+- Modify: `src/core/index.ts`
 - Modify: `src/core/__tests__/node-load.spec.ts`
 - Modify: `src/core/__tests__/infrastructure-load.spec.ts`
 
@@ -295,7 +296,7 @@ Expected: FAIL because current node loads do not have `nodeKind` or `resources`.
 
 - [ ] **Step 3: Build node loads through the Task 1 factories**
 
-Import the contract from `./node-load` and remove the local `NodeLoadSnapshot` declaration from `infrastructure.ts`. Keep the legacy flat fields in `LoadSnapshot` until Task 6.
+Import the contract from `./node-load` and remove the local `NodeLoadSnapshot` declaration from `infrastructure.ts`. In the same change, export the canonical `NodeLoadSnapshot` type from `src/core/index.ts`; this intentionally completes the barrel-export requirement deferred from Task 1 because the legacy declaration currently owns that name. Keep the legacy flat fields in `LoadSnapshot` until Task 6.
 
 Inside the existing `topology.graph.nodes.map`, construct these resources without changing any formula:
 
@@ -335,7 +336,7 @@ Expected: all tests PASS with both representations numerically identical.
 - [ ] **Step 5: Commit**
 
 ```bash
-rtk git add src/core/infrastructure.ts src/core/__tests__/node-load.spec.ts src/core/__tests__/infrastructure-load.spec.ts
+rtk git add src/core/infrastructure.ts src/core/index.ts src/core/__tests__/node-load.spec.ts src/core/__tests__/infrastructure-load.spec.ts
 rtk git commit -m "refactor: publish per-node resource loads"
 ```
 
