@@ -14,8 +14,8 @@ import {
   ServerSize,
   TechnologyId,
 } from './infrastructure';
-import { maxNodeLoad } from './node-load';
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
+import { primaryOperationalPressure } from './operational-pressure';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
 import { trafficHealthForSeverity } from './request-trace';
@@ -360,7 +360,7 @@ export class GameEngine {
     const infrastructure = this.infrastructure.clone();
     const retired = infrastructure.deployTechnology(id);
     const ignoredIncidentNodeIds = new Set(
-      retired.map((technology) => v1NodeIdForTechnology(technology)),
+      retired.map((technology) => v1NodeIdForTechnology(retiredTechnology)),
     );
     return this.calculateCurrentLoad(
       infrastructure,
@@ -376,9 +376,7 @@ export class GameEngine {
   private advanceGrowth(): void {
     this.growthEvent = GrowthPolicy.maybeStartEvent(this.growthEvent, this.random);
     const phase = this.progression.finished ? 3 : this.progression.currentRequirement.phase;
-    const maxLoadRatio = (['SERVER_GROUP', 'DATABASE', 'QUEUE', 'OBJECT_STORAGE'] as const)
-      .map((nodeKind) => maxNodeLoad(this._load, { nodeKind })?.loadRatio ?? 0)
-      .reduce((maximum, ratio) => Math.max(maximum, ratio), 0);
+    const maxLoadRatio = primaryOperationalPressure(this._load)?.ratio ?? 0;
     const result = GrowthPolicy.calculate({
       phase,
       completedFeatureGrowthBonus: this.completedFeatureDefinitions.reduce(
