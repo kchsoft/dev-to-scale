@@ -100,19 +100,21 @@ describe('game engine orchestration', () => {
 
   it('refreshes capacity and load immediately after infrastructure scaling', () => {
     const game = launchedGame(11);
+    const appNodeId = V1_NODE_IDS.app('SPRING_BOOT');
+    const databaseNodeId = V1_NODE_IDS.database('POSTGRESQL');
     const smallAppCapacity = nodeResource(game.snapshot.load, 'SERVER_GROUP', 'CPU')!.capacity;
     const smallDbCapacity = nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity;
 
-    game.scaleApplication(ServerSize.XLARGE);
+    game.resizeInfrastructureNode(appNodeId, ServerSize.XLARGE);
     expect(nodeResource(game.snapshot.load, 'SERVER_GROUP', 'CPU')!.capacity).toBeCloseTo(game.infrastructure.app.cpuCapacity);
     expect(nodeResource(game.snapshot.load, 'SERVER_GROUP', 'CPU')!.capacity).toBeGreaterThan(smallAppCapacity);
 
-    game.scaleDatabase(ServerSize.XLARGE);
+    game.resizeInfrastructureNode(databaseNodeId, ServerSize.XLARGE);
     expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeCloseTo(game.infrastructure.database.cpuCapacity);
     expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeGreaterThan(smallDbCapacity);
 
     const dbCapacityBeforeReplica = nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity;
-    game.addDatabaseReplica();
+    game.scaleOutInfrastructureNode(databaseNodeId);
     expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeCloseTo(game.infrastructure.database.cpuCapacity);
     expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeGreaterThan(dbCapacityBeforeReplica);
   });
@@ -140,7 +142,7 @@ describe('game engine orchestration', () => {
     const databaseNodeId = V1_NODE_IDS.database('POSTGRESQL');
     const incident = new Incident('db-outage', databaseNodeId, 'CRITICAL', 1);
     game.incidents.add(incident);
-    game.scaleApplication(game.infrastructure.app.size);
+    game.resizeInfrastructureNode(V1_NODE_IDS.app('SPRING_BOOT'), game.infrastructure.app.size);
     expect(game.snapshot.load.failureRate).toBe(1);
     expect(game.snapshot.load.requestTraces[0]?.failureNodeId).toBe(databaseNodeId);
 
@@ -210,7 +212,7 @@ describe('game engine orchestration', () => {
       1,
     );
     game.incidents.add(incident);
-    game.scaleApplication(game.infrastructure.app.size);
+    game.resizeInfrastructureNode(V1_NODE_IDS.app('SPRING_BOOT'), game.infrastructure.app.size);
     const current = game.snapshot.load;
 
     const preview = game.previewLoadWithTechnology('REDIS');

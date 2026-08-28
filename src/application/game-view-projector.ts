@@ -39,10 +39,6 @@ export class GameViewProjector {
       ...this.#progressionProjector.project(snapshot),
       frameworkId: this.#engine.config.frameworkId,
       databaseId: this.#engine.config.databaseId,
-      appSize: this.#engine.infrastructure.app.size,
-      appCount: this.#engine.infrastructure.app.count,
-      dbSize: this.#engine.infrastructure.database.size,
-      dbReplicaCount: this.#engine.infrastructure.database.replicaCount,
     };
   }
 }

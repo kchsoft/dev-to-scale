@@ -11,7 +11,6 @@ import {
   ServiceTopology,
   WorkloadAssignment,
 } from './service-topology';
-import { TECHNOLOGIES } from './technology';
 import {
   InfrastructureNode,
   InfrastructureNodeId,
@@ -70,40 +69,30 @@ export class V1RouteBlueprintAdapter {
   }
 }
 
-function technologyCost(infrastructure: InfrastructureState, id: keyof typeof TECHNOLOGIES): number {
-  return infrastructure.hasTechnology(id) ? TECHNOLOGIES[id].monthlyCost : 0;
-}
-
 function infrastructureNodes(infrastructure: InfrastructureState): InfrastructureNode[] {
+  const appId = V1_NODE_IDS.app(infrastructure.app.frameworkId);
+  const databaseId = V1_NODE_IDS.database(infrastructure.database.databaseId);
   const nodes: InfrastructureNode[] = [
     {
-      id: V1_NODE_IDS.app(infrastructure.app.frameworkId),
+      id: appId,
       kind: 'SERVER_GROUP',
       productId: infrastructure.app.frameworkId,
-      capacity: {
-        cpu: infrastructure.app.cpuCapacity,
-        io: infrastructure.app.ioCapacity,
-        throughput: infrastructure.app.capacity,
-      },
-      monthlyCost: infrastructure.app.monthlyCost,
+      capacity: infrastructure.nodeCapacity(appId),
+      monthlyCost: infrastructure.nodeMonthlyCost(appId),
     },
     {
-      id: V1_NODE_IDS.database(infrastructure.database.databaseId),
+      id: databaseId,
       kind: 'DATABASE',
       productId: infrastructure.database.databaseId,
-      capacity: {
-        cpu: infrastructure.database.cpuCapacity,
-        io: infrastructure.database.ioCapacity,
-        throughput: infrastructure.database.capacity,
-      },
-      monthlyCost: infrastructure.database.monthlyCost,
+      capacity: infrastructure.nodeCapacity(databaseId),
+      monthlyCost: infrastructure.nodeMonthlyCost(databaseId),
     },
     {
       id: V1_NODE_IDS.storage,
       kind: 'OBJECT_STORAGE',
       productId: infrastructure.hasTechnology('OBJECT_STORAGE') ? 'OBJECT_STORAGE' : 'LOCAL_STORAGE',
-      capacity: { storage: infrastructure.storageCapacity },
-      monthlyCost: technologyCost(infrastructure, 'OBJECT_STORAGE'),
+      capacity: infrastructure.nodeCapacity(V1_NODE_IDS.storage),
+      monthlyCost: infrastructure.nodeMonthlyCost(V1_NODE_IDS.storage),
     },
     {
       id: V1_NODE_IDS.externalAi,
@@ -119,8 +108,8 @@ function infrastructureNodes(infrastructure: InfrastructureState): Infrastructur
       id: V1_NODE_IDS.gateway,
       kind: 'LOAD_BALANCER',
       productId: 'ALB',
-      capacity: { throughput: infrastructure.app.capacity },
-      monthlyCost: TECHNOLOGIES.ALB.monthlyCost,
+      capacity: infrastructure.nodeCapacity(V1_NODE_IDS.gateway),
+      monthlyCost: infrastructure.nodeMonthlyCost(V1_NODE_IDS.gateway),
     });
   }
   if (infrastructure.hasTechnology('REDIS')) {
@@ -128,17 +117,18 @@ function infrastructureNodes(infrastructure: InfrastructureState): Infrastructur
       id: V1_NODE_IDS.cache,
       kind: 'CACHE',
       productId: 'REDIS',
-      capacity: {},
-      monthlyCost: TECHNOLOGIES.REDIS.monthlyCost,
+      capacity: infrastructure.nodeCapacity(V1_NODE_IDS.cache),
+      monthlyCost: infrastructure.nodeMonthlyCost(V1_NODE_IDS.cache),
     });
   }
   if (infrastructure.queueTechnology) {
+    const queueId = V1_NODE_IDS.queue(infrastructure.queueTechnology);
     nodes.push({
-      id: V1_NODE_IDS.queue(infrastructure.queueTechnology),
+      id: queueId,
       kind: 'QUEUE',
       productId: infrastructure.queueTechnology,
-      capacity: { throughput: infrastructure.asyncCapacity },
-      monthlyCost: TECHNOLOGIES[infrastructure.queueTechnology].monthlyCost,
+      capacity: infrastructure.nodeCapacity(queueId),
+      monthlyCost: infrastructure.nodeMonthlyCost(queueId),
     });
   }
   return nodes;

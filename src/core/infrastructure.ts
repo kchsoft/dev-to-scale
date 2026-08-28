@@ -1,5 +1,10 @@
-import { DatabaseDefinition, DatabaseId } from './database';
-import { FeatureDefinition, FrameworkDefinition, FrameworkId } from './feature';
+import { DatabaseId } from './database';
+import { FeatureDefinition, FrameworkId } from './feature';
+import {
+  nodeSizeProfile,
+  ServerSize,
+  SERVER_SIZE_VALUES,
+} from './infrastructure-sizing';
 import {
   createNodeLoadSnapshot,
   createNodeResourceLoad,
@@ -10,46 +15,30 @@ import {
   RequestTrace,
   RequestTraceSimulator,
 } from './request-trace';
-import { BuildableTechnologyId, TECHNOLOGIES } from './technology';
-import { InfrastructureNodeId } from './topology';
-import { V1ServiceTopologyFactory, V1_NODE_IDS } from './v1-topology';
+import { BuildableTechnologyId } from './technology';
+import type { InfrastructureNodeId, ResourceCapacity } from './topology';
+import { V1ServiceTopologyFactory, V1_NODE_IDS, v1NodeIdForTechnology } from './v1-topology';
 
-export enum ServerSize {
-  SMALL = 'SMALL',
-  MEDIUM = 'MEDIUM',
-  LARGE = 'LARGE',
-  XLARGE = 'XLARGE',
-}
-
+export { nodeSizeProfile, ServerSize, SERVER_SIZE_VALUES } from './infrastructure-sizing';
+export type { NodeSizeProfile } from './infrastructure-sizing';
 export type { DatabaseId } from './database';
 export type TechnologyId = BuildableTechnologyId;
 export type QueueTechnologyId = 'SQS' | 'RABBITMQ' | 'KAFKA';
+export type HorizontalScaleKind = 'INSTANCE' | 'READ_REPLICA';
+
+export interface HorizontalScaleState {
+  readonly kind: HorizontalScaleKind;
+  readonly count: number;
+  readonly maxCount: number;
+  readonly available: boolean;
+  readonly reason: string | null;
+}
 
 export const QUEUE_TECHNOLOGY_IDS: readonly QueueTechnologyId[] = ['SQS', 'RABBITMQ', 'KAFKA'];
 
 export function isQueueTechnology(technology: TechnologyId): technology is QueueTechnologyId {
   return QUEUE_TECHNOLOGY_IDS.includes(technology as QueueTechnologyId);
 }
-
-const APP_SIZE: Record<ServerSize, { capacity: number; cost: number }> = {
-  [ServerSize.SMALL]: { capacity: 100, cost: 100_000 },
-  [ServerSize.MEDIUM]: { capacity: 180, cost: 200_000 },
-  [ServerSize.LARGE]: { capacity: 320, cost: 400_000 },
-  [ServerSize.XLARGE]: { capacity: 520, cost: 800_000 },
-};
-
-const DB_SIZE: Record<ServerSize, { capacity: number; cost: number }> = {
-  [ServerSize.SMALL]: { capacity: 80, cost: 120_000 },
-  [ServerSize.MEDIUM]: { capacity: 150, cost: 250_000 },
-  [ServerSize.LARGE]: { capacity: 270, cost: 500_000 },
-  [ServerSize.XLARGE]: { capacity: 450, cost: 1_000_000 },
-};
-
-const ASYNC_CAPACITY: Partial<Record<TechnologyId, number>> = {
-  SQS: 300,
-  RABBITMQ: 500,
-  KAFKA: 1_000,
-};
 
 const CAPACITY_TUNING: Record<number, number> = {
   1: 1,
@@ -97,23 +86,19 @@ export class AppCluster {
 
   /** Legacy aggregate capacity retained for existing economy/UI previews. */
   get capacity(): number {
-    const framework = FrameworkDefinition.byId(this.frameworkId);
-    return APP_SIZE[this._size].capacity * this._count * framework.capacityModifier;
+    return (nodeSizeProfile(this.frameworkId, this._size).capacity.throughput ?? 0) * this._count;
   }
 
   get cpuCapacity(): number {
-    const framework = FrameworkDefinition.byId(this.frameworkId);
-    return APP_SIZE[this._size].capacity * this._count * framework.cpuCapacityModifier;
+    return (nodeSizeProfile(this.frameworkId, this._size).capacity.cpu ?? 0) * this._count;
   }
 
   get ioCapacity(): number {
-    const framework = FrameworkDefinition.byId(this.frameworkId);
-    return APP_SIZE[this._size].capacity * this._count * framework.ioCapacityModifier;
+    return (nodeSizeProfile(this.frameworkId, this._size).capacity.io ?? 0) * this._count;
   }
 
   get monthlyCost(): number {
-    const framework = FrameworkDefinition.byId(this.frameworkId);
-    return APP_SIZE[this._size].cost * this._count * framework.costModifier;
+    return nodeSizeProfile(this.frameworkId, this._size).monthlyCost * this._count;
   }
 }
 
@@ -138,29 +123,31 @@ export class DatabaseCluster {
 
   /** Legacy aggregate capacity retained for backwards compatibility. */
   get capacity(): number {
-    const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].capacity * (1 + 0.6 * this._replicaCount) * database.capacityModifier;
+    const base = nodeSizeProfile(this.databaseId, this._size).capacity.throughput ?? 0;
+    return base * (1 + 0.6 * this._replicaCount);
   }
 
   /** Read replicas distribute query CPU as well, but remain stronger for I/O. */
   get cpuCapacity(): number {
-    const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].capacity * (1 + 0.55 * this._replicaCount) * database.capacityModifier;
+    const base = nodeSizeProfile(this.databaseId, this._size).capacity.cpu ?? 0;
+    return base * (1 + 0.55 * this._replicaCount);
   }
 
   get ioCapacity(): number {
-    const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].capacity * (1 + 0.75 * this._replicaCount) * database.capacityModifier;
+    const base = nodeSizeProfile(this.databaseId, this._size).capacity.io ?? 0;
+    return base * (1 + 0.75 * this._replicaCount);
   }
 
   get monthlyCost(): number {
-    const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].cost * (1 + this._replicaCount) * database.costModifier;
+    return nodeSizeProfile(this.databaseId, this._size).monthlyCost * (1 + this._replicaCount);
   }
 }
 
 export class InfrastructureState {
   private readonly technologies = new Set<TechnologyId>();
+  private readonly nodeSizes = new Map<InfrastructureNodeId, ServerSize>([
+    [V1_NODE_IDS.storage, ServerSize.SMALL],
+  ]);
 
   constructor(readonly app: AppCluster, readonly database: DatabaseCluster) {}
 
@@ -177,6 +164,12 @@ export class InfrastructureState {
       new DatabaseCluster(this.database.databaseId, this.database.size, this.database.replicaCount),
     );
     for (const technology of this.deployedTechnologies) clone.deployTechnology(technology);
+    clone.nodeSizes.set(V1_NODE_IDS.storage, this.nodeSize(V1_NODE_IDS.storage));
+    for (const technology of this.deployedTechnologies) {
+      if (technology === 'OBJECT_STORAGE') continue;
+      const nodeId = v1NodeIdForTechnology(technology);
+      clone.nodeSizes.set(nodeId, this.nodeSize(nodeId));
+    }
     return clone;
   }
 
@@ -186,17 +179,26 @@ export class InfrastructureState {
    */
   deployTechnology(technology: TechnologyId): readonly TechnologyId[] {
     const retired: TechnologyId[] = [];
+    const alreadyDeployed = this.technologies.has(technology);
 
     if (isQueueTechnology(technology)) {
       for (const queue of this.queueTechnologies) {
         if (queue === technology) continue;
         this.technologies.delete(queue);
+        this.nodeSizes.delete(V1_NODE_IDS.queue(queue));
         retired.push(queue);
       }
     }
 
     this.technologies.add(technology);
     if (technology === 'ALB') this.app.enableAlb();
+    if (!alreadyDeployed) {
+      if (technology === 'OBJECT_STORAGE') {
+        this.nodeSizes.set(V1_NODE_IDS.storage, ServerSize.SMALL);
+      } else {
+        this.nodeSizes.set(v1NodeIdForTechnology(technology), ServerSize.SMALL);
+      }
+    }
     return retired;
   }
 
@@ -211,17 +213,124 @@ export class InfrastructureState {
     return this.queueTechnologies[0] ?? null;
   }
 
-  get asyncCapacity(): number {
-    const queue = this.queueTechnology;
-    return queue ? ASYNC_CAPACITY[queue] ?? 0 : 0;
+  nodeSize(nodeId: InfrastructureNodeId): ServerSize {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) return this.app.size;
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) return this.database.size;
+    if (nodeId === V1_NODE_IDS.storage) return this.nodeSizes.get(nodeId) ?? ServerSize.SMALL;
+    this.assertDeployedOwnedNode(nodeId);
+    const size = this.nodeSizes.get(nodeId);
+    if (!size) throw new Error(`Unknown or non-owned infrastructure node: ${nodeId}`);
+    return size;
   }
 
-  get storageCapacity(): number { return this.hasTechnology('OBJECT_STORAGE') ? 1_000 : 100; }
+  resizeNode(nodeId: InfrastructureNodeId, size: ServerSize): void {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) {
+      this.app.scaleUp(size);
+      return;
+    }
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) {
+      this.database.scaleUp(size);
+      return;
+    }
+    this.nodeSize(nodeId);
+    this.nodeSizes.set(nodeId, size);
+  }
+
+  horizontalScale(nodeId: InfrastructureNodeId): HorizontalScaleState | null {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) {
+      const atLimit = this.app.count >= 10;
+      const missingAlb = !this.hasTechnology('ALB');
+      return {
+        kind: 'INSTANCE',
+        count: this.app.count,
+        maxCount: 10,
+        available: !atLimit && !missingAlb,
+        reason: atLimit ? 'Application server limit reached' : missingAlb ? 'ALB is required before application scale-out' : null,
+      };
+    }
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) {
+      const atLimit = this.database.replicaCount >= 3;
+      return {
+        kind: 'READ_REPLICA',
+        count: this.database.replicaCount,
+        maxCount: 3,
+        available: !atLimit,
+        reason: atLimit ? 'Database replica limit reached' : null,
+      };
+    }
+    this.nodeSize(nodeId);
+    return null;
+  }
+
+  scaleOutNode(nodeId: InfrastructureNodeId): void {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) {
+      this.app.addServer();
+      return;
+    }
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) {
+      this.database.addReplica();
+      return;
+    }
+    this.nodeSize(nodeId);
+    throw new Error(`Infrastructure node does not support horizontal scale-out: ${nodeId}`);
+  }
+
+  nodeCapacity(nodeId: InfrastructureNodeId): ResourceCapacity {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) {
+      return {
+        cpu: this.app.cpuCapacity,
+        io: this.app.ioCapacity,
+        throughput: this.app.capacity,
+      };
+    }
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) {
+      return {
+        cpu: this.database.cpuCapacity,
+        io: this.database.ioCapacity,
+        throughput: this.database.capacity,
+      };
+    }
+    const productId = this.productIdForNode(nodeId);
+    return { ...nodeSizeProfile(productId, this.nodeSize(nodeId)).capacity };
+  }
+
+  nodeMonthlyCost(nodeId: InfrastructureNodeId): number {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) return this.app.monthlyCost;
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) return this.database.monthlyCost;
+    const productId = this.productIdForNode(nodeId);
+    return nodeSizeProfile(productId, this.nodeSize(nodeId)).monthlyCost;
+  }
+
+  get asyncCapacity(): number {
+    const queue = this.queueTechnology;
+    return queue ? this.nodeCapacity(V1_NODE_IDS.queue(queue)).throughput ?? 0 : 0;
+  }
+
+  get storageCapacity(): number {
+    return this.nodeCapacity(V1_NODE_IDS.storage).storage ?? 0;
+  }
 
   get monthlyCost(): number {
-    let total = this.app.monthlyCost + this.database.monthlyCost;
-    for (const technology of this.technologies) total += TECHNOLOGIES[technology].monthlyCost;
+    let total = this.app.monthlyCost + this.database.monthlyCost + this.nodeMonthlyCost(V1_NODE_IDS.storage);
+    if (this.hasTechnology('ALB')) total += this.nodeMonthlyCost(V1_NODE_IDS.gateway);
+    if (this.hasTechnology('REDIS')) total += this.nodeMonthlyCost(V1_NODE_IDS.cache);
+    if (this.queueTechnology) total += this.nodeMonthlyCost(V1_NODE_IDS.queue(this.queueTechnology));
     return total;
+  }
+
+  private productIdForNode(nodeId: InfrastructureNodeId): string {
+    if (nodeId === V1_NODE_IDS.storage) {
+      return this.hasTechnology('OBJECT_STORAGE') ? 'OBJECT_STORAGE' : 'LOCAL_STORAGE';
+    }
+    if (nodeId === V1_NODE_IDS.gateway && this.hasTechnology('ALB')) return 'ALB';
+    if (nodeId === V1_NODE_IDS.cache && this.hasTechnology('REDIS')) return 'REDIS';
+    const queue = this.queueTechnology;
+    if (queue && nodeId === V1_NODE_IDS.queue(queue)) return queue;
+    throw new Error(`Unknown or non-owned infrastructure node: ${nodeId}`);
+  }
+
+  private assertDeployedOwnedNode(nodeId: InfrastructureNodeId): void {
+    this.productIdForNode(nodeId);
   }
 }
 
@@ -257,10 +366,6 @@ function queueRequirement(feature: FeatureDefinition): 'REQUIRED' | 'OPTIONAL' |
   return queueStep ? queueStep.requirement ?? 'REQUIRED' : null;
 }
 
-function ratio(value: number, capacity: number): number {
-  return capacity > 0 ? value / capacity : 0;
-}
-
 function traceArrival(trace: RequestTrace, nodeId: InfrastructureNodeId): number {
   return trace.nodes.find((node) => node.nodeId === nodeId)?.arrivalRatio ?? 0;
 }
@@ -290,6 +395,7 @@ export class LoadCalculator {
     let asyncDemand = 0;
     let storageDemand = 0;
     let gatewayDemand = 0;
+    let cacheDemand = 0;
     let weightedSuccess = 0;
     let totalTrafficWeight = 0;
 
@@ -310,9 +416,12 @@ export class LoadCalculator {
         gatewayDemand += Math.max(appCpuBase, appIoBase) * traceArrival(trace, gatewayNodeId);
       }
 
-      // Redis is deliberately a targeted Read-heavy I/O solution rather than a
-      // generic DB capacity upgrade. Cache incidents weaken the benefit.
+      // Redis remains a targeted read-heavy optimization. Its own throughput is
+      // the traffic it attempts to serve; cache health only controls how much of
+      // that traffic is successfully offloaded from the database.
       if (redisActive && feature.tags.has('READ_HEAVY')) {
+        const databaseArrival = traceArrival(trace, databaseNodeId);
+        cacheDemand += Math.max(dbCpuBase * 0.12, dbIoBase * 0.40) * databaseArrival;
         dbCpuBase *= 1 - 0.12 * cacheHealth;
         dbIoBase *= 1 - 0.40 * cacheHealth;
       }
@@ -343,39 +452,18 @@ export class LoadCalculator {
       weightedSuccess += trafficWeight * trace.successRatio;
     });
 
-    const rawAppCapacity = infrastructure.app.capacity;
-    const rawDbCapacity = infrastructure.database.capacity;
-    const rawAsyncCapacity = infrastructure.asyncCapacity;
     const tuningApp = capacityTuningMultiplier(context.appProficiencyLevel ?? 1);
     const tuningDb = capacityTuningMultiplier(context.databaseProficiencyLevel ?? 1);
-    const appCapacity = rawAppCapacity * tuningApp;
-    const dbCapacity = rawDbCapacity * tuningDb;
-
-    const rawAppCpuCapacity = infrastructure.app.cpuCapacity;
-    const rawAppIoCapacity = infrastructure.app.ioCapacity;
-    const rawDbCpuCapacity = infrastructure.database.cpuCapacity;
-    const rawDbIoCapacity = infrastructure.database.ioCapacity;
-    const appCpuCapacity = rawAppCpuCapacity * tuningApp;
-    const appIoCapacity = rawAppIoCapacity * tuningApp;
-    const dbCpuCapacity = rawDbCpuCapacity * tuningDb;
-    const dbIoCapacity = rawDbIoCapacity * tuningDb;
+    const appCpuCapacity = infrastructure.app.cpuCapacity * tuningApp;
+    const appIoCapacity = infrastructure.app.ioCapacity * tuningApp;
+    const dbCpuCapacity = infrastructure.database.cpuCapacity * tuningDb;
+    const dbIoCapacity = infrastructure.database.ioCapacity * tuningDb;
 
     const queueLevel = queue ? context.technologyProficiencyLevels?.[queue] ?? 1 : 1;
-    const asyncCapacity = rawAsyncCapacity * capacityTuningMultiplier(queueLevel);
+    const asyncCapacity = infrastructure.asyncCapacity * capacityTuningMultiplier(queueLevel);
     const storageCapacity = infrastructure.storageCapacity;
-
-    const appCpuRatio = ratio(appCpuDemand, appCpuCapacity);
-    const appIoRatio = ratio(appIoDemand, appIoCapacity);
-    const dbCpuRatio = ratio(dbCpuDemand, dbCpuCapacity);
-    const dbIoRatio = ratio(dbIoDemand, dbIoCapacity);
     const failureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
-    const appDemand = Math.max(appCpuDemand, appIoDemand);
-    const dbDemand = Math.max(dbCpuDemand, dbIoDemand);
-    const appRatio = Math.max(appCpuRatio, appIoRatio);
-    const dbRatio = Math.max(dbCpuRatio, dbIoRatio);
-    const asyncRatio = queue && asyncCapacity > 0 ? asyncDemand / asyncCapacity : 0;
-    const storageRatio = storageCapacity > 0 ? storageDemand / storageCapacity : 0;
-    const dbBottleneckCapacity = dbCpuRatio >= dbIoRatio ? dbCpuCapacity : dbIoCapacity;
+
     const nodeLoads = topology.graph.nodes.map((node): NodeLoadSnapshot => {
       if (node.id === appNodeId) {
         return createNodeLoadSnapshot(node.id, node.kind, [
@@ -400,15 +488,17 @@ export class LoadCalculator {
         ]);
       }
       if (node.kind === 'LOAD_BALANCER') {
-        const gatewayCapacity = (node.capacity.throughput ?? rawAppCapacity) * tuningApp;
+        const gatewayLevel = context.technologyProficiencyLevels?.ALB ?? 1;
+        const gatewayCapacity = (node.capacity.throughput ?? 0) * capacityTuningMultiplier(gatewayLevel);
         return createNodeLoadSnapshot(node.id, node.kind, [
           createNodeResourceLoad('THROUGHPUT', gatewayDemand, gatewayCapacity),
         ]);
       }
       if (node.kind === 'CACHE') {
-        const cacheCapacity = dbRatio > 0 ? dbDemand / dbRatio : dbBottleneckCapacity;
+        const cacheLevel = context.technologyProficiencyLevels?.REDIS ?? 1;
+        const cacheCapacity = (node.capacity.throughput ?? 0) * capacityTuningMultiplier(cacheLevel);
         return createNodeLoadSnapshot(node.id, node.kind, [
-          createNodeResourceLoad('THROUGHPUT', dbDemand, cacheCapacity),
+          createNodeResourceLoad('THROUGHPUT', cacheDemand, cacheCapacity),
         ]);
       }
       return createNodeLoadSnapshot(node.id, node.kind, []);

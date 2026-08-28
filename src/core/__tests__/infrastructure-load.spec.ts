@@ -128,8 +128,8 @@ describe('infrastructure and load', () => {
 
     const cache = withRedis.nodeLoads.find(({ nodeKind }) => nodeKind === 'CACHE');
     expect(cache?.resources).toHaveLength(1);
-    expect(cache?.resources[0]).toMatchObject({ resourceKind: 'THROUGHPUT' });
-    expect(cache?.resources[0].ratio).toBeCloseTo(maxNodeLoad(withRedis, { nodeKind: 'DATABASE' })!.loadRatio);
+    expect(cache?.resources[0]).toMatchObject({ resourceKind: 'THROUGHPUT', capacity: 160 });
+    expect(cache?.resources[0].demand).toBeGreaterThan(0);
   });
 
   it('a queue removes optional async fallback pressure from APP IO', () => {
@@ -248,6 +248,10 @@ describe('infrastructure and load', () => {
     infra.deployTechnology('REDIS');
     infra.deployTechnology('KAFKA');
     infra.deployTechnology('OBJECT_STORAGE');
+    infra.resizeNode(V1_NODE_IDS.gateway, ServerSize.XLARGE);
+    infra.resizeNode(V1_NODE_IDS.cache, ServerSize.XLARGE);
+    infra.resizeNode(V1_NODE_IDS.queue('KAFKA'), ServerSize.XLARGE);
+    infra.resizeNode(V1_NODE_IDS.storage, ServerSize.XLARGE);
 
     const features = [
       new FeatureDefinition({ id: 'FULL', name: 'Full', baseWork: 1, complexity: 'NORMAL', load: { app: 14, db: 20, async: 9, storage: 3 }, tags: ['READ_HEAVY', 'EVENT_HEAVY'] }),

@@ -121,6 +121,34 @@ export interface FeatureCardView {
   readonly route: readonly RequestNodeViewKind[] | null;
 }
 
+export interface ResourceCapacityView {
+  readonly cpu?: number;
+  readonly io?: number;
+  readonly throughput?: number;
+  readonly storage?: number;
+}
+
+export interface NodeSizeOptionView {
+  readonly size: ServerSizeView;
+  readonly capacity: ResourceCapacityView;
+  readonly monthlyCost: number;
+}
+
+export interface NodeScaleOutView {
+  readonly kind: 'INSTANCE' | 'READ_REPLICA';
+  readonly count: number;
+  readonly maxCount: number;
+  readonly monthlyCostDelta: number | null;
+  readonly available: boolean;
+  readonly reason: string | null;
+}
+
+export interface NodeScalingView {
+  readonly currentSize: ServerSizeView;
+  readonly sizeOptions: readonly NodeSizeOptionView[];
+  readonly scaleOut: NodeScaleOutView | null;
+}
+
 export interface TopologyNodeView {
   readonly id: string;
   readonly kind: 'load-balancer' | 'server-group' | 'database' | 'cache' | 'queue' | 'object-storage' | 'worker' | 'external-service';
@@ -129,6 +157,8 @@ export interface TopologyNodeView {
   readonly loadPercent: number;
   readonly tone: LoadTone;
   readonly detail: string;
+  readonly monthlyCost: number;
+  readonly scaling: NodeScalingView | null;
   readonly incidentId?: string;
   readonly incidentSeverity?: string;
 }
@@ -163,13 +193,6 @@ export interface TopologyView {
   readonly nodes: readonly TopologyNodeView[];
   readonly edges: readonly TopologyEdgeView[];
   readonly traces: readonly RequestTraceView[];
-}
-
-export interface InfrastructureCostView {
-  readonly appSizeMonthlyCosts: Readonly<Record<ServerSizeView, number>>;
-  readonly dbSizeMonthlyCosts: Readonly<Record<ServerSizeView, number>>;
-  readonly addAppServerMonthlyCostDelta: number | null;
-  readonly addDbReplicaMonthlyCostDelta: number | null;
 }
 
 export interface ObservabilityView {
@@ -242,13 +265,8 @@ export interface GameView {
   readonly skills: readonly SkillNodeView[];
   readonly features: readonly FeatureCardView[];
   readonly topology: TopologyView;
-  readonly infrastructureCosts: InfrastructureCostView;
   readonly service: ServiceOperationsView;
   readonly operations: FeatureOperationsView;
   readonly frameworkId: FrameworkOptionId;
   readonly databaseId: DatabaseOptionId;
-  readonly appSize: ServerSizeView;
-  readonly appCount: number;
-  readonly dbSize: ServerSizeView;
-  readonly dbReplicaCount: number;
 }

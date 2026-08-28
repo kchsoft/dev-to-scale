@@ -1,8 +1,6 @@
 import {
-  AppCluster,
   COMMUNITY_BOOTSTRAP,
   COMMUNITY_FEATURES,
-  DatabaseCluster,
   GameEngine,
   GameSnapshot,
   InfrastructureNodeKind,
@@ -17,7 +15,7 @@ import {
 } from '../core';
 import {
   AlertView,
-  InfrastructureCostView,
+  NodeScalingView,
   ObservabilityView,
   ServiceOperationsView,
   TopologyView,
@@ -56,7 +54,6 @@ export interface FeatureImpactPreview {
 export interface GameServiceProjection {
   readonly alerts: readonly AlertView[];
   readonly topology: TopologyView;
-  readonly infrastructureCosts: InfrastructureCostView;
   readonly service: ServiceOperationsView;
 }
 
@@ -102,7 +99,6 @@ export class GameServiceProjector {
     return {
       alerts: this.alerts(snapshot, financials.monthlyProfit, service.observability),
       topology: this.topology(snapshot, topology),
-      infrastructureCosts: this.infrastructureCostView(),
       service,
     };
   }
@@ -132,7 +128,56 @@ export class GameServiceProjector {
       traces: snapshot.load.requestTraces,
       incidents: snapshot.incidents,
       dau: snapshot.dau,
+      scalingByNode: this.scalingByNode(topology),
     });
+  }
+
+  private scalingByNode(topology: ServiceTopology): ReadonlyMap<string, NodeScalingView> {
+    const infrastructure = this.#engine.infrastructure;
+    const scaling = new Map<string, NodeScalingView>();
+
+    for (const node of topology.graph.nodes) {
+      if (node.kind === 'EXTERNAL_SERVICE') continue;
+
+      const currentSize = infrastructure.nodeSize(node.id);
+      const sizeOptions = SERVER_SIZES.map((size) => {
+        const candidate = infrastructure.clone();
+        candidate.resizeNode(node.id, size);
+        return Object.freeze({
+          size: size as NodeScalingView['currentSize'],
+          capacity: Object.freeze({ ...candidate.nodeCapacity(node.id) }),
+          monthlyCost: candidate.nodeMonthlyCost(node.id),
+        });
+      });
+
+      const horizontal = infrastructure.horizontalScale(node.id);
+      let scaleOut: NodeScalingView['scaleOut'] = null;
+      if (horizontal) {
+        let monthlyCostDelta: number | null = null;
+        if (horizontal.available) {
+          const candidate = infrastructure.clone();
+          const before = candidate.nodeMonthlyCost(node.id);
+          candidate.scaleOutNode(node.id);
+          monthlyCostDelta = candidate.nodeMonthlyCost(node.id) - before;
+        }
+        scaleOut = Object.freeze({
+          kind: horizontal.kind,
+          count: horizontal.count,
+          maxCount: horizontal.maxCount,
+          monthlyCostDelta,
+          available: horizontal.available,
+          reason: horizontal.reason,
+        });
+      }
+
+      scaling.set(node.id, Object.freeze({
+        currentSize: currentSize as NodeScalingView['currentSize'],
+        sizeOptions: Object.freeze(sizeOptions),
+        scaleOut,
+      }));
+    }
+
+    return scaling;
   }
 
   private alerts(snapshot: GameSnapshot, profit: number, observability: ObservabilityView): AlertView[] {
@@ -281,58 +326,6 @@ export class GameServiceProjector {
       summary: `${changes.join(' · ')}${suffix}`,
       tone: projected.failureRate >= 0.1 || top.after.ratio > 1 ? 'danger' : top.after.ratio >= 0.9 ? 'warning' : 'info',
       nodeId: top.after.nodeId ?? top.before.nodeId,
-    };
-  }
-
-  private infrastructureCostView(): InfrastructureCostView {
-    const currentApp = this.#engine.infrastructure.app;
-    const currentDb = this.#engine.infrastructure.database;
-    const hasAlb = this.#engine.infrastructure.hasTechnology('ALB');
-
-    const appSizeMonthlyCosts = {} as Record<ServerSize, number>;
-    const dbSizeMonthlyCosts = {} as Record<ServerSize, number>;
-    for (const size of SERVER_SIZES) {
-      appSizeMonthlyCosts[size] = new AppCluster(
-        this.#engine.config.frameworkId,
-        size,
-        currentApp.count,
-        hasAlb,
-      ).monthlyCost;
-      dbSizeMonthlyCosts[size] = new DatabaseCluster(
-        this.#engine.config.databaseId,
-        size,
-        currentDb.replicaCount,
-      ).monthlyCost;
-    }
-
-    let addAppServerMonthlyCostDelta: number | null = null;
-    if (hasAlb && currentApp.count < 10) {
-      const expanded = new AppCluster(
-        this.#engine.config.frameworkId,
-        currentApp.size,
-        currentApp.count,
-        true,
-      );
-      expanded.addServer();
-      addAppServerMonthlyCostDelta = expanded.monthlyCost - currentApp.monthlyCost;
-    }
-
-    let addDbReplicaMonthlyCostDelta: number | null = null;
-    if (currentDb.replicaCount < 3) {
-      const expanded = new DatabaseCluster(
-        this.#engine.config.databaseId,
-        currentDb.size,
-        currentDb.replicaCount,
-      );
-      expanded.addReplica();
-      addDbReplicaMonthlyCostDelta = expanded.monthlyCost - currentDb.monthlyCost;
-    }
-
-    return {
-      appSizeMonthlyCosts,
-      dbSizeMonthlyCosts,
-      addAppServerMonthlyCostDelta,
-      addDbReplicaMonthlyCostDelta,
     };
   }
 }

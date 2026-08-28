@@ -164,7 +164,14 @@ export default function GameApp() {
         {tab === 'report' && <ReportPanel view={view} observability={observability} />}
       </section>
     </div>
-    {selected && <NodeInspector node={selected} view={view} observability={observability} onClose={() => setSelectedNode(null)} onScaleApplication={(size) => run(() => controller.scaleApplication(size))} onAddApplicationServer={() => run(() => controller.addApplicationServer())} onScaleDatabase={(size) => run(() => controller.scaleDatabase(size))} onAddDatabaseReplica={() => run(() => controller.addDatabaseReplica())} onIncidentResponse={(id) => run(() => controller.startIncidentResponse(id))} />}
+    {selected && <NodeInspector
+      node={selected}
+      observability={observability}
+      onClose={() => setSelectedNode(null)}
+      onResizeNode={(nodeId, size) => run(() => controller.resizeInfrastructureNode(nodeId, size))}
+      onScaleOutNode={(nodeId) => run(() => controller.scaleOutInfrastructureNode(nodeId))}
+      onIncidentResponse={(id) => run(() => controller.startIncidentResponse(id))}
+    />}
     {activeEvent && <EventOverlay event={activeEvent} view={view} observability={observability} onDismiss={closeActiveEvent} onTrafficResponse={handleTrafficResponse} onRespond={() => { if (activeEvent.kind === 'incident') run(() => controller.startIncidentResponse(activeEvent.id), '장애 대응을 시작했습니다.'); closeActiveEvent(); }} />}
     {toast && <div className="toast">{toast}</div>}
   </main>;

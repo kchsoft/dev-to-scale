@@ -21,6 +21,7 @@ import { SeededRandomSource } from './random';
 import { trafficHealthForSeverity } from './request-trace';
 import { TechDebtState } from './tech-debt';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
+import type { InfrastructureNodeId } from './topology';
 import { V1ServiceTopologyFactory, v1NodeIdForTechnology } from './v1-topology';
 
 export type GameStatus = 'RUNNING' | 'BANKRUPT' | 'WON';
@@ -291,27 +292,15 @@ export class GameEngine {
     this.incidents.startResponse(incidentId, context.proficiencyLevel, context.fundamentalAverage);
   }
 
-  scaleApplication(size: ServerSize): void {
+  resizeInfrastructureNode(nodeId: InfrastructureNodeId, size: ServerSize): void {
     this.ensureRunning();
-    this.infrastructure.app.scaleUp(size);
+    this.infrastructure.resizeNode(nodeId, size);
     this.refreshLoad();
   }
 
-  addApplicationServer(): void {
+  scaleOutInfrastructureNode(nodeId: InfrastructureNodeId): void {
     this.ensureRunning();
-    this.infrastructure.app.addServer();
-    this.refreshLoad();
-  }
-
-  scaleDatabase(size: ServerSize): void {
-    this.ensureRunning();
-    this.infrastructure.database.scaleUp(size);
-    this.refreshLoad();
-  }
-
-  addDatabaseReplica(): void {
-    this.ensureRunning();
-    this.infrastructure.database.addReplica();
+    this.infrastructure.scaleOutNode(nodeId);
     this.refreshLoad();
   }
 

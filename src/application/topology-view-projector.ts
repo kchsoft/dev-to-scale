@@ -7,6 +7,7 @@ import type {
 import { maxResourceLoad } from '../core';
 import type {
   LoadTone,
+  NodeScalingView,
   RequestTraceView,
   TopologyNodeView,
   TopologyView,
@@ -25,6 +26,7 @@ interface TopologyProjectionSource {
   readonly traces: readonly RequestTrace[];
   readonly incidents: readonly IncidentProjectionSource[];
   readonly dau: number;
+  readonly scalingByNode?: ReadonlyMap<string, NodeScalingView>;
 }
 
 const KIND_VIEW: Readonly<Record<InfrastructureNodeKind, TopologyNodeView['kind']>> = Object.freeze({
@@ -92,6 +94,8 @@ export class TopologyViewProjector {
         loadPercent: percent(load?.loadRatio ?? 0),
         tone: loadTone(load?.loadRatio ?? 0, Boolean(incident)),
         detail: capacity > 0 ? `CAP ${capacity}` : 'CONNECTED',
+        monthlyCost: node.monthlyCost,
+        scaling: source.scalingByNode?.get(node.id) ?? null,
         ...(incident ? { incidentId: incident.id, incidentSeverity: incident.severity } : {}),
       });
     });
