@@ -351,6 +351,7 @@ rtk git commit -m "refactor: publish per-node resource loads"
 **Files:**
 - Modify: `src/application/game-view.ts`
 - Modify: `src/application/operational-view-projector.ts`
+- Modify: `src/application/game-service-projector.ts`
 - Modify: `src/application/__tests__/operational-view-projector.spec.ts`
 - Modify: `src/ui/ServiceDashboard.tsx`
 - Modify: `src/ui/ReportPanel.tsx`
@@ -444,6 +445,8 @@ export interface ServiceHealthView {
 
 In `OperationalViewProjector`, create bottleneck candidates from exact node resources. Map Server CPU/I/O, Database CPU/I/O, Queue throughput, and Object Storage storage to the existing `BottleneckView` values and labels. Preserve current threshold comparisons and use strict `>` so topology order wins ties.
 
+Pass the exact App, Database, optional Queue, and Object Storage node IDs into `OperationalViewProjector` from `GameServiceProjector`, using the `SingleServiceTopology` deployment bindings. Required V1 bindings or their node loads must fail fast; do not select required nodes by kind, prefix, or array position. The optional Queue binding remains nullable. This explicit Application-owned selection is the seam for future multi-module routing.
+
 For BASIC visible metrics, use each App/DB node's `loadRatio`, Queue throughput, and Storage storage. For METRICS/APM, expose App/DB CPU and I/O plus Queue and Storage. Preserve current V1 order. When Queue is absent, emit `{ id: 'optional:QUEUE:THROUGHPUT', nodeId: null, label: 'ASYNC', percent: 0, tone: 'stable' }`.
 
 Make `diagnose(nodeId, snapshot)` call `nodeLoad(snapshot.load, nodeId)` and inspect that exact node's resources. Keep the existing visible signal labels and suggestions, but remove all node-ID-prefix selection of load fields. Throw `Error('Missing load for topology node: ' + nodeId)` when a diagnosis targets a topology node without a node-load entry.
@@ -464,7 +467,7 @@ Expected: all tests PASS and UI/Core import boundaries remain intact.
 - [ ] **Step 5: Commit**
 
 ```bash
-rtk git add src/application/game-view.ts src/application/operational-view-projector.ts src/application/__tests__/operational-view-projector.spec.ts src/ui/ServiceDashboard.tsx src/ui/ReportPanel.tsx
+rtk git add src/application/game-view.ts src/application/operational-view-projector.ts src/application/game-service-projector.ts src/application/__tests__/operational-view-projector.spec.ts src/ui/ServiceDashboard.tsx src/ui/ReportPanel.tsx
 rtk git commit -m "refactor: project operations from node resources"
 ```
 
