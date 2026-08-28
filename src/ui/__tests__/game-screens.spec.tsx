@@ -34,7 +34,7 @@ describe('focused game screens', () => {
         view={view}
         observability={view.service.observability}
         onNode={vi.fn()}
-        onTab={vi.fn()}
+        onDevelopmentSlot={vi.fn()}
       />,
     );
 

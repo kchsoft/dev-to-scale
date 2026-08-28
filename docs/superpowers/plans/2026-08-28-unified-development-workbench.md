@@ -53,6 +53,7 @@
 
 - [x] Replace five primary tabs with service, development, report.
 - [x] Route feature/technology/learning service work slots to development.
+- [x] Preserve an active service work-slot selection so Development opens the matching Inspector entry.
 - [x] Map all four supported development actions to existing controller commands.
 - [x] Re-read the latest feature before FAST TRACK to reject a stale confirmation.
 - [x] Refresh the latest Application view when a command fails.
@@ -76,10 +77,11 @@
 - [x] Require a confirmation dialog before dispatch.
 - [x] Add keyboard focus behavior, Escape handling, focus return, and reduced-motion handling.
 - [x] Use a fixed bottom-sheet Inspector layout on mobile.
+- [x] Remove obsolete FeatureBoard, TechnologyPanel, and LearningPanel screen components after consolidation.
 
 ### Task 4: Regression verification
 
-- [ ] Run `npm test`.
-- [ ] Run `npm run typecheck`.
-- [ ] Run `npm run build`.
-- [ ] Review the final diff for accidental Core changes and stale feature/technology/learning tab references.
+- [x] Run `npm test`.
+- [x] Run `npm run typecheck`.
+- [x] Run `npm run build`.
+- [x] Review the final diff for accidental Core changes and stale feature/technology/learning tab references.
