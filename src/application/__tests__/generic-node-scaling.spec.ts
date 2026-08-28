@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ServerSize } from '../../core';
+import { GameEngine, ServerSize, V1_NODE_IDS } from '../../core';
 import { GameController } from '../game-controller';
+import { GameServiceProjector } from '../game-service-projector';
 import type { TopologyNodeView } from '../game-view';
 
 interface ExpectedScaling {
@@ -57,6 +58,26 @@ describe('generic node scaling application projection', () => {
       capacity: { storage: 320 }, monthlyCost: 50_000,
     });
     expect(storage.scaling?.scaleOut).toBeNull();
+  });
+
+  it('projects the same four tiers for deployed ALB, Redis, and queue nodes', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 43 });
+    engine.infrastructure.deployTechnology('ALB');
+    engine.infrastructure.deployTechnology('REDIS');
+    engine.infrastructure.deployTechnology('SQS');
+
+    const nodes = new GameServiceProjector(engine).project(engine.snapshot, {
+      monthlyRevenue: 0,
+      monthlyCost: engine.infrastructure.monthlyCost,
+      monthlyProfit: -engine.infrastructure.monthlyCost,
+    }).topology.nodes;
+
+    for (const nodeId of [V1_NODE_IDS.gateway, V1_NODE_IDS.cache, V1_NODE_IDS.queue('SQS')]) {
+      const node = nodes.find((candidate) => candidate.id === nodeId)!;
+      expect(node.scaling?.currentSize).toBe('SMALL');
+      expect(node.scaling?.sizeOptions.map(({ size }) => size)).toEqual(['SMALL', 'MEDIUM', 'LARGE', 'XLARGE']);
+      expect(node.monthlyCost).toBeGreaterThan(0);
+    }
   });
 
   it('emits exactly one updated view after a generic node resize command', () => {
