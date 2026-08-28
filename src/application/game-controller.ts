@@ -5,13 +5,15 @@ import {
   SkillRef,
   TrafficSpikeResponse,
 } from '../core';
+import { DevelopmentWorkbenchProjector } from './development-workbench-projector';
+import type { DevelopmentWorkbenchView } from './development-view';
 import { GameEventProjector } from './game-event-projector';
 import type {
   AlertView,
   FeatureCardView,
   GameEventView,
   GameStartConfig,
-  GameView,
+  GameView as BaseGameView,
   InfrastructureCostView,
   RequestTraceView,
   ServerSizeView,
@@ -31,7 +33,6 @@ export type {
   AlertView,
   FeatureCardView,
   GameEventView,
-  GameView,
   InfrastructureCostView,
   RequestTraceView,
   SkillNodeView,
@@ -40,10 +41,22 @@ export type {
   TopologyNodeView,
   TopologyView,
 } from './game-view';
+export type {
+  DevelopmentActionView,
+  DevelopmentOptionKind,
+  DevelopmentOptionState,
+  DevelopmentOptionView,
+  DevelopmentWorkbenchView,
+} from './development-view';
+
+export interface GameView extends BaseGameView {
+  readonly development: DevelopmentWorkbenchView;
+}
 
 export class GameController {
   readonly #engine: GameEngine;
   readonly #viewProjector: GameViewProjector;
+  readonly #developmentProjector = new DevelopmentWorkbenchProjector();
   readonly #eventProjector: GameEventProjector;
   private readonly listeners = new Set<(view: GameView) => void>();
 
@@ -61,7 +74,11 @@ export class GameController {
   }
 
   getView(): GameView {
-    return this.#viewProjector.project();
+    const baseView = this.#viewProjector.project();
+    return {
+      ...baseView,
+      development: this.#developmentProjector.project(baseView),
+    };
   }
 
   advanceDay(): GameEventView[] {
