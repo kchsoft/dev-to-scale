@@ -75,12 +75,14 @@ export class TopologyViewProjector {
     const nodes = visibleNodes.map((node): TopologyNodeView => {
       const load = loadByNode.get(node.id);
       const incident = incidentByNode.get(node.id);
-      const capacity = Math.round(load?.capacity ?? Math.max(
-        node.capacity.cpu ?? 0,
-        node.capacity.io ?? 0,
-        node.capacity.throughput ?? 0,
-        node.capacity.storage ?? 0,
-      ));
+      const capacity = Math.round(load
+        ? Math.max(0, ...load.resources.map((resource) => resource.capacity))
+        : Math.max(
+          node.capacity.cpu ?? 0,
+          node.capacity.io ?? 0,
+          node.capacity.throughput ?? 0,
+          node.capacity.storage ?? 0,
+        ));
       return Object.freeze({
         id: node.id,
         kind: KIND_VIEW[node.kind],

@@ -1,5 +1,10 @@
 import { DatabaseDefinition, DatabaseId } from './database';
 import { FeatureDefinition, FrameworkDefinition, FrameworkId } from './feature';
+import {
+  createNodeLoadSnapshot,
+  createNodeResourceLoad,
+} from './node-load';
+import type { NodeLoadSnapshot } from './node-load';
 import { RequestFlowResult } from './request-flow';
 import {
   LegacyRequestFlowProjector,
@@ -272,16 +277,6 @@ export interface LoadSnapshot {
   requestFlows: readonly RequestFlowResult[];
 }
 
-export interface NodeLoadSnapshot {
-  readonly nodeId: InfrastructureNodeId;
-  readonly cpuDemand?: number;
-  readonly ioDemand?: number;
-  readonly throughputDemand?: number;
-  readonly storageDemand?: number;
-  readonly capacity: number;
-  readonly loadRatio: number;
-}
-
 const LOAD_CURVE = {
   app: { coefficient: 0.55, exponent: 0.63 },
   db: { coefficient: 0.96, exponent: 0.42 },
@@ -418,61 +413,43 @@ export class LoadCalculator {
     const dbRatio = Math.max(dbCpuRatio, dbIoRatio);
     const asyncRatio = queue && asyncCapacity > 0 ? asyncDemand / asyncCapacity : 0;
     const storageRatio = storageCapacity > 0 ? storageDemand / storageCapacity : 0;
-    const appBottleneckCapacity = appCpuRatio >= appIoRatio ? appCpuCapacity : appIoCapacity;
     const dbBottleneckCapacity = dbCpuRatio >= dbIoRatio ? dbCpuCapacity : dbIoCapacity;
     const nodeLoads = topology.graph.nodes.map((node): NodeLoadSnapshot => {
       if (node.id === appNodeId) {
-        return Object.freeze({
-          nodeId: node.id,
-          cpuDemand: appCpuDemand,
-          ioDemand: appIoDemand,
-          capacity: appBottleneckCapacity,
-          loadRatio: appRatio,
-        });
+        return createNodeLoadSnapshot(node.id, node.kind, [
+          createNodeResourceLoad('CPU', appCpuDemand, appCpuCapacity),
+          createNodeResourceLoad('IO', appIoDemand, appIoCapacity),
+        ]);
       }
       if (node.id === databaseNodeId) {
-        return Object.freeze({
-          nodeId: node.id,
-          cpuDemand: dbCpuDemand,
-          ioDemand: dbIoDemand,
-          capacity: dbBottleneckCapacity,
-          loadRatio: dbRatio,
-        });
+        return createNodeLoadSnapshot(node.id, node.kind, [
+          createNodeResourceLoad('CPU', dbCpuDemand, dbCpuCapacity),
+          createNodeResourceLoad('IO', dbIoDemand, dbIoCapacity),
+        ]);
       }
       if (node.kind === 'QUEUE') {
-        return Object.freeze({
-          nodeId: node.id,
-          throughputDemand: asyncDemand,
-          capacity: asyncCapacity,
-          loadRatio: asyncRatio,
-        });
+        return createNodeLoadSnapshot(node.id, node.kind, [
+          createNodeResourceLoad('THROUGHPUT', asyncDemand, asyncCapacity),
+        ]);
       }
       if (node.kind === 'OBJECT_STORAGE') {
-        return Object.freeze({
-          nodeId: node.id,
-          storageDemand,
-          capacity: storageCapacity,
-          loadRatio: storageRatio,
-        });
+        return createNodeLoadSnapshot(node.id, node.kind, [
+          createNodeResourceLoad('STORAGE', storageDemand, storageCapacity),
+        ]);
       }
       if (node.kind === 'LOAD_BALANCER') {
         const gatewayCapacity = (node.capacity.throughput ?? rawAppCapacity) * tuningApp;
-        return Object.freeze({
-          nodeId: node.id,
-          throughputDemand: gatewayDemand,
-          capacity: gatewayCapacity,
-          loadRatio: ratio(gatewayDemand, gatewayCapacity),
-        });
+        return createNodeLoadSnapshot(node.id, node.kind, [
+          createNodeResourceLoad('THROUGHPUT', gatewayDemand, gatewayCapacity),
+        ]);
       }
       if (node.kind === 'CACHE') {
-        return Object.freeze({
-          nodeId: node.id,
-          throughputDemand: dbDemand,
-          capacity: dbRatio > 0 ? dbDemand / dbRatio : dbBottleneckCapacity,
-          loadRatio: dbRatio,
-        });
+        const cacheCapacity = dbRatio > 0 ? dbDemand / dbRatio : dbBottleneckCapacity;
+        return createNodeLoadSnapshot(node.id, node.kind, [
+          createNodeResourceLoad('THROUGHPUT', dbDemand, cacheCapacity),
+        ]);
       }
-      return Object.freeze({ nodeId: node.id, capacity: 0, loadRatio: 0 });
+      return createNodeLoadSnapshot(node.id, node.kind, []);
     });
 
     return {

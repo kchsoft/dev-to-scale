@@ -22,6 +22,7 @@ export {
   resourceLoad,
 } from './node-load';
 export type {
+  NodeLoadSnapshot,
   NodeLoadCollection,
   NodeResourceKind,
   NodeResourceLoad,

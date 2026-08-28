@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { NodeLoadSnapshot, RequestTrace } from '../../core';
-import { TopologyGraph } from '../../core';
+import {
+  createNodeLoadSnapshot,
+  createNodeResourceLoad,
+  TopologyGraph,
+} from '../../core';
 import { TopologyViewProjector } from '../topology-view-projector';
 
 describe('TopologyViewProjector', () => {
@@ -16,9 +20,13 @@ describe('TopologyViewProjector', () => {
     ],
   );
   const nodeLoads: readonly NodeLoadSnapshot[] = [
-    { nodeId: 'app', cpuDemand: 92, capacity: 100, loadRatio: 0.92 },
-    { nodeId: 'db', ioDemand: 24, capacity: 80, loadRatio: 0.30 },
-    { nodeId: 'external-ai', throughputDemand: 0, capacity: 0, loadRatio: 0 },
+    createNodeLoadSnapshot('app', 'SERVER_GROUP', [
+      createNodeResourceLoad('CPU', 115, 125),
+    ]),
+    createNodeLoadSnapshot('db', 'DATABASE', [
+      createNodeResourceLoad('IO', 24, 80),
+    ]),
+    createNodeLoadSnapshot('external-ai', 'EXTERNAL_SERVICE', []),
   ];
 
   it('preserves exact topology IDs and trace edge order while hiding an unused external node', () => {
@@ -48,6 +56,7 @@ describe('TopologyViewProjector', () => {
       ['app', 'server-group', 92, 'critical'],
       ['db', 'database', 30, 'stable'],
     ]);
+    expect(view.nodes.map((node) => node.detail)).toEqual(['CAP 125', 'CAP 80']);
     expect(view.edges).toEqual([
       { id: 'edge-app-db', fromNodeId: 'app', toNodeId: 'db', mode: 'sync' },
     ]);

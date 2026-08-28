@@ -119,6 +119,11 @@ describe('infrastructure and load', () => {
     expect(cpuReduction).toBeCloseTo(0.12);
     expect(ioReduction).toBeCloseTo(0.40);
     expect(ioReduction).toBeGreaterThan(cpuReduction);
+
+    const cache = withRedis.nodeLoads.find(({ nodeKind }) => nodeKind === 'CACHE');
+    expect(cache?.resources).toHaveLength(1);
+    expect(cache?.resources[0]).toMatchObject({ resourceKind: 'THROUGHPUT' });
+    expect(cache?.resources[0].ratio).toBeCloseTo(withRedis.dbRatio);
   });
 
   it('a queue removes optional async fallback pressure from APP IO', () => {

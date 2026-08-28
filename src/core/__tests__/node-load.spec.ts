@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FeatureDefinition } from '../feature';
 import { InfrastructureState, LoadCalculator } from '../infrastructure';
+import { maxNodeLoad } from '../node-load';
 import { V1_NODE_IDS } from '../v1-topology';
 
 const posts = new FeatureDefinition({
@@ -27,12 +28,26 @@ describe('node-specific load calculation', () => {
     });
     const app = load.nodeLoads.find(({ nodeId }) => nodeId === appNodeId)!;
     const db = load.nodeLoads.find(({ nodeId }) => nodeId === dbNodeId)!;
+    const appCpu = app.resources.find(({ resourceKind }) => resourceKind === 'CPU');
+    const appIo = app.resources.find(({ resourceKind }) => resourceKind === 'IO');
+    const dbCpu = db.resources.find(({ resourceKind }) => resourceKind === 'CPU');
+    const dbIo = db.resources.find(({ resourceKind }) => resourceKind === 'IO');
 
-    expect(app.cpuDemand).toBeCloseTo(load.appCpuDemand);
-    expect(app.ioDemand).toBeCloseTo(load.appIoDemand);
+    expect(app.nodeKind).toBe('SERVER_GROUP');
+    expect(appCpu).toMatchObject({ demand: load.appCpuDemand, capacity: load.appCpuCapacity });
+    expect(appCpu?.ratio).toBeCloseTo(load.appCpuRatio);
+    expect(appIo).toMatchObject({ demand: load.appIoDemand, capacity: load.appIoCapacity });
+    expect(appIo?.ratio).toBeCloseTo(load.appIoRatio);
     expect(app.loadRatio).toBeCloseTo(load.appRatio);
-    expect(db.cpuDemand).toBe(0);
-    expect(db.ioDemand).toBe(0);
+    expect(dbCpu?.ratio).toBeCloseTo(load.dbCpuRatio);
+    expect(dbIo?.ratio).toBeCloseTo(load.dbIoRatio);
+    expect(db.loadRatio).toBeCloseTo(load.dbRatio);
+    expect(maxNodeLoad(load)?.loadRatio).toBeCloseTo(Math.max(
+      load.appRatio,
+      load.dbRatio,
+      load.asyncRatio,
+      load.storageRatio,
+    ));
     expect(load.requestTraces[0].failureNodeId).toBe(appNodeId);
     expect(load.failureRate).toBe(1);
   });
@@ -114,7 +129,14 @@ describe('node-specific load calculation', () => {
       V1_NODE_IDS.queue('SQS'),
     ]);
     const gateway = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.gateway)!;
-    expect(gateway.loadRatio).toBeCloseTo(gateway.throughputDemand! / gateway.capacity);
+    const queue = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.queue('SQS'))!;
+    const storage = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.storage)!;
+    const external = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.externalAi)!;
+
+    expect(gateway.resources.map(({ resourceKind }) => resourceKind)).toEqual(['THROUGHPUT']);
+    expect(queue.resources.map(({ resourceKind }) => resourceKind)).toEqual(['THROUGHPUT']);
+    expect(storage.resources.map(({ resourceKind }) => resourceKind)).toEqual(['STORAGE']);
+    expect(external.resources).toEqual([]);
   });
 
   it('keeps ingress demand on a failed ALB while removing downstream APP demand', () => {
@@ -127,9 +149,9 @@ describe('node-specific load calculation', () => {
     const gateway = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.gateway)!;
     const app = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.app('SPRING_BOOT'))!;
 
-    expect(gateway.throughputDemand).toBeGreaterThan(0);
-    expect(app.cpuDemand).toBe(0);
-    expect(app.ioDemand).toBe(0);
+    expect(gateway.resources[0].demand).toBeGreaterThan(0);
+    expect(app.resources.find(({ resourceKind }) => resourceKind === 'CPU')?.demand).toBe(0);
+    expect(app.resources.find(({ resourceKind }) => resourceKind === 'IO')?.demand).toBe(0);
     expect(load.requestTraces[0].failureNodeId).toBe(V1_NODE_IDS.gateway);
   });
 });
