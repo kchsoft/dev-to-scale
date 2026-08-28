@@ -52,7 +52,7 @@ describe('application layer', () => {
 
   it('emits exactly one current view after each successful command', () => {
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 25 });
-    const listener = vi.fn();
+    const listener = vi.fn<(view: ReturnType<GameController['getView']>) => void>();
     const unsubscribe = controller.subscribe(listener);
 
     expect(listener).toHaveBeenCalledTimes(1);
