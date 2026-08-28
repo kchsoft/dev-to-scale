@@ -18,6 +18,7 @@ import {
 import {
   AlertView,
   InfrastructureCostView,
+  NodeScalingView,
   ObservabilityView,
   ServiceOperationsView,
   TopologyView,
@@ -132,7 +133,56 @@ export class GameServiceProjector {
       traces: snapshot.load.requestTraces,
       incidents: snapshot.incidents,
       dau: snapshot.dau,
+      scalingByNode: this.scalingByNode(topology),
     });
+  }
+
+  private scalingByNode(topology: ServiceTopology): ReadonlyMap<string, NodeScalingView> {
+    const infrastructure = this.#engine.infrastructure;
+    const scaling = new Map<string, NodeScalingView>();
+
+    for (const node of topology.graph.nodes) {
+      if (node.kind === 'EXTERNAL_SERVICE') continue;
+
+      const currentSize = infrastructure.nodeSize(node.id);
+      const sizeOptions = SERVER_SIZES.map((size) => {
+        const candidate = infrastructure.clone();
+        candidate.resizeNode(node.id, size);
+        return Object.freeze({
+          size: size as NodeScalingView['currentSize'],
+          capacity: Object.freeze({ ...candidate.nodeCapacity(node.id) }),
+          monthlyCost: candidate.nodeMonthlyCost(node.id),
+        });
+      });
+
+      const horizontal = infrastructure.horizontalScale(node.id);
+      let scaleOut: NodeScalingView['scaleOut'] = null;
+      if (horizontal) {
+        let monthlyCostDelta: number | null = null;
+        if (horizontal.available) {
+          const candidate = infrastructure.clone();
+          const before = candidate.nodeMonthlyCost(node.id);
+          candidate.scaleOutNode(node.id);
+          monthlyCostDelta = candidate.nodeMonthlyCost(node.id) - before;
+        }
+        scaleOut = Object.freeze({
+          kind: horizontal.kind,
+          count: horizontal.count,
+          maxCount: horizontal.maxCount,
+          monthlyCostDelta,
+          available: horizontal.available,
+          reason: horizontal.reason,
+        });
+      }
+
+      scaling.set(node.id, Object.freeze({
+        currentSize: currentSize as NodeScalingView['currentSize'],
+        sizeOptions: Object.freeze(sizeOptions),
+        scaleOut,
+      }));
+    }
+
+    return scaling;
   }
 
   private alerts(snapshot: GameSnapshot, profit: number, observability: ObservabilityView): AlertView[] {
@@ -284,6 +334,7 @@ export class GameServiceProjector {
     };
   }
 
+  /** @deprecated Kept until the old APP/DB inspector call sites are migrated. */
   private infrastructureCostView(): InfrastructureCostView {
     const currentApp = this.#engine.infrastructure.app;
     const currentDb = this.#engine.infrastructure.database;
