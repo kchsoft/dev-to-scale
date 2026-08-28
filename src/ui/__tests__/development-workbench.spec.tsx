@@ -19,6 +19,24 @@ describe('DevelopmentWorkbench', () => {
     expect(html).not.toContain('CONFIRM ACTION');
   });
 
+  it('opens the Inspector for an initial selection requested by another screen', () => {
+    const view = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 }).getView();
+    const featureSlot = view.development.workSlots.find(({ id }) => id === 'feature')!;
+    const initialSelectedId = optionIdForWorkSlot(featureSlot, view.development.options);
+
+    const html = renderToStaticMarkup(
+      <DevelopmentWorkbench
+        view={view.development}
+        initialSelectedId={initialSelectedId}
+        onAction={vi.fn()}
+      />,
+    );
+
+    expect(initialSelectedId).toBe('feature:COMMUNITY_MVP');
+    expect(html).not.toContain('NO SELECTION');
+    expect(html).toContain('<code>feature:COMMUNITY_MVP</code>');
+  });
+
   it('filters without changing Application ordering', () => {
     const options = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 }).getView().development.options;
     const technologies = filterDevelopmentOptions(options, 'technology');
