@@ -24,6 +24,15 @@ export type { NodeSizeProfile } from './infrastructure-sizing';
 export type { DatabaseId } from './database';
 export type TechnologyId = BuildableTechnologyId;
 export type QueueTechnologyId = 'SQS' | 'RABBITMQ' | 'KAFKA';
+export type HorizontalScaleKind = 'INSTANCE' | 'READ_REPLICA';
+
+export interface HorizontalScaleState {
+  readonly kind: HorizontalScaleKind;
+  readonly count: number;
+  readonly maxCount: number;
+  readonly available: boolean;
+  readonly reason: string | null;
+}
 
 export const QUEUE_TECHNOLOGY_IDS: readonly QueueTechnologyId[] = ['SQS', 'RABBITMQ', 'KAFKA'];
 
@@ -225,6 +234,45 @@ export class InfrastructureState {
     }
     this.nodeSize(nodeId);
     this.nodeSizes.set(nodeId, size);
+  }
+
+  horizontalScale(nodeId: InfrastructureNodeId): HorizontalScaleState | null {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) {
+      const atLimit = this.app.count >= 10;
+      const missingAlb = !this.hasTechnology('ALB');
+      return {
+        kind: 'INSTANCE',
+        count: this.app.count,
+        maxCount: 10,
+        available: !atLimit && !missingAlb,
+        reason: atLimit ? 'Application server limit reached' : missingAlb ? 'ALB is required before application scale-out' : null,
+      };
+    }
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) {
+      const atLimit = this.database.replicaCount >= 3;
+      return {
+        kind: 'READ_REPLICA',
+        count: this.database.replicaCount,
+        maxCount: 3,
+        available: !atLimit,
+        reason: atLimit ? 'Database replica limit reached' : null,
+      };
+    }
+    this.nodeSize(nodeId);
+    return null;
+  }
+
+  scaleOutNode(nodeId: InfrastructureNodeId): void {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) {
+      this.app.addServer();
+      return;
+    }
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) {
+      this.database.addReplica();
+      return;
+    }
+    this.nodeSize(nodeId);
+    throw new Error(`Infrastructure node does not support horizontal scale-out: ${nodeId}`);
   }
 
   nodeCapacity(nodeId: InfrastructureNodeId): ResourceCapacity {
