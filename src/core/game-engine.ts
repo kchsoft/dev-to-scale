@@ -360,7 +360,7 @@ export class GameEngine {
     const infrastructure = this.infrastructure.clone();
     const retired = infrastructure.deployTechnology(id);
     const ignoredIncidentNodeIds = new Set(
-      retired.map((technology) => v1NodeIdForTechnology(retiredTechnology)),
+      retired.map((technology) => v1NodeIdForTechnology(technology)),
     );
     return this.calculateCurrentLoad(
       infrastructure,
