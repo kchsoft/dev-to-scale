@@ -1,7 +1,7 @@
 import type { FeatureDefinition, FrameworkId } from './feature';
 import type { DatabaseId } from './database';
 import type { InfrastructureState, QueueTechnologyId, TechnologyId } from './infrastructure';
-import type { RequestNodeKind } from './request-flow';
+import type { RequestNodeKind } from './request-route';
 import {
   ModuleDeployment,
   ResourceRole,

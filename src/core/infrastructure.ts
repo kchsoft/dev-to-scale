@@ -5,9 +5,7 @@ import {
   createNodeResourceLoad,
 } from './node-load';
 import type { NodeLoadSnapshot } from './node-load';
-import { RequestFlowResult } from './request-flow';
 import {
-  LegacyRequestFlowProjector,
   NodeHealth,
   RequestTrace,
   RequestTraceSimulator,
@@ -274,7 +272,6 @@ export interface LoadSnapshot {
   failureRate: number;
   nodeLoads: readonly NodeLoadSnapshot[];
   requestTraces: readonly RequestTrace[];
-  requestFlows: readonly RequestFlowResult[];
 }
 
 const LOAD_CURVE = {
@@ -315,7 +312,6 @@ export class LoadCalculator {
       topology.resolveForTrace(feature.id),
       context.nodeHealth,
     ));
-    const requestFlows = requestTraces.map((trace) => LegacyRequestFlowProjector.fromTrace(trace));
     const appNodeId = V1_NODE_IDS.app(infrastructure.app.frameworkId);
     const databaseNodeId = V1_NODE_IDS.database(infrastructure.database.databaseId);
     const queueNodeId = queue ? V1_NODE_IDS.queue(queue) : null;
@@ -487,7 +483,6 @@ export class LoadCalculator {
       failureRate: Math.max(0, Math.min(1, failureRate)),
       nodeLoads: Object.freeze(nodeLoads),
       requestTraces: Object.freeze(requestTraces),
-      requestFlows: Object.freeze(requestFlows),
     };
   }
 }

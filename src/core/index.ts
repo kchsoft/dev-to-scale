@@ -29,7 +29,7 @@ export type {
 } from './node-load';
 export * from './progression';
 export * from './random';
-export * from './request-flow';
+export * from './request-route';
 export * from './request-trace';
 export * from './service-topology';
 export * from './tech-debt';

@@ -17,7 +17,7 @@ import {
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
-import { trafficHealthForSeverity } from './request-flow';
+import { trafficHealthForSeverity } from './request-trace';
 import { TechDebtState } from './tech-debt';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
 import { SingleServiceTopology, v1NodeIdForTechnology } from './v1-topology';

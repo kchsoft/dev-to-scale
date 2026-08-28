@@ -1,6 +1,5 @@
 import type { ResourceRole, ResolvedRoute } from './service-topology';
-import { RequestFlowResult } from './request-flow';
-import type { RequestNodeKind } from './request-flow';
+import type { IncidentSeverity } from './incident';
 import type { InfrastructureNodeId } from './topology';
 
 export type RequestTraceNodeStatus = 'HEALTHY' | 'SLOW' | 'FAILED' | 'MISSING';
@@ -28,6 +27,14 @@ export interface RequestTrace {
 }
 
 export type NodeHealth = Readonly<Partial<Record<InfrastructureNodeId, number>>>;
+
+export function trafficHealthForSeverity(severity: IncidentSeverity): number {
+  switch (severity) {
+    case 'MINOR': return 0.8;
+    case 'MAJOR': return 0.4;
+    case 'CRITICAL': return 0;
+  }
+}
 
 function clampHealth(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -101,44 +108,5 @@ export class RequestTraceSimulator {
       successRatio: currentRatio,
       failureNodeId,
     });
-  }
-}
-
-function legacyNodeForRole(role: ResourceRole): RequestNodeKind | null {
-  switch (role) {
-    case 'ENTRY_GATEWAY': return 'ALB';
-    case 'ENTRY_APP': return 'APP';
-    case 'PRIMARY_DATABASE': return 'DB';
-    case 'CACHE': return 'CACHE';
-    case 'EVENT_BUS': return 'QUEUE';
-    case 'OBJECT_STORAGE': return 'STORAGE';
-    case 'EXTERNAL_SERVICE': return 'AI';
-    case 'WORKER': return null;
-  }
-}
-
-export class LegacyRequestFlowProjector {
-  static fromTrace(trace: RequestTrace): RequestFlowResult {
-    const nodes = trace.nodes.flatMap((node) => {
-      const legacyNode = legacyNodeForRole(node.role);
-      return legacyNode === null
-        ? []
-        : [{
-            node: legacyNode,
-            arrivalRatio: node.arrivalRatio,
-            passThroughRatio: node.passThroughRatio,
-            available: node.status !== 'MISSING',
-          }];
-    });
-    const failed = trace.nodes.find((node) => (
-      node.status === 'FAILED' || (node.status === 'MISSING' && trace.successRatio <= 0)
-    ));
-
-    return new RequestFlowResult(
-      trace.workloadId,
-      Object.freeze(nodes),
-      trace.successRatio,
-      failed ? legacyNodeForRole(failed.role) : null,
-    );
   }
 }

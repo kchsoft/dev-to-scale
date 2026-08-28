@@ -38,6 +38,7 @@ describe('node-specific load calculation', () => {
     const load = LoadCalculator.calculate(100_000, [posts], infrastructure, {
       nodeHealth: { [appNodeId]: 0 },
     });
+    expect(Object.hasOwn(load, 'requestFlows')).toBe(false);
     const app = load.nodeLoads.find(({ nodeId }) => nodeId === appNodeId)!;
     const db = load.nodeLoads.find(({ nodeId }) => nodeId === dbNodeId)!;
     const appCpu = app.resources.find(({ resourceKind }) => resourceKind === 'CPU');
@@ -77,7 +78,7 @@ describe('node-specific load calculation', () => {
     expect(unrelated.requestTraces[0].successRatio).toBe(1);
   });
 
-  it('projects missing required resources into both trace and legacy request flow', () => {
+  it('projects missing required resources into the canonical trace', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     const notification = new FeatureDefinition({
       id: 'NOTIFICATION',
@@ -99,11 +100,11 @@ describe('node-specific load calculation', () => {
       nodeId: null,
       status: 'MISSING',
     }));
-    expect(load.requestFlows[0].failureNode).toBe('QUEUE');
-    expect(load.requestFlows[0].successRatio).toBe(0);
+    expect(load.requestTraces[0].successRatio).toBe(0);
+    expect(load.requestTraces[0].failureNodeId).toBeNull();
   });
 
-  it('does not project a missing optional resource as a legacy failure node', () => {
+  it('does not project a missing optional resource as a request failure', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     const optional = new FeatureDefinition({
       id: 'PREMIUM',
@@ -121,8 +122,8 @@ describe('node-specific load calculation', () => {
     const load = LoadCalculator.calculate(100_000, [optional], infrastructure);
 
     expect(load.requestTraces[0].nodes.at(-1)?.status).toBe('MISSING');
-    expect(load.requestFlows[0].failureNode).toBeNull();
-    expect(load.requestFlows[0].successRatio).toBe(1);
+    expect(load.requestTraces[0].failureNodeId).toBeNull();
+    expect(load.requestTraces[0].successRatio).toBe(1);
   });
 
   it('publishes one node load for every current topology node', () => {

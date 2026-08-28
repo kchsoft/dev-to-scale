@@ -62,14 +62,14 @@ describe('game engine orchestration', () => {
     expect(dauAfterFirstFeature(0.05)).toBeGreaterThan(dauAfterFirstFeature(0.005));
   });
 
-  it('publishes the launched service load and request flow in the launch snapshot', () => {
+  it('publishes the launched service load and request trace in the launch snapshot', () => {
     const game = launchedGame();
     const snapshot = game.snapshot;
 
     expect(snapshot.dau).toBe(80);
     expect(snapshot.load.appDemand).toBeGreaterThan(0);
     expect(snapshot.load.dbDemand).toBeGreaterThan(0);
-    expect(snapshot.load.requestFlows.map((flow) => flow.featureId)).toContain('COMMUNITY_MVP');
+    expect(snapshot.load.requestTraces.map((trace) => trace.workloadId)).toContain('COMMUNITY_MVP');
   });
 
   it('refreshes capacity and load immediately after infrastructure scaling', () => {
@@ -109,7 +109,7 @@ describe('game engine orchestration', () => {
     expect(game.snapshot.load.rawAsyncCapacity).toBeGreaterThan(0);
   });
 
-  it('publishes a healthy request flow in the same snapshot that completes incident recovery', () => {
+  it('publishes a healthy request trace in the same snapshot that completes incident recovery', () => {
     const game = launchedGame(13, new NoIncidentRandom());
     const databaseNodeId = V1_NODE_IDS.database('POSTGRESQL');
     const incident = new Incident('db-outage', databaseNodeId, 'CRITICAL', 1);
@@ -122,7 +122,6 @@ describe('game engine orchestration', () => {
     for (let day = 0; day < 10 && game.snapshot.incidents.length > 0; day += 1) game.advanceDay();
 
     expect(game.snapshot.load.failureRate).toBe(0);
-    expect(game.snapshot.load.requestFlows[0]?.successRatio).toBe(1);
     expect(game.snapshot.load.requestTraces[0]?.successRatio).toBe(1);
   });
 

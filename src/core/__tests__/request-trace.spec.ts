@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RequestTraceSimulator } from '../request-trace';
+import { RequestTraceSimulator, trafficHealthForSeverity } from '../request-trace';
 import type { ResolvedRoute } from '../service-topology';
 
 function queueRoute(queueNodeId: string): ResolvedRoute {
@@ -77,5 +77,29 @@ describe('RequestTraceSimulator', () => {
     const trace = RequestTraceSimulator.simulate(queueRoute('queue-a'), { 'app-a': 0.6 });
 
     expect(trace.edges).toEqual([{ edgeId: 'edge-app-queue-a', trafficRatio: 0.6 }]);
+  });
+
+  it('keeps a missing optional step visible without reducing success', () => {
+    const trace = RequestTraceSimulator.simulate({
+      workloadId: 'premium',
+      moduleId: 'community',
+      steps: [
+        { stepId: 'app', role: 'ENTRY_APP', requirement: 'REQUIRED', nodeId: 'app' },
+        { stepId: 'queue', role: 'EVENT_BUS', requirement: 'OPTIONAL', nodeId: null },
+        { stepId: 'db', role: 'PRIMARY_DATABASE', requirement: 'REQUIRED', nodeId: 'db' },
+      ],
+      edges: [{ blueprintEdgeId: 'app-queue+queue-db', topologyEdgeId: 'app-db', fromNodeId: 'app', toNodeId: 'db', mode: 'ASYNC' }],
+    });
+
+    expect(trace.successRatio).toBe(1);
+    expect(trace.failureNodeId).toBeNull();
+    expect(trace.nodes[1]).toMatchObject({ status: 'MISSING', nodeId: null });
+    expect(trace.edges).toContainEqual({ edgeId: 'app-db', trafficRatio: 1 });
+  });
+
+  it('maps incident severity to canonical node health', () => {
+    expect(trafficHealthForSeverity('MINOR')).toBe(0.8);
+    expect(trafficHealthForSeverity('MAJOR')).toBe(0.4);
+    expect(trafficHealthForSeverity('CRITICAL')).toBe(0);
   });
 });

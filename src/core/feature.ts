@@ -1,4 +1,4 @@
-import type { RequestRouteStep } from './request-flow';
+import type { RequestRouteStep } from './request-route';
 
 export type FeatureComplexity = 'SIMPLE' | 'NORMAL' | 'COMPLEX';
 export type FeatureTag =
