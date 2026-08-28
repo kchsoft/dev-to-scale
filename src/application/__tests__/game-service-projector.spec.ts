@@ -3,7 +3,7 @@ import { createNodeLoadSnapshot, createNodeResourceLoad, GameEngine, nodeLoad, V
 import { GameServiceProjector } from '../game-service-projector';
 
 describe('GameServiceProjector', () => {
-  it('projects operational bindings from the explicit v1 module deployment', () => {
+  it('projects BASIC operational metrics from player-owned topology nodes', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
     const result = new GameServiceProjector(engine).project(engine.snapshot, {
       monthlyRevenue: 0,
@@ -14,12 +14,11 @@ describe('GameServiceProjector', () => {
     expect(result.service.visibleLoads.map(({ nodeId }) => nodeId)).toEqual([
       V1_NODE_IDS.app('SPRING_BOOT'),
       V1_NODE_IDS.database('POSTGRESQL'),
-      null,
       V1_NODE_IDS.storage,
     ]);
   });
 
-  it('derives operational node selection from deployment bindings instead of load order', () => {
+  it('scopes operational projection to topology membership instead of load order', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
     const appNodeId = V1_NODE_IDS.app('SPRING_BOOT');
     const state = {
