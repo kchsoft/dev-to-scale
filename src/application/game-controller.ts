@@ -15,7 +15,6 @@ import type {
   GameEventView,
   GameStartConfig,
   GameView as BaseGameView,
-  InfrastructureCostView,
   RequestTraceView,
   ServerSizeView,
   SkillNodeView,
@@ -34,7 +33,6 @@ export type {
   AlertView,
   FeatureCardView,
   GameEventView,
-  InfrastructureCostView,
   RequestTraceView,
   SkillNodeView,
   TechnologyOptionView,
@@ -101,14 +99,6 @@ export class GameController {
     this.#engine.scaleOutInfrastructureNode(nodeId as InfrastructureNodeId);
     this.emit();
   }
-  /** @deprecated Use resizeInfrastructureNode. */
-  scaleApplication(size: ServerSizeView): void { this.resizeInfrastructureNode(`v1:app:${this.getView().frameworkId}`, size); }
-  /** @deprecated Use scaleOutInfrastructureNode. */
-  addApplicationServer(): void { this.scaleOutInfrastructureNode(`v1:app:${this.getView().frameworkId}`); }
-  /** @deprecated Use resizeInfrastructureNode. */
-  scaleDatabase(size: ServerSizeView): void { this.resizeInfrastructureNode(`v1:database:${this.getView().databaseId}`, size); }
-  /** @deprecated Use scaleOutInfrastructureNode. */
-  addDatabaseReplica(): void { this.scaleOutInfrastructureNode(`v1:database:${this.getView().databaseId}`); }
   fastTrackCurrentFeature(): void { this.#engine.fastTrackCurrentFeature(); this.emit(); }
   startRefactor(): void { this.#engine.startRefactor(); this.emit(); }
   respondTrafficSpike(response: TrafficResponseChoice): void { this.#engine.respondToTrafficSpike(response as TrafficSpikeResponse); this.emit(); }
