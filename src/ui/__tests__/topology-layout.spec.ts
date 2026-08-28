@@ -3,7 +3,17 @@ import type { TopologyEdgeView, TopologyNodeView } from '../../application/game-
 import { layoutTopology } from '../topology-layout';
 
 function node(id: string, kind: TopologyNodeView['kind']): TopologyNodeView {
-  return { id, kind, name: id, icon: '•', loadPercent: 0, tone: 'stable', detail: 'CONNECTED' };
+  return {
+    id,
+    kind,
+    name: id,
+    icon: '•',
+    loadPercent: 0,
+    tone: 'stable',
+    detail: 'CONNECTED',
+    monthlyCost: 0,
+    scaling: null,
+  };
 }
 
 describe('layoutTopology', () => {
