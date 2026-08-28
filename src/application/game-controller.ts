@@ -5,6 +5,7 @@ import {
   SkillRef,
   TrafficSpikeResponse,
 } from '../core';
+import type { InfrastructureNodeId } from '../core';
 import { DevelopmentWorkbenchProjector } from './development-workbench-projector';
 import type { DevelopmentWorkbenchView } from './development-view';
 import { GameEventProjector } from './game-event-projector';
@@ -92,10 +93,22 @@ export class GameController {
   startTechnologyBuild(id: TechnologyIdView): void { this.#engine.startTechnologyBuild(id as BuildableTechnologyId); this.emit(); }
   startLearning(ref: SkillRefView): void { this.#engine.startLearning(ref as SkillRef); this.emit(); }
   startIncidentResponse(id: string): void { this.#engine.startIncidentResponse(id); this.emit(); }
-  scaleApplication(size: ServerSizeView): void { this.#engine.scaleApplication(size as ServerSize); this.emit(); }
-  addApplicationServer(): void { this.#engine.addApplicationServer(); this.emit(); }
-  scaleDatabase(size: ServerSizeView): void { this.#engine.scaleDatabase(size as ServerSize); this.emit(); }
-  addDatabaseReplica(): void { this.#engine.addDatabaseReplica(); this.emit(); }
+  resizeInfrastructureNode(nodeId: string, size: ServerSizeView): void {
+    this.#engine.resizeInfrastructureNode(nodeId as InfrastructureNodeId, size as ServerSize);
+    this.emit();
+  }
+  scaleOutInfrastructureNode(nodeId: string): void {
+    this.#engine.scaleOutInfrastructureNode(nodeId as InfrastructureNodeId);
+    this.emit();
+  }
+  /** @deprecated Use resizeInfrastructureNode. */
+  scaleApplication(size: ServerSizeView): void { this.resizeInfrastructureNode(`v1:app:${this.getView().frameworkId}`, size); }
+  /** @deprecated Use scaleOutInfrastructureNode. */
+  addApplicationServer(): void { this.scaleOutInfrastructureNode(`v1:app:${this.getView().frameworkId}`); }
+  /** @deprecated Use resizeInfrastructureNode. */
+  scaleDatabase(size: ServerSizeView): void { this.resizeInfrastructureNode(`v1:database:${this.getView().databaseId}`, size); }
+  /** @deprecated Use scaleOutInfrastructureNode. */
+  addDatabaseReplica(): void { this.scaleOutInfrastructureNode(`v1:database:${this.getView().databaseId}`); }
   fastTrackCurrentFeature(): void { this.#engine.fastTrackCurrentFeature(); this.emit(); }
   startRefactor(): void { this.#engine.startRefactor(); this.emit(); }
   respondTrafficSpike(response: TrafficResponseChoice): void { this.#engine.respondToTrafficSpike(response as TrafficSpikeResponse); this.emit(); }
