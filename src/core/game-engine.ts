@@ -14,6 +14,7 @@ import {
   ServerSize,
   TechnologyId,
 } from './infrastructure';
+import { maxNodeLoad } from './node-load';
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
@@ -386,12 +387,7 @@ export class GameEngine {
   private advanceGrowth(): void {
     this.growthEvent = GrowthPolicy.maybeStartEvent(this.growthEvent, this.random);
     const phase = this.progression.finished ? 3 : this.progression.currentRequirement.phase;
-    const maxLoadRatio = Math.max(
-      this._load.appRatio,
-      this._load.dbRatio,
-      this._load.asyncRatio,
-      this._load.storageRatio,
-    );
+    const maxLoadRatio = maxNodeLoad(this._load)?.loadRatio ?? 0;
     const result = GrowthPolicy.calculate({
       phase,
       completedFeatureGrowthBonus: this.completedFeatureDefinitions.reduce(

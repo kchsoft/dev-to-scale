@@ -235,40 +235,6 @@ export interface LoadCalculationContext {
 }
 
 export interface LoadSnapshot {
-  /** Legacy aggregate demand/capacity fields. Ratios use the worst CPU/I/O bottleneck. */
-  appDemand: number;
-  dbDemand: number;
-  asyncDemand: number;
-  storageDemand: number;
-  rawAppCapacity: number;
-  rawDbCapacity: number;
-  rawAsyncCapacity: number;
-  appCapacity: number;
-  dbCapacity: number;
-  asyncCapacity: number;
-  storageCapacity: number;
-  appRatio: number;
-  dbRatio: number;
-  asyncRatio: number;
-  storageRatio: number;
-
-  appCpuDemand: number;
-  appIoDemand: number;
-  dbCpuDemand: number;
-  dbIoDemand: number;
-  rawAppCpuCapacity: number;
-  rawAppIoCapacity: number;
-  rawDbCpuCapacity: number;
-  rawDbIoCapacity: number;
-  appCpuCapacity: number;
-  appIoCapacity: number;
-  dbCpuCapacity: number;
-  dbIoCapacity: number;
-  appCpuRatio: number;
-  appIoRatio: number;
-  dbCpuRatio: number;
-  dbIoRatio: number;
-
   failureRate: number;
   nodeLoads: readonly NodeLoadSnapshot[];
   requestTraces: readonly RequestTrace[];
@@ -448,41 +414,10 @@ export class LoadCalculator {
       return createNodeLoadSnapshot(node.id, node.kind, []);
     });
 
-    return {
-      appDemand,
-      dbDemand,
-      asyncDemand,
-      storageDemand,
-      rawAppCapacity,
-      rawDbCapacity,
-      rawAsyncCapacity,
-      appCapacity,
-      dbCapacity,
-      asyncCapacity,
-      storageCapacity,
-      appRatio,
-      dbRatio,
-      asyncRatio,
-      storageRatio,
-      appCpuDemand,
-      appIoDemand,
-      dbCpuDemand,
-      dbIoDemand,
-      rawAppCpuCapacity,
-      rawAppIoCapacity,
-      rawDbCpuCapacity,
-      rawDbIoCapacity,
-      appCpuCapacity,
-      appIoCapacity,
-      dbCpuCapacity,
-      dbIoCapacity,
-      appCpuRatio,
-      appIoRatio,
-      dbCpuRatio,
-      dbIoRatio,
+    return Object.freeze({
       failureRate: Math.max(0, Math.min(1, failureRate)),
       nodeLoads: Object.freeze(nodeLoads),
       requestTraces: Object.freeze(requestTraces),
-    };
+    });
   }
 }

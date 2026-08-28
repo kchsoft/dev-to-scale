@@ -3,7 +3,13 @@ import { COMMUNITY_FEATURES } from '../community';
 import { GameEngine } from '../game-engine';
 import { RandomSource } from '../growth';
 import { Incident } from '../incident-manager';
-import { ServerSize } from '../infrastructure';
+import { LoadSnapshot, ServerSize } from '../infrastructure';
+import { maxNodeLoad, resourceLoad } from '../node-load';
+
+function nodeResource(load: LoadSnapshot, nodeKind: 'SERVER_GROUP' | 'DATABASE' | 'QUEUE', resourceKind: 'CPU' | 'IO' | 'THROUGHPUT') {
+  const node = maxNodeLoad(load, { nodeKind });
+  return node ? resourceLoad(node, resourceKind) : undefined;
+}
 import { skillRef } from '../learning';
 import { V1_NODE_IDS } from '../v1-topology';
 
@@ -67,28 +73,28 @@ describe('game engine orchestration', () => {
     const snapshot = game.snapshot;
 
     expect(snapshot.dau).toBe(80);
-    expect(snapshot.load.appDemand).toBeGreaterThan(0);
-    expect(snapshot.load.dbDemand).toBeGreaterThan(0);
+    expect(resourceLoad(maxNodeLoad(snapshot.load, { nodeKind: 'SERVER_GROUP' })!, 'CPU')!.demand).toBeGreaterThan(0);
+    expect(resourceLoad(maxNodeLoad(snapshot.load, { nodeKind: 'DATABASE' })!, 'CPU')!.demand).toBeGreaterThan(0);
     expect(snapshot.load.requestTraces.map((trace) => trace.workloadId)).toContain('COMMUNITY_MVP');
   });
 
   it('refreshes capacity and load immediately after infrastructure scaling', () => {
     const game = launchedGame(11);
-    const smallAppCapacity = game.snapshot.load.rawAppCapacity;
-    const smallDbCapacity = game.snapshot.load.rawDbCapacity;
+    const smallAppCapacity = nodeResource(game.snapshot.load, 'SERVER_GROUP', 'CPU')!.capacity;
+    const smallDbCapacity = nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity;
 
     game.scaleApplication(ServerSize.XLARGE);
-    expect(game.snapshot.load.rawAppCapacity).toBeCloseTo(game.infrastructure.app.capacity);
-    expect(game.snapshot.load.rawAppCapacity).toBeGreaterThan(smallAppCapacity);
+    expect(nodeResource(game.snapshot.load, 'SERVER_GROUP', 'CPU')!.capacity).toBeCloseTo(game.infrastructure.app.cpuCapacity);
+    expect(nodeResource(game.snapshot.load, 'SERVER_GROUP', 'CPU')!.capacity).toBeGreaterThan(smallAppCapacity);
 
     game.scaleDatabase(ServerSize.XLARGE);
-    expect(game.snapshot.load.rawDbCapacity).toBeCloseTo(game.infrastructure.database.capacity);
-    expect(game.snapshot.load.rawDbCapacity).toBeGreaterThan(smallDbCapacity);
+    expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeCloseTo(game.infrastructure.database.cpuCapacity);
+    expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeGreaterThan(smallDbCapacity);
 
-    const dbCapacityBeforeReplica = game.snapshot.load.rawDbCapacity;
+    const dbCapacityBeforeReplica = nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity;
     game.addDatabaseReplica();
-    expect(game.snapshot.load.rawDbCapacity).toBeCloseTo(game.infrastructure.database.capacity);
-    expect(game.snapshot.load.rawDbCapacity).toBeGreaterThan(dbCapacityBeforeReplica);
+    expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeCloseTo(game.infrastructure.database.cpuCapacity);
+    expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeGreaterThan(dbCapacityBeforeReplica);
   });
 
   it('publishes deployed queue capacity in the same snapshot that completes the build', () => {
@@ -105,8 +111,8 @@ describe('game engine orchestration', () => {
     for (let day = 0; day < 20 && game.snapshot.currentTechnologyBuild; day += 1) game.advanceDay();
 
     expect(game.infrastructure.hasTechnology('SQS')).toBe(true);
-    expect(game.snapshot.load.rawAsyncCapacity).toBe(game.infrastructure.asyncCapacity);
-    expect(game.snapshot.load.rawAsyncCapacity).toBeGreaterThan(0);
+    expect(nodeResource(game.snapshot.load, 'QUEUE', 'THROUGHPUT')!.capacity).toBe(game.infrastructure.asyncCapacity);
+    expect(nodeResource(game.snapshot.load, 'QUEUE', 'THROUGHPUT')!.capacity).toBeGreaterThan(0);
   });
 
   it('publishes a healthy request trace in the same snapshot that completes incident recovery', () => {
@@ -170,8 +176,8 @@ describe('game engine orchestration', () => {
     const feature = COMMUNITY_FEATURES[game.progression.featureOrder[0]];
     const projected = game.previewLoadWithFeature(feature);
 
-    expect(projected.appCpuDemand + projected.appIoDemand).toBeGreaterThan(before.appCpuDemand + before.appIoDemand);
-    expect(projected.dbCpuDemand + projected.dbIoDemand).toBeGreaterThan(before.dbCpuDemand + before.dbIoDemand);
+    expect(nodeResource(projected, 'SERVER_GROUP', 'CPU')!.demand + nodeResource(projected, 'SERVER_GROUP', 'IO')!.demand).toBeGreaterThan(nodeResource(before, 'SERVER_GROUP', 'CPU')!.demand + nodeResource(before, 'SERVER_GROUP', 'IO')!.demand);
+    expect(nodeResource(projected, 'DATABASE', 'CPU')!.demand + nodeResource(projected, 'DATABASE', 'IO')!.demand).toBeGreaterThan(nodeResource(before, 'DATABASE', 'CPU')!.demand + nodeResource(before, 'DATABASE', 'IO')!.demand);
   });
 
   it('preserves proficiency and incident health when previewing a technology', () => {
@@ -189,7 +195,7 @@ describe('game engine orchestration', () => {
 
     const preview = game.previewLoadWithTechnology('REDIS');
 
-    expect(preview.dbCapacity).toBeCloseTo(current.dbCapacity);
+    expect(nodeResource(preview, 'DATABASE', 'CPU')!.capacity).toBeCloseTo(nodeResource(current, 'DATABASE', 'CPU')!.capacity);
     expect(preview.failureRate).toBe(current.failureRate);
   });
 

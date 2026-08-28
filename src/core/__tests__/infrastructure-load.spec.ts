@@ -9,6 +9,12 @@ import {
 } from '../infrastructure';
 import { FeatureDefinition } from '../feature';
 import { V1_NODE_IDS } from '../v1-topology';
+import { maxNodeLoad, resourceLoad } from '../node-load';
+
+function nodeResource(load: ReturnType<typeof LoadCalculator.calculate>, nodeKind: 'SERVER_GROUP' | 'DATABASE' | 'QUEUE' | 'OBJECT_STORAGE', resourceKind: 'CPU' | 'IO' | 'THROUGHPUT' | 'STORAGE') {
+  const node = maxNodeLoad(load, { nodeKind });
+  return node ? resourceLoad(node, resourceKind) : undefined;
+}
 
 describe('infrastructure and load', () => {
   it('requires ALB before application scale-out', () => {
@@ -67,12 +73,12 @@ describe('infrastructure and load', () => {
       databaseProficiencyLevel: 10,
     });
 
-    expect(expert.appCpuCapacity).toBeCloseTo(novice.appCpuCapacity * 1.25);
-    expect(expert.appIoCapacity).toBeCloseTo(novice.appIoCapacity * 1.25);
-    expect(expert.dbCpuCapacity).toBeCloseTo(novice.dbCpuCapacity * 1.25);
-    expect(expert.dbIoCapacity).toBeCloseTo(novice.dbIoCapacity * 1.25);
-    expect(expert.appCpuDemand).toBeCloseTo(novice.appCpuDemand);
-    expect(expert.dbIoDemand).toBeCloseTo(novice.dbIoDemand);
+    expect(nodeResource(expert, 'SERVER_GROUP', 'CPU')!.capacity).toBeCloseTo(nodeResource(novice, 'SERVER_GROUP', 'CPU')!.capacity * 1.25);
+    expect(nodeResource(expert, 'SERVER_GROUP', 'IO')!.capacity).toBeCloseTo(nodeResource(novice, 'SERVER_GROUP', 'IO')!.capacity * 1.25);
+    expect(nodeResource(expert, 'DATABASE', 'CPU')!.capacity).toBeCloseTo(nodeResource(novice, 'DATABASE', 'CPU')!.capacity * 1.25);
+    expect(nodeResource(expert, 'DATABASE', 'IO')!.capacity).toBeCloseTo(nodeResource(novice, 'DATABASE', 'IO')!.capacity * 1.25);
+    expect(nodeResource(expert, 'SERVER_GROUP', 'CPU')!.demand).toBeCloseTo(nodeResource(novice, 'SERVER_GROUP', 'CPU')!.demand);
+    expect(nodeResource(expert, 'DATABASE', 'IO')!.demand).toBeCloseTo(nodeResource(novice, 'DATABASE', 'IO')!.demand);
   });
 
   it('lets a feature create a different CPU bottleneck from its IO bottleneck', () => {
@@ -91,9 +97,9 @@ describe('infrastructure and load', () => {
     const springLoad = LoadCalculator.calculate(100_000, [feature], spring);
     const nestLoad = LoadCalculator.calculate(100_000, [feature], nest);
 
-    expect(springLoad.appIoDemand).toBeGreaterThan(springLoad.appCpuDemand);
-    expect(springLoad.appRatio).toBeCloseTo(Math.max(springLoad.appCpuRatio, springLoad.appIoRatio));
-    expect(nestLoad.appIoRatio).toBeLessThan(springLoad.appIoRatio);
+    expect(nodeResource(springLoad, 'SERVER_GROUP', 'IO')!.demand).toBeGreaterThan(nodeResource(springLoad, 'SERVER_GROUP', 'CPU')!.demand);
+    expect(maxNodeLoad(springLoad, { nodeKind: 'SERVER_GROUP' })!.loadRatio).toBeCloseTo(Math.max(nodeResource(springLoad, 'SERVER_GROUP', 'CPU')!.ratio, nodeResource(springLoad, 'SERVER_GROUP', 'IO')!.ratio));
+    expect(nodeResource(nestLoad, 'SERVER_GROUP', 'IO')!.ratio).toBeLessThan(nodeResource(springLoad, 'SERVER_GROUP', 'IO')!.ratio);
   });
 
   it('redis targets read-heavy DB IO much more strongly than DB CPU', () => {
@@ -114,8 +120,8 @@ describe('infrastructure and load', () => {
     const without = LoadCalculator.calculate(100_000, [feature], plain);
     const withRedis = LoadCalculator.calculate(100_000, [feature], optimized);
 
-    const cpuReduction = 1 - withRedis.dbCpuDemand / without.dbCpuDemand;
-    const ioReduction = 1 - withRedis.dbIoDemand / without.dbIoDemand;
+    const cpuReduction = 1 - nodeResource(withRedis, 'DATABASE', 'CPU')!.demand / nodeResource(without, 'DATABASE', 'CPU')!.demand;
+    const ioReduction = 1 - nodeResource(withRedis, 'DATABASE', 'IO')!.demand / nodeResource(without, 'DATABASE', 'IO')!.demand;
     expect(cpuReduction).toBeCloseTo(0.12);
     expect(ioReduction).toBeCloseTo(0.40);
     expect(ioReduction).toBeGreaterThan(cpuReduction);
@@ -123,7 +129,7 @@ describe('infrastructure and load', () => {
     const cache = withRedis.nodeLoads.find(({ nodeKind }) => nodeKind === 'CACHE');
     expect(cache?.resources).toHaveLength(1);
     expect(cache?.resources[0]).toMatchObject({ resourceKind: 'THROUGHPUT' });
-    expect(cache?.resources[0].ratio).toBeCloseTo(withRedis.dbRatio);
+    expect(cache?.resources[0].ratio).toBeCloseTo(maxNodeLoad(withRedis, { nodeKind: 'DATABASE' })!.loadRatio);
   });
 
   it('a queue removes optional async fallback pressure from APP IO', () => {
@@ -147,9 +153,9 @@ describe('infrastructure and load', () => {
     const without = LoadCalculator.calculate(100_000, [feature], plain);
     const withQueue = LoadCalculator.calculate(100_000, [feature], optimized);
 
-    expect(withQueue.appIoDemand).toBeLessThan(without.appIoDemand);
-    expect(withQueue.appCpuDemand).toBeLessThan(without.appCpuDemand);
-    expect(withQueue.asyncCapacity).toBe(300);
+    expect(nodeResource(withQueue, 'SERVER_GROUP', 'IO')!.demand).toBeLessThan(nodeResource(without, 'SERVER_GROUP', 'IO')!.demand);
+    expect(nodeResource(withQueue, 'SERVER_GROUP', 'CPU')!.demand).toBeLessThan(nodeResource(without, 'SERVER_GROUP', 'CPU')!.demand);
+    expect(nodeResource(withQueue, 'QUEUE', 'THROUGHPUT')!.capacity).toBe(300);
   });
 
   it('removes downstream DB load when an APP incident blocks request flow', () => {
@@ -165,9 +171,9 @@ describe('infrastructure and load', () => {
       nodeHealth: { [V1_NODE_IDS.app('SPRING_BOOT')]: 0 },
     });
 
-    expect(appDown.appDemand).toBeCloseTo(healthy.appDemand);
-    expect(appDown.dbCpuDemand).toBe(0);
-    expect(appDown.dbIoDemand).toBe(0);
+    expect(maxNodeLoad(appDown, { nodeKind: 'SERVER_GROUP' })!.loadRatio).toBeCloseTo(maxNodeLoad(healthy, { nodeKind: 'SERVER_GROUP' })!.loadRatio);
+    expect(nodeResource(appDown, 'DATABASE', 'CPU')!.demand).toBe(0);
+    expect(nodeResource(appDown, 'DATABASE', 'IO')!.demand).toBe(0);
     expect(appDown.failureRate).toBe(1);
   });
 
@@ -189,9 +195,9 @@ describe('infrastructure and load', () => {
     const restored = LoadCalculator.calculate(100_000, [feature], infra);
 
     expect(missing.failureRate).toBe(1);
-    expect(missing.asyncDemand).toBe(0);
+    expect(nodeResource(missing, 'SERVER_GROUP', 'IO')!.demand).toBeGreaterThan(0);
     expect(restored.failureRate).toBe(0);
-    expect(restored.asyncDemand).toBeGreaterThan(0);
+    expect(nodeResource(restored, 'QUEUE', 'THROUGHPUT')!.demand).toBeGreaterThan(0);
   });
 
   it('keeps only one active queue in V1 and retires the previous queue on replacement', () => {
@@ -227,10 +233,10 @@ describe('infrastructure and load', () => {
     const normal = LoadCalculator.calculate(100_000, [feature], infra);
     const spike = LoadCalculator.calculate(100_000, [feature], infra, { trafficMultiplier: 1.8 });
 
-    expect(spike.appCpuDemand).toBeCloseTo(normal.appCpuDemand * 1.8);
-    expect(spike.appIoDemand).toBeCloseTo(normal.appIoDemand * 1.8);
-    expect(spike.dbIoDemand).toBeCloseTo(normal.dbIoDemand * 1.8);
-    expect(spike.storageDemand).toBeCloseTo(normal.storageDemand * 1.8);
+    expect(nodeResource(spike, 'SERVER_GROUP', 'CPU')!.demand).toBeCloseTo(nodeResource(normal, 'SERVER_GROUP', 'CPU')!.demand * 1.8);
+    expect(nodeResource(spike, 'SERVER_GROUP', 'IO')!.demand).toBeCloseTo(nodeResource(normal, 'SERVER_GROUP', 'IO')!.demand * 1.8);
+    expect(nodeResource(spike, 'DATABASE', 'IO')!.demand).toBeCloseTo(nodeResource(normal, 'DATABASE', 'IO')!.demand * 1.8);
+    expect(nodeResource(spike, 'OBJECT_STORAGE', 'STORAGE')!.demand).toBeCloseTo(nodeResource(normal, 'OBJECT_STORAGE', 'STORAGE')!.demand * 1.8);
   });
 
   it('keeps maximum prepared infrastructure just within capacity around 25M DAU', () => {
@@ -249,9 +255,9 @@ describe('infrastructure and load', () => {
 
     const load = LoadCalculator.calculate(25_000_000, features, infra);
 
-    expect(load.appRatio).toBeLessThanOrEqual(0.95);
-    expect(load.dbRatio).toBeLessThanOrEqual(1.0);
-    expect(load.asyncRatio).toBeLessThanOrEqual(0.9);
-    expect(load.storageRatio).toBeLessThanOrEqual(0.9);
+    expect(maxNodeLoad(load, { nodeKind: 'SERVER_GROUP' })!.loadRatio).toBeLessThanOrEqual(0.95);
+    expect(maxNodeLoad(load, { nodeKind: 'DATABASE' })!.loadRatio).toBeLessThanOrEqual(1.0);
+    expect(maxNodeLoad(load, { nodeKind: 'QUEUE' })!.loadRatio).toBeLessThanOrEqual(0.9);
+    expect(maxNodeLoad(load, { nodeKind: 'OBJECT_STORAGE' })!.loadRatio).toBeLessThanOrEqual(0.9);
   });
 });

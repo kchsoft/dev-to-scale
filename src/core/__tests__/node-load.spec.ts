@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { FeatureDefinition } from '../feature';
 import { InfrastructureState, LoadCalculator } from '../infrastructure';
-import { maxNodeLoad } from '../node-load';
+import { maxNodeLoad, resourceLoad } from '../node-load';
+
+function resource(load: ReturnType<typeof LoadCalculator.calculate>, nodeKind: 'SERVER_GROUP' | 'DATABASE' | 'QUEUE' | 'OBJECT_STORAGE' | 'LOAD_BALANCER' | 'CACHE', kind: 'CPU' | 'IO' | 'THROUGHPUT' | 'STORAGE') {
+  const node = maxNodeLoad(load, { nodeKind });
+  return node ? resourceLoad(node, kind) : undefined;
+}
 import { V1_NODE_IDS } from '../v1-topology';
 
 const posts = new FeatureDefinition({
@@ -38,6 +43,7 @@ describe('node-specific load calculation', () => {
     const load = LoadCalculator.calculate(100_000, [posts], infrastructure, {
       nodeHealth: { [appNodeId]: 0 },
     });
+    expect(Object.keys(load).sort()).toEqual(['failureRate', 'nodeLoads', 'requestTraces']);
     expect(Object.hasOwn(load, 'requestFlows')).toBe(false);
     const app = load.nodeLoads.find(({ nodeId }) => nodeId === appNodeId)!;
     const db = load.nodeLoads.find(({ nodeId }) => nodeId === dbNodeId)!;
@@ -47,19 +53,19 @@ describe('node-specific load calculation', () => {
     const dbIo = db.resources.find(({ resourceKind }) => resourceKind === 'IO');
 
     expect(app.nodeKind).toBe('SERVER_GROUP');
-    expect(appCpu).toMatchObject({ demand: load.appCpuDemand, capacity: load.appCpuCapacity });
-    expect(appCpu?.ratio).toBeCloseTo(load.appCpuRatio);
-    expect(appIo).toMatchObject({ demand: load.appIoDemand, capacity: load.appIoCapacity });
-    expect(appIo?.ratio).toBeCloseTo(load.appIoRatio);
-    expect(app.loadRatio).toBeCloseTo(load.appRatio);
-    expect(dbCpu?.ratio).toBeCloseTo(load.dbCpuRatio);
-    expect(dbIo?.ratio).toBeCloseTo(load.dbIoRatio);
-    expect(db.loadRatio).toBeCloseTo(load.dbRatio);
+    expect(appCpu).toMatchObject({ demand: resource(load, 'SERVER_GROUP', 'CPU')!.demand, capacity: resource(load, 'SERVER_GROUP', 'CPU')!.capacity });
+    expect(appCpu?.ratio).toBeCloseTo(resource(load, 'SERVER_GROUP', 'CPU')!.ratio);
+    expect(appIo).toMatchObject({ demand: resource(load, 'SERVER_GROUP', 'IO')!.demand, capacity: resource(load, 'SERVER_GROUP', 'IO')!.capacity });
+    expect(appIo?.ratio).toBeCloseTo(resource(load, 'SERVER_GROUP', 'IO')!.ratio);
+    expect(app.loadRatio).toBeCloseTo(maxNodeLoad(load, { nodeKind: 'SERVER_GROUP' })!.loadRatio);
+    expect(dbCpu?.ratio).toBeCloseTo(resource(load, 'DATABASE', 'CPU')!.ratio);
+    expect(dbIo?.ratio).toBeCloseTo(resource(load, 'DATABASE', 'IO')!.ratio);
+    expect(db.loadRatio).toBeCloseTo(maxNodeLoad(load, { nodeKind: 'DATABASE' })!.loadRatio);
     expect(maxNodeLoad(load)?.loadRatio).toBeCloseTo(Math.max(
-      load.appRatio,
-      load.dbRatio,
-      load.asyncRatio,
-      load.storageRatio,
+      maxNodeLoad(load, { nodeKind: 'SERVER_GROUP' })!.loadRatio,
+      maxNodeLoad(load, { nodeKind: 'DATABASE' })!.loadRatio,
+      maxNodeLoad(load, { nodeKind: 'QUEUE' })?.loadRatio ?? 0,
+      maxNodeLoad(load, { nodeKind: 'OBJECT_STORAGE' })?.loadRatio ?? 0,
     ));
     expect(load.requestTraces[0].failureNodeId).toBe(appNodeId);
     expect(load.failureRate).toBe(1);
@@ -74,7 +80,7 @@ describe('node-specific load calculation', () => {
     });
 
     expect(unrelated.failureRate).toBe(0);
-    expect(unrelated.dbCpuDemand).toBeCloseTo(healthy.dbCpuDemand);
+    expect(resource(unrelated, 'DATABASE', 'CPU')!.demand).toBeCloseTo(resource(healthy, 'DATABASE', 'CPU')!.demand);
     expect(unrelated.requestTraces[0].successRatio).toBe(1);
   });
 
@@ -185,20 +191,20 @@ describe('node-specific load calculation', () => {
     const gateway = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.gateway)!;
     const cache = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.cache)!;
 
-    expectResourceParity(app, 'CPU', load.appCpuDemand, load.appCpuCapacity, load.appCpuRatio);
-    expectResourceParity(app, 'IO', load.appIoDemand, load.appIoCapacity, load.appIoRatio);
-    expectResourceParity(database, 'CPU', load.dbCpuDemand, load.dbCpuCapacity, load.dbCpuRatio);
-    expectResourceParity(database, 'IO', load.dbIoDemand, load.dbIoCapacity, load.dbIoRatio);
-    expectResourceParity(queue, 'THROUGHPUT', load.asyncDemand, load.asyncCapacity, load.asyncRatio);
-    expectResourceParity(storage, 'STORAGE', load.storageDemand, load.storageCapacity, load.storageRatio);
+    expectResourceParity(app, 'CPU', resource(load, 'SERVER_GROUP', 'CPU')!.demand, resource(load, 'SERVER_GROUP', 'CPU')!.capacity, resource(load, 'SERVER_GROUP', 'CPU')!.ratio);
+    expectResourceParity(app, 'IO', resource(load, 'SERVER_GROUP', 'IO')!.demand, resource(load, 'SERVER_GROUP', 'IO')!.capacity, resource(load, 'SERVER_GROUP', 'IO')!.ratio);
+    expectResourceParity(database, 'CPU', resource(load, 'DATABASE', 'CPU')!.demand, resource(load, 'DATABASE', 'CPU')!.capacity, resource(load, 'DATABASE', 'CPU')!.ratio);
+    expectResourceParity(database, 'IO', resource(load, 'DATABASE', 'IO')!.demand, resource(load, 'DATABASE', 'IO')!.capacity, resource(load, 'DATABASE', 'IO')!.ratio);
+    expectResourceParity(queue, 'THROUGHPUT', resource(load, 'QUEUE', 'THROUGHPUT')!.demand, resource(load, 'QUEUE', 'THROUGHPUT')!.capacity, resource(load, 'QUEUE', 'THROUGHPUT')!.ratio);
+    expectResourceParity(storage, 'STORAGE', resource(load, 'OBJECT_STORAGE', 'STORAGE')!.demand, resource(load, 'OBJECT_STORAGE', 'STORAGE')!.capacity, resource(load, 'OBJECT_STORAGE', 'STORAGE')!.ratio);
     expectResourceParity(
       gateway,
       'THROUGHPUT',
-      Math.max(load.appCpuDemand, load.appIoDemand),
-      load.rawAppCapacity,
-      Math.max(load.appCpuDemand, load.appIoDemand) / load.rawAppCapacity,
+      Math.max(resource(load, 'SERVER_GROUP', 'CPU')!.demand, resource(load, 'SERVER_GROUP', 'IO')!.demand),
+      resource(load, 'LOAD_BALANCER', 'THROUGHPUT')!.capacity,
+      resource(load, 'LOAD_BALANCER', 'THROUGHPUT')!.ratio,
     );
-    expectResourceParity(cache, 'THROUGHPUT', load.dbDemand, load.dbDemand / load.dbRatio, load.dbRatio);
+    expectResourceParity(cache, 'THROUGHPUT', resource(load, 'CACHE', 'THROUGHPUT')!.demand, resource(load, 'CACHE', 'THROUGHPUT')!.capacity, resource(load, 'CACHE', 'THROUGHPUT')!.ratio);
   });
 
   it('keeps ingress demand on a failed ALB while removing downstream APP demand', () => {

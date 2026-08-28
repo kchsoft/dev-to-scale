@@ -10,9 +10,6 @@ describe('GameServiceProjector', () => {
       ...engine.snapshot,
       load: {
         ...engine.snapshot.load,
-        appRatio: 9,
-        appCpuRatio: 9,
-        appIoRatio: 9,
         nodeLoads: [
           createNodeLoadSnapshot('decoy:app', 'SERVER_GROUP', [
             createNodeResourceLoad('CPU', 99, 100), createNodeResourceLoad('IO', 99, 100),

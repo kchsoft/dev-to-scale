@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GameEngine, ServerSize, skillRef } from '../../core';
+import { GameEngine, maxNodeLoad, ServerSize, skillRef } from '../../core';
 import { GameProgressionProjector } from '../game-progression-projector';
 
 describe('GameProgressionProjector', () => {
@@ -23,7 +23,7 @@ describe('GameProgressionProjector', () => {
 
     engine.scaleDatabase(ServerSize.XLARGE);
 
-    expect(engine.snapshot.load.dbRatio).not.toBe(captured.load.dbRatio);
+    expect(maxNodeLoad(engine.snapshot.load, { nodeKind: 'DATABASE' })!.loadRatio).not.toBe(maxNodeLoad(captured.load, { nodeKind: 'DATABASE' })!.loadRatio);
     expect(() => new GameProgressionProjector(engine).project(captured))
       .toThrow('GameProgressionProjector requires the current engine snapshot');
   });

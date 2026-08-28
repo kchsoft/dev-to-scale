@@ -17,7 +17,8 @@ const selection = {
   storageNodeId: V1_NODE_IDS.storage,
 };
 
-function snapshot(loadOverrides: Partial<LoadSnapshot>): GameSnapshot {
+type LoadOverrides = Partial<LoadSnapshot> & Record<string, number>;
+function snapshot(loadOverrides: LoadOverrides): GameSnapshot {
   const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 22 });
   const ratioFor = (nodeId: string, resourceKind: 'CPU' | 'IO' | 'THROUGHPUT' | 'STORAGE', current: number) => {
     if (nodeId === V1_NODE_IDS.app('SPRING_BOOT')) {
@@ -38,7 +39,7 @@ function snapshot(loadOverrides: Partial<LoadSnapshot>): GameSnapshot {
     ...engine.snapshot,
     load: {
       ...engine.snapshot.load,
-      ...loadOverrides,
+      failureRate: loadOverrides.failureRate ?? engine.snapshot.load.failureRate,
       nodeLoads: engine.snapshot.load.nodeLoads.map((node) => createNodeLoadSnapshot(
         node.nodeId,
         node.nodeKind,
@@ -69,10 +70,6 @@ describe('operational view projector', () => {
       ...engine.snapshot,
       load: {
         ...engine.snapshot.load,
-        appRatio: 9, dbRatio: 9, asyncRatio: 9, storageRatio: 9,
-        appCpuRatio: 9, appIoRatio: 9, dbCpuRatio: 9, dbIoRatio: 9,
-        appDemand: 999, dbDemand: 999, asyncDemand: 999, storageDemand: 999,
-        appCapacity: 1, dbCapacity: 1, asyncCapacity: 1, storageCapacity: 1,
         nodeLoads: [
           createNodeLoadSnapshot('decoy:app', 'SERVER_GROUP', [createNodeResourceLoad('CPU', 999, 100)]),
           createNodeLoadSnapshot('decoy:db', 'DATABASE', [createNodeResourceLoad('CPU', 999, 100)]),
