@@ -132,7 +132,7 @@ Core provides pure read-only queries so policies and Application projectors do n
 nodeLoad(load, nodeId): NodeLoadSnapshot | undefined;
 resourceLoad(nodeLoad, resourceKind): NodeResourceLoad | undefined;
 nodeLoadsOfKind(load, nodeKind): readonly NodeLoadSnapshot[];
-maxNodeLoad(load): NodeLoadSnapshot | undefined;
+maxNodeLoad(load, { nodeKind? } = {}): NodeLoadSnapshot | undefined;
 maxResourceLoad(load, { nodeKind?, resourceKind? }):
   { node: NodeLoadSnapshot; resource: NodeResourceLoad } | undefined;
 ```
@@ -204,7 +204,7 @@ The change is where the results are published:
 - Queue throughput maps to `ASYNC` and visible label `ASYNC QUEUE`.
 - Object-storage storage maps to `STORAGE` and visible label `STORAGE`.
 
-Load-balancer and cache pressure participate in node alerts and exact-node diagnosis, but the current V1 summary and visible load strip remain unchanged to avoid a UI or balance change. A future MSA phase can define new player-facing metrics for additional node kinds.
+Load-balancer and cache pressure participate in topology node tones and exact-node diagnosis, but Phase 8 does not add new visible alert categories for them. The current V1 summary, alert set, and visible load strip remain unchanged to avoid a UI or balance change. A future MSA phase can define new player-facing metrics and alerts for additional node kinds.
 
 P95 latency thresholds, service-health thresholds, observability masking, diagnosis text, and suggestion text remain unchanged. Diagnosis reads the selected exact node's resources. Generic ID-prefix inference is removed.
 
@@ -225,7 +225,7 @@ export interface ServiceHealthView {
 }
 ```
 
-`LoadMetricView.id` is stable and unique for the exact node/resource pair. React keys metrics by `id`, not visible label. A currently unbound optional infrastructure role, such as Queue before deployment, retains its existing visible zero metric with `nodeId: null` and a stable role/resource ID. No phantom topology node is created. The new metadata does not change rendered copy.
+`LoadMetricView.id` is stable and unique: resource-specific metrics use the exact node/resource pair, while BASIC node-summary metrics use the exact node ID plus a `load` suffix. React keys metrics by `id`, not visible label. A currently unbound optional infrastructure role, such as Queue before deployment, retains its existing visible zero metric with `nodeId: null` and a stable role/resource ID. No phantom topology node is created. The new metadata does not change rendered copy.
 
 ### 8.3 Alerts
 
