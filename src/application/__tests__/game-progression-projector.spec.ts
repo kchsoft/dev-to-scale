@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GameEngine, maxNodeLoad, ServerSize, skillRef } from '../../core';
+import { GameEngine, maxNodeLoad, ServerSize, skillRef, V1_NODE_IDS } from '../../core';
 import { GameProgressionProjector } from '../game-progression-projector';
 
 describe('GameProgressionProjector', () => {
@@ -21,7 +21,7 @@ describe('GameProgressionProjector', () => {
     for (let day = 0; day < 30 && !engine.launched; day += 1) engine.advanceDay();
     const captured = engine.snapshot;
 
-    engine.scaleDatabase(ServerSize.XLARGE);
+    engine.resizeInfrastructureNode(V1_NODE_IDS.database('POSTGRESQL'), ServerSize.XLARGE);
 
     expect(maxNodeLoad(engine.snapshot.load, { nodeKind: 'DATABASE' })!.loadRatio).not.toBe(maxNodeLoad(captured.load, { nodeKind: 'DATABASE' })!.loadRatio);
     expect(() => new GameProgressionProjector(engine).project(captured))
