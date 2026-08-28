@@ -106,7 +106,7 @@ describe('GameServiceProjector', () => {
       monthlyRevenue: 0, monthlyCost: 0, monthlyProfit: 0,
     });
 
-    expect(result.alerts.find(({ id }) => id === 'load-Database')?.nodeId).toBe(databaseNodeId);
+    expect(result.alerts.find(({ id }) => id === `load:${databaseNodeId}`)?.nodeId).toBe(databaseNodeId);
     expect(result.alerts.find(({ id }) => id === 'request-failure')).toMatchObject({
       title: expect.stringMatching(/^Request Failure \d+%$/),
       nodeId: result.topology.traces.find(({ successPercent }) => successPercent < 100)?.failureNodeId,
