@@ -18,6 +18,17 @@ export type ResourceRole =
 
 export type RouteRequirement = 'REQUIRED' | 'OPTIONAL';
 
+const COMPATIBLE_NODE_KIND: Readonly<Record<ResourceRole, InfrastructureNodeKind>> = {
+  ENTRY_GATEWAY: 'LOAD_BALANCER',
+  ENTRY_APP: 'SERVER_GROUP',
+  PRIMARY_DATABASE: 'DATABASE',
+  CACHE: 'CACHE',
+  EVENT_BUS: 'QUEUE',
+  OBJECT_STORAGE: 'OBJECT_STORAGE',
+  WORKER: 'WORKER',
+  EXTERNAL_SERVICE: 'EXTERNAL_SERVICE',
+};
+
 export interface RouteBlueprintStep {
   readonly id: string;
   readonly role: ResourceRole;
@@ -74,10 +85,18 @@ export class ServiceModule {
   readonly blueprints: readonly RouteBlueprint[];
 
   constructor(readonly id: string, blueprints: readonly RouteBlueprint[]) {
+    const workloadIds = new Set<string>();
     for (const blueprint of blueprints) {
       if (blueprint.moduleId !== id) {
         throw new Error(`Blueprint ${blueprint.workloadId} belongs to module ${blueprint.moduleId}, not ${id}`);
       }
+      if (workloadIds.has(blueprint.workloadId)) {
+        throw new TopologyValidationError(
+          'DUPLICATE_MODULE_WORKLOAD',
+          `Module ${id} defines workload more than once: ${blueprint.workloadId}`,
+        );
+      }
+      workloadIds.add(blueprint.workloadId);
     }
     this.blueprints = Object.freeze([...blueprints]);
   }
@@ -115,6 +134,112 @@ export class WorkloadAssignment {
   }
 }
 
+export interface ServiceTopologyInput {
+  readonly graph: TopologyGraph;
+  readonly modules: readonly ServiceModule[];
+  readonly deployments: readonly ModuleDeployment[];
+  readonly assignments: readonly WorkloadAssignment[];
+}
+
+export class ServiceTopology {
+  readonly graph: TopologyGraph;
+  readonly modules: readonly ServiceModule[];
+  readonly deployments: readonly ModuleDeployment[];
+  readonly assignments: readonly WorkloadAssignment[];
+
+  private readonly modulesById: ReadonlyMap<string, ServiceModule>;
+  private readonly deploymentsByModuleId: ReadonlyMap<string, ModuleDeployment>;
+  private readonly assignmentsByWorkloadId: ReadonlyMap<string, WorkloadAssignment>;
+
+  constructor(input: ServiceTopologyInput) {
+    this.graph = input.graph;
+    this.modules = Object.freeze([...input.modules]);
+    this.deployments = Object.freeze([...input.deployments]);
+    this.assignments = Object.freeze([...input.assignments]);
+
+    const modulesById = new Map<string, ServiceModule>();
+    for (const module of this.modules) {
+      if (modulesById.has(module.id)) {
+        throw new TopologyValidationError('DUPLICATE_MODULE_ID', `Module ID must be unique: ${module.id}`);
+      }
+      modulesById.set(module.id, module);
+    }
+
+    const deploymentsByModuleId = new Map<string, ModuleDeployment>();
+    for (const deployment of this.deployments) {
+      if (deploymentsByModuleId.has(deployment.moduleId)) {
+        throw new TopologyValidationError(
+          'DUPLICATE_MODULE_DEPLOYMENT',
+          `Module deployment must be unique: ${deployment.moduleId}`,
+        );
+      }
+      if (!modulesById.has(deployment.moduleId)) {
+        throw new TopologyValidationError(
+          'UNKNOWN_DEPLOYMENT_MODULE',
+          `Deployment references unknown module: ${deployment.moduleId}`,
+        );
+      }
+      for (const [role, nodeId] of deployment.bindings) {
+        const node = this.graph.node(nodeId);
+        if (!node) {
+          throw new TopologyValidationError(
+            'MISSING_BOUND_NODE',
+            `Module ${deployment.moduleId} binds ${role} to missing node ${nodeId}`,
+          );
+        }
+        if (node.kind !== COMPATIBLE_NODE_KIND[role]) {
+          throw new TopologyValidationError(
+            'INCOMPATIBLE_BINDING',
+            `Role ${role} requires ${COMPATIBLE_NODE_KIND[role]}, but ${nodeId} is ${node.kind}`,
+          );
+        }
+      }
+      deploymentsByModuleId.set(deployment.moduleId, deployment);
+    }
+
+    const assignmentsByWorkloadId = new Map<string, WorkloadAssignment>();
+    for (const assignment of this.assignments) {
+      if (assignmentsByWorkloadId.has(assignment.workloadId)) {
+        throw new TopologyValidationError(
+          'DUPLICATE_WORKLOAD_ASSIGNMENT',
+          `Workload assignment must be unique: ${assignment.workloadId}`,
+        );
+      }
+      const module = modulesById.get(assignment.entryModuleId);
+      const deployment = deploymentsByModuleId.get(assignment.entryModuleId);
+      if (!module || !deployment) {
+        throw new TopologyValidationError(
+          'MISSING_ENTRY_MODULE',
+          `Workload ${assignment.workloadId} has no deployed entry module ${assignment.entryModuleId}`,
+        );
+      }
+      if (!module.blueprints.some(({ workloadId }) => workloadId === assignment.workloadId)) {
+        throw new TopologyValidationError(
+          'MISSING_WORKLOAD_BLUEPRINT',
+          `Module ${module.id} does not define workload ${assignment.workloadId}`,
+        );
+      }
+      assignmentsByWorkloadId.set(assignment.workloadId, assignment);
+    }
+
+    this.modulesById = modulesById;
+    this.deploymentsByModuleId = deploymentsByModuleId;
+    this.assignmentsByWorkloadId = assignmentsByWorkloadId;
+  }
+
+  module(moduleId: string): ServiceModule | undefined {
+    return this.modulesById.get(moduleId);
+  }
+
+  deployment(moduleId: string): ModuleDeployment | undefined {
+    return this.deploymentsByModuleId.get(moduleId);
+  }
+
+  assignment(workloadId: string): WorkloadAssignment | undefined {
+    return this.assignmentsByWorkloadId.get(workloadId);
+  }
+}
+
 export interface ResolvedRouteStep {
   readonly stepId: string;
   readonly role: ResourceRole;
@@ -136,17 +261,6 @@ export interface ResolvedRoute {
   readonly steps: readonly ResolvedRouteStep[];
   readonly edges: readonly ResolvedRouteEdge[];
 }
-
-const COMPATIBLE_NODE_KIND: Readonly<Record<ResourceRole, InfrastructureNodeKind>> = {
-  ENTRY_GATEWAY: 'LOAD_BALANCER',
-  ENTRY_APP: 'SERVER_GROUP',
-  PRIMARY_DATABASE: 'DATABASE',
-  CACHE: 'CACHE',
-  EVENT_BUS: 'QUEUE',
-  OBJECT_STORAGE: 'OBJECT_STORAGE',
-  WORKER: 'WORKER',
-  EXTERNAL_SERVICE: 'EXTERNAL_SERVICE',
-};
 
 function validateNoSynchronousCycle(blueprint: RouteBlueprint): void {
   const adjacency = new Map<string, string[]>();
