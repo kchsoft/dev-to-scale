@@ -11,7 +11,9 @@ import {
   maxNodeLoad,
   maxResourceLoad,
   ServerSize,
-  SingleServiceTopology,
+  ServiceTopology,
+  V1_MODULE_ID,
+  V1ServiceTopologyFactory,
 } from '../core';
 import {
   AlertView,
@@ -58,20 +60,27 @@ export interface GameServiceProjection {
   readonly service: ServiceOperationsView;
 }
 
+function requiredV1Deployment(topology: ServiceTopology) {
+  const deployment = topology.deployment(V1_MODULE_ID);
+  if (!deployment) throw new Error(`Missing required module deployment: ${V1_MODULE_ID}`);
+  return deployment;
+}
+
 function requiredTopologyBinding(
-  topology: SingleServiceTopology,
+  topology: ServiceTopology,
   role: 'ENTRY_APP' | 'PRIMARY_DATABASE' | 'OBJECT_STORAGE',
 ): string {
-  const nodeId = topology.deployment.bindingFor(role);
+  const nodeId = requiredV1Deployment(topology).bindingFor(role);
   if (!nodeId) throw new Error(`Missing required topology binding: ${role}`);
   return nodeId;
 }
 
-function operationalNodeSelection(topology: SingleServiceTopology): OperationalNodeSelection {
+function operationalNodeSelection(topology: ServiceTopology): OperationalNodeSelection {
+  const deployment = requiredV1Deployment(topology);
   return {
     appNodeId: requiredTopologyBinding(topology, 'ENTRY_APP'),
     databaseNodeId: requiredTopologyBinding(topology, 'PRIMARY_DATABASE'),
-    queueNodeId: topology.deployment.bindingFor('EVENT_BUS') ?? null,
+    queueNodeId: deployment.bindingFor('EVENT_BUS') ?? null,
     storageNodeId: requiredTopologyBinding(topology, 'OBJECT_STORAGE'),
   };
 }
@@ -103,7 +112,7 @@ export class GameServiceProjector {
     return this.featureImpactFor(snapshot, featureId);
   }
 
-  private serviceTopology(snapshot: GameSnapshot): SingleServiceTopology {
+  private serviceTopology(snapshot: GameSnapshot): ServiceTopology {
     const activeFeatureDefinitions = snapshot.launched
       ? [
           COMMUNITY_BOOTSTRAP,
@@ -113,10 +122,10 @@ export class GameServiceProjector {
           }),
         ]
       : [];
-    return SingleServiceTopology.from(this.#engine.infrastructure, activeFeatureDefinitions);
+    return V1ServiceTopologyFactory.create(this.#engine.infrastructure, activeFeatureDefinitions);
   }
 
-  private topology(snapshot: GameSnapshot, topology: SingleServiceTopology): TopologyView {
+  private topology(snapshot: GameSnapshot, topology: ServiceTopology): TopologyView {
     return TopologyViewProjector.project({
       graph: topology.graph,
       nodeLoads: snapshot.load.nodeLoads,

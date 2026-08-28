@@ -7,8 +7,6 @@ import {
   ResourceRole,
   RouteBlueprint,
   RouteBlueprintEdge,
-  RouteResolver,
-  ResolvedRoute,
   ServiceModule,
   ServiceTopology,
   WorkloadAssignment,
@@ -220,82 +218,6 @@ export class V1ServiceTopologyFactory {
       modules: [module],
       deployments: [deployment],
       assignments,
-    });
-  }
-}
-
-export class SingleServiceTopology {
-  private constructor(
-    readonly graph: TopologyGraph,
-    readonly module: ServiceModule,
-    readonly deployment: ModuleDeployment,
-    readonly assignments: readonly WorkloadAssignment[],
-  ) {}
-
-  static from(
-    infrastructure: InfrastructureState,
-    features: readonly FeatureDefinition[],
-  ): SingleServiceTopology {
-    const blueprints = features.map((feature) => V1RouteBlueprintAdapter.fromFeature(feature));
-    const module = new ServiceModule('community', blueprints);
-    const deployment = new ModuleDeployment('community', deploymentBindings(infrastructure));
-    const graph = new TopologyGraph(
-      infrastructureNodes(infrastructure),
-      topologyEdges(blueprints, deployment, infrastructure),
-    );
-    const assignments = Object.freeze(features.map((feature) => (
-      new WorkloadAssignment(feature.id, module.id)
-    )));
-    return new SingleServiceTopology(graph, module, deployment, assignments);
-  }
-
-  resolve(workloadId: string) {
-    const assignment = this.assignments.find((candidate) => candidate.workloadId === workloadId);
-    const blueprint = this.module.blueprints.find((candidate) => candidate.workloadId === workloadId);
-    if (!assignment || !blueprint) {
-      throw new Error(`Unknown V1 workload: ${workloadId}`);
-    }
-    assignment.validate([this.deployment]);
-    return RouteResolver.resolve(blueprint, this.deployment, this.graph);
-  }
-
-  resolveForTrace(workloadId: string): ResolvedRoute {
-    const blueprint = this.module.blueprints.find((candidate) => candidate.workloadId === workloadId);
-    if (!blueprint) throw new Error(`Unknown V1 workload: ${workloadId}`);
-
-    const internalRoute = RouteResolver.resolveForTrace(blueprint, this.deployment, this.graph);
-    const gatewayNodeId = this.deployment.bindingFor('ENTRY_GATEWAY');
-    if (!gatewayNodeId || internalRoute.steps[0]?.role === 'ENTRY_GATEWAY') return internalRoute;
-
-    const firstNodeId = internalRoute.steps.find((step) => step.nodeId !== null)?.nodeId;
-    if (!firstNodeId) return internalRoute;
-    const ingressEdge = this.graph.edge(gatewayNodeId, firstNodeId, 'SYNC');
-    if (!ingressEdge) {
-      throw new Error(`V1 gateway is disconnected from module entry: ${gatewayNodeId} -> ${firstNodeId}`);
-    }
-
-    return Object.freeze({
-      workloadId: internalRoute.workloadId,
-      moduleId: internalRoute.moduleId,
-      steps: Object.freeze([
-        Object.freeze({
-          stepId: `${workloadId}:ingress:gateway`,
-          role: 'ENTRY_GATEWAY' as const,
-          requirement: 'REQUIRED' as const,
-          nodeId: gatewayNodeId,
-        }),
-        ...internalRoute.steps,
-      ]),
-      edges: Object.freeze([
-        Object.freeze({
-          blueprintEdgeId: `${workloadId}:ingress`,
-          topologyEdgeId: ingressEdge.id,
-          fromNodeId: gatewayNodeId,
-          toNodeId: firstNodeId,
-          mode: ingressEdge.mode,
-        }),
-        ...internalRoute.edges,
-      ]),
     });
   }
 }

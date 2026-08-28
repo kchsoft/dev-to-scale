@@ -3,7 +3,6 @@ import { COMMUNITY_FEATURES } from '../community';
 import { InfrastructureState } from '../infrastructure';
 import { RequestTraceSimulator } from '../request-trace';
 import {
-  SingleServiceTopology,
   V1_MODULE_ID,
   V1_NODE_IDS,
   V1RouteBlueprintAdapter,
@@ -29,10 +28,12 @@ describe('V1RouteBlueprintAdapter', () => {
   });
 });
 
-describe('SingleServiceTopology', () => {
+describe('V1ServiceTopologyFactory', () => {
   it('projects initial infrastructure into independent nodes and bindings', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
-    const topology = SingleServiceTopology.from(infrastructure, [COMMUNITY_FEATURES.COMMENT]);
+    const topology = V1ServiceTopologyFactory.create(infrastructure, [COMMUNITY_FEATURES.COMMENT]);
+    const module = topology.module(V1_MODULE_ID)!;
+    const deployment = topology.deployment(V1_MODULE_ID)!;
 
     expect(topology.graph.nodes.map(({ id }) => id)).toEqual([
       V1_NODE_IDS.app('SPRING_BOOT'),
@@ -40,9 +41,10 @@ describe('SingleServiceTopology', () => {
       V1_NODE_IDS.storage,
       V1_NODE_IDS.externalAi,
     ]);
-    expect(topology.deployment.bindingFor('ENTRY_APP')).toBe(V1_NODE_IDS.app('SPRING_BOOT'));
-    expect(topology.deployment.bindingFor('PRIMARY_DATABASE')).toBe(V1_NODE_IDS.database('POSTGRESQL'));
-    expect(topology.deployment.bindingFor('OBJECT_STORAGE')).toBe(V1_NODE_IDS.storage);
+    expect(module.blueprints).toHaveLength(1);
+    expect(deployment.bindingFor('ENTRY_APP')).toBe(V1_NODE_IDS.app('SPRING_BOOT'));
+    expect(deployment.bindingFor('PRIMARY_DATABASE')).toBe(V1_NODE_IDS.database('POSTGRESQL'));
+    expect(deployment.bindingFor('OBJECT_STORAGE')).toBe(V1_NODE_IDS.storage);
     expect(topology.graph.node(V1_NODE_IDS.storage)).toEqual(expect.objectContaining({
       productId: 'LOCAL_STORAGE',
       capacity: { storage: 100 },
@@ -57,12 +59,15 @@ describe('SingleServiceTopology', () => {
     infrastructure.deployTechnology('SQS');
     infrastructure.deployTechnology('OBJECT_STORAGE');
 
-    const topology = SingleServiceTopology.from(infrastructure, [
+    const topology = V1ServiceTopologyFactory.create(infrastructure, [
       COMMUNITY_FEATURES.COMMENT,
       COMMUNITY_FEATURES.IMAGE_UPLOAD,
       COMMUNITY_FEATURES.NOTIFICATION,
     ]);
+    const module = topology.module(V1_MODULE_ID)!;
+    const deployment = topology.deployment(V1_MODULE_ID)!;
 
+    expect(module.blueprints).toHaveLength(3);
     expect(topology.graph.node(V1_NODE_IDS.gateway)).toEqual(expect.objectContaining({ monthlyCost: 100_000 }));
     expect(topology.graph.node(V1_NODE_IDS.cache)).toEqual(expect.objectContaining({ monthlyCost: 100_000 }));
     expect(topology.graph.node(V1_NODE_IDS.queue('SQS'))).toEqual(expect.objectContaining({
@@ -77,9 +82,9 @@ describe('SingleServiceTopology', () => {
     expect(topology.graph.nodes.reduce((sum, node) => sum + node.monthlyCost, 0)).toBe(
       infrastructure.monthlyCost,
     );
-    expect(topology.deployment.bindingFor('ENTRY_GATEWAY')).toBe(V1_NODE_IDS.gateway);
-    expect(topology.deployment.bindingFor('CACHE')).toBe(V1_NODE_IDS.cache);
-    expect(topology.deployment.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('SQS'));
+    expect(deployment.bindingFor('ENTRY_GATEWAY')).toBe(V1_NODE_IDS.gateway);
+    expect(deployment.bindingFor('CACHE')).toBe(V1_NODE_IDS.cache);
+    expect(deployment.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('SQS'));
     expect(topology.graph.hasEdge(V1_NODE_IDS.gateway, V1_NODE_IDS.app('SPRING_BOOT'))).toBe(true);
   });
 
@@ -87,10 +92,14 @@ describe('SingleServiceTopology', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     infrastructure.deployTechnology('SQS');
     const feature = COMMUNITY_FEATURES.AI_RECOMMENDATION;
-    const topology = SingleServiceTopology.from(infrastructure, [feature]);
+    const topology = V1ServiceTopologyFactory.create(infrastructure, [feature]);
+    const module = topology.module(V1_MODULE_ID)!;
+    const deployment = topology.deployment(V1_MODULE_ID)!;
 
     const route = topology.resolve(feature.id);
 
+    expect(module.blueprints).toHaveLength(1);
+    expect(deployment.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('SQS'));
     expect(route.steps.map(({ nodeId }) => nodeId)).toEqual([
       V1_NODE_IDS.app('SPRING_BOOT'),
       V1_NODE_IDS.database('POSTGRESQL'),
@@ -108,11 +117,15 @@ describe('SingleServiceTopology', () => {
 
     const retired = infrastructure.deployTechnology('KAFKA');
     const after = V1ServiceTopologyFactory.create(infrastructure, [feature]);
+    const beforeModule = before.module(V1_MODULE_ID)!;
+    const beforeDeployment = before.deployment(V1_MODULE_ID)!;
+    const afterModule = after.module(V1_MODULE_ID)!;
+    const afterDeployment = after.deployment(V1_MODULE_ID)!;
 
     expect(retired).toEqual(['SQS']);
-    expect(before.module(V1_MODULE_ID)?.blueprints).toEqual(after.module(V1_MODULE_ID)?.blueprints);
-    expect(before.deployment(V1_MODULE_ID)?.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('SQS'));
-    expect(after.deployment(V1_MODULE_ID)?.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('KAFKA'));
+    expect(beforeModule.blueprints).toEqual(afterModule.blueprints);
+    expect(beforeDeployment.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('SQS'));
+    expect(afterDeployment.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('KAFKA'));
     expect(after.graph.node(V1_NODE_IDS.queue('SQS'))).toBeUndefined();
     expect(after.graph.node(V1_NODE_IDS.queue('KAFKA'))).toEqual(expect.objectContaining({
       productId: 'KAFKA',
@@ -127,10 +140,12 @@ describe('SingleServiceTopology', () => {
     const before = V1ServiceTopologyFactory.create(infrastructure, [feature]);
     infrastructure.deployTechnology('ALB');
     const after = V1ServiceTopologyFactory.create(infrastructure, [feature]);
+    const beforeModule = before.module(V1_MODULE_ID)!;
+    const afterModule = after.module(V1_MODULE_ID)!;
 
     const trace = RequestTraceSimulator.simulate(after.resolveForTrace(feature.id));
 
-    expect(before.module(V1_MODULE_ID)?.blueprints).toEqual(after.module(V1_MODULE_ID)?.blueprints);
+    expect(beforeModule.blueprints).toEqual(afterModule.blueprints);
     expect(trace.nodes.map(({ nodeId }) => nodeId)).toEqual([
       V1_NODE_IDS.gateway,
       V1_NODE_IDS.app('SPRING_BOOT'),
@@ -142,10 +157,14 @@ describe('SingleServiceTopology', () => {
   it('preserves a missing required queue as a failed runtime trace step', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     const feature = COMMUNITY_FEATURES.NOTIFICATION;
-    const topology = SingleServiceTopology.from(infrastructure, [feature]);
+    const topology = V1ServiceTopologyFactory.create(infrastructure, [feature]);
+    const module = topology.module(V1_MODULE_ID)!;
+    const deployment = topology.deployment(V1_MODULE_ID)!;
 
     const trace = RequestTraceSimulator.simulate(topology.resolveForTrace(feature.id));
 
+    expect(module.blueprints).toHaveLength(1);
+    expect(deployment.bindingFor('EVENT_BUS')).toBeUndefined();
     expect(trace.nodes.at(-1)).toEqual(expect.objectContaining({
       role: 'EVENT_BUS',
       nodeId: null,
@@ -166,8 +185,10 @@ describe('V1ServiceTopologyFactory', () => {
     expect(topology.assignments).toEqual([
       expect.objectContaining({ workloadId: 'COMMENT', entryModuleId: 'community' }),
     ]);
-    expect(topology.module(V1_MODULE_ID)?.blueprints).toHaveLength(1);
-    expect(topology.deployment(V1_MODULE_ID)?.bindingFor('ENTRY_APP')).toBe(
+    const module = topology.module(V1_MODULE_ID)!;
+    const deployment = topology.deployment(V1_MODULE_ID)!;
+    expect(module.blueprints).toHaveLength(1);
+    expect(deployment.bindingFor('ENTRY_APP')).toBe(
       V1_NODE_IDS.app('SPRING_BOOT'),
     );
     expect(topology.resolve('COMMENT').steps.map(({ nodeId }) => nodeId)).toEqual([
