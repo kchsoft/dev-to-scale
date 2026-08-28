@@ -180,6 +180,8 @@ export interface ObservabilityView {
 }
 
 export interface LoadMetricView {
+  readonly id: string;
+  readonly nodeId: string | null;
   readonly label: string;
   readonly percent: number;
   readonly tone: LoadTone;
@@ -191,6 +193,7 @@ export interface ServiceHealthView {
   readonly bottleneck: BottleneckView;
   readonly bottleneckLabel: string;
   readonly bottleneckPercent: number;
+  readonly bottleneckNodeId: string | null;
 }
 
 export interface ServiceOperationsView {

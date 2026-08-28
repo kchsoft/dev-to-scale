@@ -1,14 +1,12 @@
-import { DeveloperProfile, GameSnapshot, LoadSnapshot, V1_NODE_IDS } from '../core';
+import {
+  DeveloperProfile,
+  GameSnapshot,
+  nodeLoad,
+  nodeLoadsOfKind,
+  resourceLoad,
+} from '../core';
+import type { InfrastructureNodeKind, NodeLoadSnapshot, NodeResourceKind } from '../core';
 import { BottleneckView, LoadMetricView, ObservabilityView, ServiceHealthView, ServiceOperationsView } from './game-view';
-
-const BOTTLENECKS: Array<[BottleneckView, keyof LoadSnapshot]> = [
-  ['APP_CPU', 'appCpuRatio'],
-  ['APP_IO', 'appIoRatio'],
-  ['DB_CPU', 'dbCpuRatio'],
-  ['DB_IO', 'dbIoRatio'],
-  ['ASYNC', 'asyncRatio'],
-  ['STORAGE', 'storageRatio'],
-];
 
 const BOTTLENECK_LABELS: Record<BottleneckView, string> = {
   APP_CPU: 'APP CPU', APP_IO: 'APP I/O', DB_CPU: 'DB CPU', DB_IO: 'DB I/O',
@@ -19,9 +17,49 @@ function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
 }
 
-function metric(label: string, ratio: number): LoadMetricView {
+function metric(id: string, nodeId: string | null, label: string, ratio: number): LoadMetricView {
   const tone = ratio > 1 ? 'overload' : ratio >= 0.9 ? 'critical' : ratio >= 0.7 ? 'busy' : 'stable';
-  return { label, percent: percent(ratio), tone };
+  return { id, nodeId, label, percent: percent(ratio), tone };
+}
+
+function requiredNodeLoad(load: GameSnapshot['load'], nodeKind: InfrastructureNodeKind): NodeLoadSnapshot {
+  const node = nodeLoadsOfKind(load, nodeKind)[0];
+  if (!node) throw new Error(`Missing load for required topology node kind: ${nodeKind}`);
+  return node;
+}
+
+function requiredResource(node: NodeLoadSnapshot, resourceKind: NodeResourceKind) {
+  const resource = resourceLoad(node, resourceKind);
+  if (!resource) throw new Error(`Missing ${resourceKind} resource load for topology node: ${node.nodeId}`);
+  return resource;
+}
+
+interface BottleneckCandidate {
+  readonly bottleneck: BottleneckView;
+  readonly nodeId: string;
+  readonly ratio: number;
+}
+
+function bottleneckCandidates(load: GameSnapshot['load']): readonly BottleneckCandidate[] {
+  const candidates: BottleneckCandidate[] = [];
+  for (const node of load.nodeLoads) {
+    if (node.nodeKind === 'SERVER_GROUP') {
+      candidates.push(
+        { bottleneck: 'APP_CPU', nodeId: node.nodeId, ratio: requiredResource(node, 'CPU').ratio },
+        { bottleneck: 'APP_IO', nodeId: node.nodeId, ratio: requiredResource(node, 'IO').ratio },
+      );
+    } else if (node.nodeKind === 'DATABASE') {
+      candidates.push(
+        { bottleneck: 'DB_CPU', nodeId: node.nodeId, ratio: requiredResource(node, 'CPU').ratio },
+        { bottleneck: 'DB_IO', nodeId: node.nodeId, ratio: requiredResource(node, 'IO').ratio },
+      );
+    } else if (node.nodeKind === 'QUEUE') {
+      candidates.push({ bottleneck: 'ASYNC', nodeId: node.nodeId, ratio: requiredResource(node, 'THROUGHPUT').ratio });
+    } else if (node.nodeKind === 'OBJECT_STORAGE') {
+      candidates.push({ bottleneck: 'STORAGE', nodeId: node.nodeId, ratio: requiredResource(node, 'STORAGE').ratio });
+    }
+  }
+  return candidates;
 }
 
 function latencyFromPressure(maxRatio: number, failureRate: number): number {
@@ -36,14 +74,18 @@ function latencyFromPressure(maxRatio: number, failureRate: number): number {
   return Math.round(Math.max(100, Math.min(4_500, latency)));
 }
 
-function projectHealth(load: LoadSnapshot): ServiceHealthView {
+function projectHealth(load: GameSnapshot['load']): ServiceHealthView {
+  requiredNodeLoad(load, 'SERVER_GROUP');
+  requiredNodeLoad(load, 'DATABASE');
+  requiredNodeLoad(load, 'OBJECT_STORAGE');
   let bottleneck: BottleneckView = 'NONE';
   let bottleneckRatio = 0;
-  for (const [kind, field] of BOTTLENECKS) {
-    const value = load[field];
-    if (typeof value === 'number' && value > bottleneckRatio) {
-      bottleneck = kind;
-      bottleneckRatio = value;
+  let bottleneckNodeId: string | null = null;
+  for (const candidate of bottleneckCandidates(load)) {
+    if (candidate.ratio > bottleneckRatio) {
+      bottleneck = candidate.bottleneck;
+      bottleneckRatio = candidate.ratio;
+      bottleneckNodeId = candidate.nodeId;
     }
   }
 
@@ -59,6 +101,7 @@ function projectHealth(load: LoadSnapshot): ServiceHealthView {
     bottleneck,
     bottleneckLabel: BOTTLENECK_LABELS[bottleneck],
     bottleneckPercent: percent(bottleneckRatio),
+    bottleneckNodeId,
   };
 }
 
@@ -94,46 +137,52 @@ interface Diagnosis {
   suggestions: readonly string[];
 }
 
-function strongest(candidates: Array<{ label: string; ratio: number }>): { label: string; ratio: number } {
-  return [...candidates].sort((left, right) => right.ratio - left.ratio)[0];
+function strongest(candidates: readonly { label: string; ratio: number }[]): { label: string; ratio: number } {
+  let strongest = candidates[0];
+  for (const candidate of candidates.slice(1)) {
+    if (candidate.ratio > strongest.ratio) strongest = candidate;
+  }
+  return strongest;
 }
 
 function diagnose(nodeId: string, snapshot: GameSnapshot): Diagnosis {
+  const node = nodeLoad(snapshot.load, nodeId);
+  if (!node) throw new Error(`Missing load for topology node: ${nodeId}`);
   const load = snapshot.load;
   const trafficMultiplier = Math.max(1, snapshot.growthEvent?.trafficMultiplier ?? 1);
   let primary = {
     label: 'SERVICE LOAD',
-    ratio: Math.max(load.appRatio, load.dbRatio, load.asyncRatio, load.storageRatio),
+    ratio: node.loadRatio,
   };
   let suggestions: string[] = ['현재 병목을 확인한 뒤 Capacity 또는 구조 변경'];
 
-  if (nodeId.startsWith('v1:app:')) {
+  if (node.nodeKind === 'SERVER_GROUP') {
     primary = strongest([
-      { label: 'APP CPU', ratio: load.appCpuRatio },
-      { label: 'APP I/O', ratio: load.appIoRatio },
+      { label: 'APP CPU', ratio: requiredResource(node, 'CPU').ratio },
+      { label: 'APP I/O', ratio: requiredResource(node, 'IO').ratio },
     ]);
     suggestions = primary.label === 'APP CPU'
       ? ['APP Scale-up', 'ALB + Scale-out', '개발자 숙련도 향상']
       : ['ALB + Scale-out', 'Queue로 비동기 I/O 분리', '요청량 급증 여부 확인'];
-  } else if (nodeId.startsWith('v1:database:')) {
+  } else if (node.nodeKind === 'DATABASE') {
     primary = strongest([
-      { label: 'DB CPU', ratio: load.dbCpuRatio },
-      { label: 'DB I/O', ratio: load.dbIoRatio },
+      { label: 'DB CPU', ratio: requiredResource(node, 'CPU').ratio },
+      { label: 'DB I/O', ratio: requiredResource(node, 'IO').ratio },
     ]);
     suggestions = primary.label === 'DB I/O'
       ? ['Redis로 Read I/O 절감', 'Read Replica 추가', 'DB Size-up']
       : ['DB Size-up', 'Replica로 Query 분산', 'DB 숙련도 향상'];
-  } else if (nodeId === V1_NODE_IDS.cache) {
-    primary = { label: 'DB I/O', ratio: load.dbIoRatio };
+  } else if (node.nodeKind === 'CACHE') {
+    primary = { label: 'DB I/O', ratio: requiredResource(node, 'THROUGHPUT').ratio };
     suggestions = ['Cache 의존도를 확인', 'DB Capacity 확보', '장애 복구 우선'];
-  } else if (nodeId.startsWith('v1:queue:')) {
-    primary = { label: 'ASYNC', ratio: load.asyncRatio };
+  } else if (node.nodeKind === 'QUEUE') {
+    primary = { label: 'ASYNC', ratio: requiredResource(node, 'THROUGHPUT').ratio };
     suggestions = ['Queue Capacity 상향', '상위 Queue 기술 검토', 'Event-heavy 기능 부하 확인'];
-  } else if (nodeId === V1_NODE_IDS.storage) {
-    primary = { label: 'STORAGE', ratio: load.storageRatio };
+  } else if (node.nodeKind === 'OBJECT_STORAGE') {
+    primary = { label: 'STORAGE', ratio: requiredResource(node, 'STORAGE').ratio };
     suggestions = ['Storage Capacity 확인', '이미지/파일 기능 부하 확인', '장애 복구 우선'];
-  } else if (nodeId === V1_NODE_IDS.gateway) {
-    primary = { label: 'APP', ratio: load.appRatio };
+  } else if (node.nodeKind === 'LOAD_BALANCER') {
+    primary = { label: 'APP', ratio: requiredResource(node, 'THROUGHPUT').ratio };
     suggestions = ['APP 서버 상태 확인', 'Scale-out 구성 확인', '트래픽 급증 여부 확인'];
   }
 
@@ -150,7 +199,7 @@ function diagnose(nodeId: string, snapshot: GameSnapshot): Diagnosis {
 
   if (trafficMultiplier > 1 && primary.ratio >= 0.85) {
     likelyCause = `Traffic Spike가 ${primary.label} 병목을 드러낸 가능성이 높습니다.`;
-  } else if (snapshot.techDebt.value >= 60 && nodeId.startsWith('v1:app:')) {
+  } else if (snapshot.techDebt.value >= 60 && node.nodeKind === 'SERVER_GROUP') {
     likelyCause = `높은 Tech Debt와 ${primary.label} 압력이 함께 장애 위험을 높였습니다.`;
   } else if (load.failureRate >= 0.1) {
     likelyCause = `요청 실패율이 높습니다. ${primary.label}와 Request Flow를 함께 확인해야 합니다.`;
@@ -163,27 +212,35 @@ export class OperationalViewProjector {
   static project(snapshot: GameSnapshot, developer: DeveloperProfile): ServiceOperationsView {
     const observability = projectObservability(developer);
     const health = projectHealth(snapshot.load);
+    const app = requiredNodeLoad(snapshot.load, 'SERVER_GROUP');
+    const database = requiredNodeLoad(snapshot.load, 'DATABASE');
+    const queue = nodeLoadsOfKind(snapshot.load, 'QUEUE')[0];
+    const storage = requiredNodeLoad(snapshot.load, 'OBJECT_STORAGE');
     const visibleLoads = observability.level === 'BASIC'
       ? [
-          metric('APP', snapshot.load.appRatio),
-          metric('DB', snapshot.load.dbRatio),
-          metric('ASYNC', snapshot.load.asyncRatio),
-          metric('STORAGE', snapshot.load.storageRatio),
+          metric(`${app.nodeId}:load`, app.nodeId, 'APP', app.loadRatio),
+          metric(`${database.nodeId}:load`, database.nodeId, 'DB', database.loadRatio),
+          queue
+            ? metric(`${queue.nodeId}:load`, queue.nodeId, 'ASYNC', requiredResource(queue, 'THROUGHPUT').ratio)
+            : metric('optional:QUEUE:THROUGHPUT', null, 'ASYNC', 0),
+          metric(`${storage.nodeId}:load`, storage.nodeId, 'STORAGE', storage.loadRatio),
         ]
       : [
-          metric('APP CPU', snapshot.load.appCpuRatio),
-          metric('APP I/O', snapshot.load.appIoRatio),
-          metric('DB CPU', snapshot.load.dbCpuRatio),
-          metric('DB I/O', snapshot.load.dbIoRatio),
-          metric('ASYNC', snapshot.load.asyncRatio),
-          metric('STORAGE', snapshot.load.storageRatio),
+          metric(`${app.nodeId}:CPU`, app.nodeId, 'APP CPU', requiredResource(app, 'CPU').ratio),
+          metric(`${app.nodeId}:IO`, app.nodeId, 'APP I/O', requiredResource(app, 'IO').ratio),
+          metric(`${database.nodeId}:CPU`, database.nodeId, 'DB CPU', requiredResource(database, 'CPU').ratio),
+          metric(`${database.nodeId}:IO`, database.nodeId, 'DB I/O', requiredResource(database, 'IO').ratio),
+          queue
+            ? metric(`${queue.nodeId}:THROUGHPUT`, queue.nodeId, 'ASYNC', requiredResource(queue, 'THROUGHPUT').ratio)
+            : metric('optional:QUEUE:THROUGHPUT', null, 'ASYNC', 0),
+          metric(`${storage.nodeId}:STORAGE`, storage.nodeId, 'STORAGE', requiredResource(storage, 'STORAGE').ratio),
         ];
     return {
       observability,
       health,
       summary: {
         headline: observability.level === 'BASIC'
-          ? `LOAD ${percent(Math.max(snapshot.load.appRatio, snapshot.load.dbRatio))}%`
+          ? `LOAD ${percent(Math.max(app.loadRatio, database.loadRatio))}%`
           : `P95 ${health.p95LatencyMs.toLocaleString()}ms`,
         detail: observability.level === 'APM'
           ? `TOP BOTTLENECK · ${health.bottleneckLabel} ${health.bottleneckPercent}% · 요청 경로와 출시 영향까지 추적 가능합니다.`
