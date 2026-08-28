@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FeatureDefinition } from '../feature';
-import { InfrastructureState, LoadCalculator } from '../infrastructure';
+import { InfrastructureState, LoadCalculator, LoadSnapshot } from '../infrastructure';
 import { maxNodeLoad, resourceLoad } from '../node-load';
 
 function resource(load: ReturnType<typeof LoadCalculator.calculate>, nodeKind: 'SERVER_GROUP' | 'DATABASE' | 'QUEUE' | 'OBJECT_STORAGE' | 'LOAD_BALANCER' | 'CACHE', kind: 'CPU' | 'IO' | 'THROUGHPUT' | 'STORAGE') {
@@ -43,6 +43,12 @@ describe('node-specific load calculation', () => {
     const load = LoadCalculator.calculate(100_000, [posts], infrastructure, {
       nodeHealth: { [appNodeId]: 0 },
     });
+    expect(Object.isFrozen(load)).toBe(true);
+    const readonlyLoad: LoadSnapshot = load;
+    if (false) {
+      // @ts-expect-error LoadSnapshot fields are immutable public contract.
+      readonlyLoad.failureRate = 1;
+    }
     expect(Object.keys(load).sort()).toEqual(['failureRate', 'nodeLoads', 'requestTraces']);
     expect(Object.hasOwn(load, 'requestFlows')).toBe(false);
     const app = load.nodeLoads.find(({ nodeId }) => nodeId === appNodeId)!;
