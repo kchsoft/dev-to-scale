@@ -2,17 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { GameClock, type GameSpeed } from '../application/game-clock';
-import { GameController, type GameEventView, type GameView } from '../application/game-controller';
-import type { DatabaseOptionId, FrameworkOptionId, TrafficResponseChoice } from '../application/game-view';
+import { GameController, type DevelopmentActionView, type GameEventView, type GameView } from '../application/game-controller';
+import type { DatabaseOptionId, FrameworkOptionId, SkillRefView, TechnologyIdView, TrafficResponseChoice } from '../application/game-view';
+import { DevelopmentWorkbench } from './DevelopmentWorkbench';
+import { dispatchDevelopmentAction } from './development-action-dispatcher';
 import { EventOverlay } from './EventOverlay';
-import { FeatureBoard } from './FeatureBoard';
 import { GameSetup } from './GameSetup';
 import { Hud } from './Hud';
-import { LearningPanel } from './LearningPanel';
 import { NodeInspector } from './NodeInspector';
 import { ReportPanel } from './ReportPanel';
-import { ServiceDashboard, type GameTab } from './ServiceDashboard';
-import { TechnologyPanel } from './TechnologyPanel';
+import { ServiceDashboard } from './ServiceDashboard';
+import { GAME_NAV_ITEMS, type GameTab } from './game-navigation';
 import { money } from './game-format';
 
 export default function GameApp() {
@@ -78,6 +78,7 @@ export default function GameApp() {
       action();
       if (success) setToast(success);
     } catch (error) {
+      setView(controller?.getView() ?? null);
       setToast(error instanceof Error ? error.message : '처리할 수 없습니다.');
     }
   };
@@ -103,19 +104,50 @@ export default function GameApp() {
       setToast(`${label} 선택${cost > 0 ? ` · 즉시 ${money(cost)}` : ''}`);
       closeActiveEvent();
     } catch (error) {
+      setView(controller.getView());
       setToast(error instanceof Error ? error.message : 'Traffic 대응을 적용할 수 없습니다.');
     }
+  };
+
+  const handleDevelopmentAction = (action: DevelopmentActionView) => {
+    dispatchDevelopmentAction(action, {
+      startTechnologyBuild: (technologyId: TechnologyIdView) => {
+        const technology = view.technologies.find((item) => item.id === technologyId);
+        run(
+          () => controller.startTechnologyBuild(technologyId),
+          technology ? `${technology.name} 구축 시작 · 즉시 ${money(technology.buildCost)} · 월 ${money(technology.monthlyCost)}` : '기술 구축 시작',
+        );
+      },
+      startLearning: (skillRef: SkillRefView) => {
+        const skill = view.skills.find((item) => item.ref.category === skillRef.category && item.ref.id === skillRef.id);
+        run(
+          () => controller.startLearning(skillRef),
+          skill ? `${skill.name} 학습 시작 · ${money(skill.cost ?? 0)}` : '학습 시작',
+        );
+      },
+      fastTrackFeature: (featureId: string) => {
+        run(() => {
+          const latest = controller.getView();
+          if (latest.operations.currentFeature?.id !== featureId) {
+            throw new Error('기능 상태가 변경되었습니다. 최신 상태를 다시 확인해주세요.');
+          }
+          controller.fastTrackCurrentFeature();
+        }, 'FAST TRACK · 기능 진행 +30% · Tech Debt 증가');
+      },
+      startRefactor: () => run(
+        () => controller.startRefactor(),
+        'REFACTORING 시작 · 5일간 기능 개발 중단',
+      ),
+    });
   };
 
   return <main className="game-screen">
     <Hud view={view} speed={speed} dayProgress={dayProgress} onSpeed={(next) => clockRef.current?.setSpeed(next)} onStep={() => clockRef.current?.advanceOneDay()} />
     <div className="main-shell">
-      <nav className="side-nav"><div className="nav-brand">D<span>2</span>S</div>{([['service', '⌂', '서비스'], ['features', '☆', '기능'], ['technology', '⌕', '기술'], ['learning', '◇', '학습'], ['report', '▥', '리포트']] as const).map(([id, icon, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><span>{icon}</span><small>{label}</small></button>)}<button className="restart-button" onClick={restart}><span>↺</span><small>재시작</small></button></nav>
+      <nav className="side-nav"><div className="nav-brand">D<span>2</span>S</div>{GAME_NAV_ITEMS.map(([id, icon, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><span>{icon}</span><small>{label}</small></button>)}<button className="restart-button" onClick={restart}><span>↺</span><small>재시작</small></button></nav>
       <section className="workspace">
         {tab === 'service' && <ServiceDashboard view={view} observability={observability} onNode={setSelectedNode} onTab={setTab} />}
-        {tab === 'features' && <FeatureBoard view={view} observability={observability} onFastTrack={() => run(() => controller.fastTrackCurrentFeature(), 'FAST TRACK · 기능 진행 +30% · Tech Debt 증가')} onRefactor={() => run(() => controller.startRefactor(), 'REFACTORING 시작 · 5일간 기능 개발 중단')} />}
-        {tab === 'technology' && <TechnologyPanel view={view} onBuild={(tech) => run(() => controller.startTechnologyBuild(tech.id), `${tech.name} 구축 시작 · 즉시 ${money(tech.buildCost)} · 월 ${money(tech.monthlyCost)}`)} />}
-        {tab === 'learning' && <LearningPanel view={view} onStudy={(skill) => run(() => controller.startLearning(skill.ref), `${skill.name} 학습 시작 · ${money(skill.cost ?? 0)}`)} />}
+        {tab === 'development' && <DevelopmentWorkbench view={view.development} onAction={handleDevelopmentAction} />}
         {tab === 'report' && <ReportPanel view={view} observability={observability} />}
       </section>
     </div>

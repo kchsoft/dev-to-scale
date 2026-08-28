@@ -4,6 +4,7 @@ import "./globals.css";
 import "./request-flow.css";
 import "./topology-map.css";
 import "./dense-ui.css";
+import "./development-workbench.css";
 import "./mobile.css";
 
 export const metadata: Metadata = {
