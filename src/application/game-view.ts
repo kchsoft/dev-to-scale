@@ -145,6 +145,7 @@ export interface RequestTraceView {
   readonly name: string;
   readonly nodes: readonly {
     readonly nodeId: string | null;
+    readonly requirement: 'required' | 'optional';
     readonly arrivalPercent: number;
     readonly status: 'healthy' | 'slow' | 'failed' | 'missing';
   }[];

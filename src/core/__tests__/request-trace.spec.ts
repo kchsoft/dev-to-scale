@@ -98,6 +98,38 @@ describe('RequestTraceSimulator', () => {
     expect(trace.edges).toContainEqual({ edgeId: 'app-db', trafficRatio: 1 });
   });
 
+  it('records real arrival ratio and blocks pass-through for a missing required step downstream of a degraded node', () => {
+    const route = queueRoute('queue-a');
+    const missing: ResolvedRoute = {
+      ...route,
+      steps: [route.steps[0], { ...route.steps[1], nodeId: null }],
+      edges: [],
+    };
+
+    const trace = RequestTraceSimulator.simulate(missing, { 'app-a': 0.6 });
+
+    expect(trace.nodes.at(-1)).toEqual(expect.objectContaining({
+      status: 'MISSING',
+      arrivalRatio: 0.6,
+      passThroughRatio: 0,
+    }));
+  });
+
+  it('carries the blueprint requirement onto every trace node, including missing ones', () => {
+    const trace = RequestTraceSimulator.simulate({
+      workloadId: 'premium',
+      moduleId: 'community',
+      steps: [
+        { stepId: 'app', role: 'ENTRY_APP', requirement: 'REQUIRED', nodeId: 'app' },
+        { stepId: 'queue', role: 'EVENT_BUS', requirement: 'OPTIONAL', nodeId: null },
+      ],
+      edges: [],
+    });
+
+    expect(trace.nodes[0]).toMatchObject({ requirement: 'REQUIRED' });
+    expect(trace.nodes[1]).toMatchObject({ requirement: 'OPTIONAL' });
+  });
+
   it('maps incident severity to canonical node health', () => {
     expect(trafficHealthForSeverity('MINOR')).toBe(0.8);
     expect(trafficHealthForSeverity('MAJOR')).toBe(0.4);

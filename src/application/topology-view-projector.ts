@@ -109,6 +109,7 @@ export class TopologyViewProjector {
       name: presentationCatalog.label(trace.workloadId),
       nodes: Object.freeze(trace.nodes.map((node) => Object.freeze({
         nodeId: node.nodeId,
+        requirement: node.requirement.toLowerCase() as RequestTraceView['nodes'][number]['requirement'],
         arrivalPercent: percent(node.arrivalRatio),
         status: node.status.toLowerCase() as RequestTraceView['nodes'][number]['status'],
       }))),

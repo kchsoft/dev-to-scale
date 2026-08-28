@@ -166,7 +166,7 @@ export function TopologyMap({ topology, observability, dau, launched, onNode }: 
           );
         })}
 
-        {selectedTrace?.nodes.some((node) => node.status === 'missing') && (
+        {selectedTrace?.nodes.some((node) => node.status === 'missing' && node.requirement === 'required') && (
           <div className="topology-missing-stop"><b>×</b><span>REQUIRED NODE MISSING</span></div>
         )}
       </div>

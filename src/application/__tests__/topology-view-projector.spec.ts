@@ -34,8 +34,8 @@ describe('TopologyViewProjector', () => {
       {
         workloadId: 'COMMENT',
         nodes: [
-          { stepId: 'comment-app', role: 'ENTRY_APP', nodeId: 'app', arrivalRatio: 1, passThroughRatio: 1, status: 'HEALTHY' },
-          { stepId: 'comment-db', role: 'PRIMARY_DATABASE', nodeId: 'db', arrivalRatio: 1, passThroughRatio: 1, status: 'HEALTHY' },
+          { stepId: 'comment-app', role: 'ENTRY_APP', nodeId: 'app', requirement: 'REQUIRED', arrivalRatio: 1, passThroughRatio: 1, status: 'HEALTHY' },
+          { stepId: 'comment-db', role: 'PRIMARY_DATABASE', nodeId: 'db', requirement: 'REQUIRED', arrivalRatio: 1, passThroughRatio: 1, status: 'HEALTHY' },
         ],
         edges: [{ edgeId: 'edge-app-db', trafficRatio: 1 }],
         successRatio: 1,
@@ -65,8 +65,8 @@ describe('TopologyViewProjector', () => {
         id: 'COMMENT',
         name: '댓글',
         nodes: [
-          { nodeId: 'app', arrivalPercent: 100, status: 'healthy' },
-          { nodeId: 'db', arrivalPercent: 100, status: 'healthy' },
+          { nodeId: 'app', requirement: 'required', arrivalPercent: 100, status: 'healthy' },
+          { nodeId: 'db', requirement: 'required', arrivalPercent: 100, status: 'healthy' },
         ],
         edges: [{ edgeId: 'edge-app-db', trafficPercent: 100 }],
         successPercent: 100,
@@ -82,9 +82,9 @@ describe('TopologyViewProjector', () => {
       {
         workloadId: 'AI_RECOMMENDATION',
         nodes: [
-          { stepId: 'ai-app', role: 'ENTRY_APP', nodeId: 'app', arrivalRatio: 1, passThroughRatio: 1, status: 'HEALTHY' },
-          { stepId: 'ai-db', role: 'PRIMARY_DATABASE', nodeId: 'db', arrivalRatio: 1, passThroughRatio: 0, status: 'FAILED' },
-          { stepId: 'ai-external', role: 'EXTERNAL_SERVICE', nodeId: 'external-ai', arrivalRatio: 0, passThroughRatio: 0, status: 'HEALTHY' },
+          { stepId: 'ai-app', role: 'ENTRY_APP', nodeId: 'app', requirement: 'REQUIRED', arrivalRatio: 1, passThroughRatio: 1, status: 'HEALTHY' },
+          { stepId: 'ai-db', role: 'PRIMARY_DATABASE', nodeId: 'db', requirement: 'REQUIRED', arrivalRatio: 1, passThroughRatio: 0, status: 'FAILED' },
+          { stepId: 'ai-external', role: 'EXTERNAL_SERVICE', nodeId: 'external-ai', requirement: 'OPTIONAL', arrivalRatio: 0, passThroughRatio: 0, status: 'HEALTHY' },
         ],
         edges: [
           { edgeId: 'edge-app-db', trafficRatio: 1 },

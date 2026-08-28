@@ -1,4 +1,4 @@
-import type { ResourceRole, ResolvedRoute } from './service-topology';
+import type { ResourceRole, ResolvedRoute, RouteRequirement } from './service-topology';
 import type { IncidentSeverity } from './incident';
 import type { InfrastructureNodeId } from './topology';
 
@@ -8,6 +8,7 @@ export interface RequestTraceNode {
   readonly stepId: string;
   readonly role: ResourceRole;
   readonly nodeId: InfrastructureNodeId | null;
+  readonly requirement: RouteRequirement;
   readonly arrivalRatio: number;
   readonly passThroughRatio: number;
   readonly status: RequestTraceNodeStatus;
@@ -50,18 +51,20 @@ export class RequestTraceSimulator {
 
     for (const step of route.steps) {
       if (step.nodeId === null) {
+        const arrivalRatio = currentRatio;
+        if (step.requirement === 'REQUIRED') {
+          currentRatio = 0;
+        }
         nodes.push(Object.freeze({
           stepId: step.stepId,
           role: step.role,
           nodeId: null,
-          arrivalRatio: 0,
+          requirement: step.requirement,
+          arrivalRatio,
           passThroughRatio: currentRatio,
           status: 'MISSING' as const,
         }));
-        if (step.requirement === 'REQUIRED') {
-          currentRatio = 0;
-          break;
-        }
+        if (step.requirement === 'REQUIRED') break;
         continue;
       }
 
@@ -89,6 +92,7 @@ export class RequestTraceSimulator {
         stepId: step.stepId,
         role: step.role,
         nodeId: step.nodeId,
+        requirement: step.requirement,
         arrivalRatio,
         passThroughRatio: currentRatio,
         status,

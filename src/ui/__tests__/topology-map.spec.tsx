@@ -25,8 +25,8 @@ const topology: TopologyView = {
     {
       id: 'COMMENT', name: '댓글',
       nodes: [
-        { nodeId: 'app', arrivalPercent: 100, status: 'healthy' },
-        { nodeId: 'db', arrivalPercent: 100, status: 'healthy' },
+        { nodeId: 'app', requirement: 'required', arrivalPercent: 100, status: 'healthy' },
+        { nodeId: 'db', requirement: 'required', arrivalPercent: 100, status: 'healthy' },
       ],
       edges: [{ edgeId: 'edge-app-db', trafficPercent: 100 }],
       successPercent: 100, failureNodeId: null, particleCount: 1, trafficUnit: 10_000,
@@ -34,8 +34,8 @@ const topology: TopologyView = {
     {
       id: 'NOTIFICATION', name: '알림',
       nodes: [
-        { nodeId: 'app', arrivalPercent: 100, status: 'healthy' },
-        { nodeId: 'queue', arrivalPercent: 100, status: 'slow' },
+        { nodeId: 'app', requirement: 'required', arrivalPercent: 100, status: 'healthy' },
+        { nodeId: 'queue', requirement: 'required', arrivalPercent: 100, status: 'slow' },
       ],
       edges: [{ edgeId: 'edge-app-queue', trafficPercent: 100 }],
       successPercent: 60, failureNodeId: 'queue', particleCount: 2, trafficUnit: 10_000,
@@ -63,6 +63,55 @@ describe('TopologyMap', () => {
     expect(html).toContain('data-failure-node="queue"');
     expect(html.match(/class="topology-particle"/g)).toHaveLength(2);
     expect(html).not.toContain('data-particle-edge="edge-app-db"');
+  });
+
+  it('does not show the required-node-missing banner for a missing optional step', () => {
+    const html = renderToStaticMarkup(
+      <TopologyMap
+        topology={{
+          ...topology,
+          traces: [{
+            id: 'PREMIUM', name: '프리미엄',
+            nodes: [
+              { nodeId: 'app', requirement: 'required', arrivalPercent: 100, status: 'healthy' },
+              { nodeId: null, requirement: 'optional', arrivalPercent: 100, status: 'missing' },
+            ],
+            edges: [],
+            successPercent: 100, failureNodeId: null, particleCount: 1, trafficUnit: 10_000,
+          }],
+        }}
+        observability={observability}
+        dau={50_000}
+        launched
+        onNode={() => undefined}
+      />,
+    );
+
+    expect(html).not.toContain('REQUIRED NODE MISSING');
+  });
+
+  it('shows the required-node-missing banner for a missing required step', () => {
+    const html = renderToStaticMarkup(
+      <TopologyMap
+        topology={{
+          ...topology,
+          traces: [{
+            id: 'PREMIUM', name: '프리미엄',
+            nodes: [
+              { nodeId: null, requirement: 'required', arrivalPercent: 0, status: 'missing' },
+            ],
+            edges: [],
+            successPercent: 0, failureNodeId: null, particleCount: 1, trafficUnit: 10_000,
+          }],
+        }}
+        observability={observability}
+        dau={50_000}
+        launched
+        onNode={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('REQUIRED NODE MISSING');
   });
 
   it('keeps the infrastructure visible without request particles before launch', () => {
