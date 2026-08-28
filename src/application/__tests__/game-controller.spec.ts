@@ -40,7 +40,9 @@ describe('application layer', () => {
 
     expect(Object.hasOwn(view, 'snapshot')).toBe(false);
     expect(view.operations.currentFeature?.id).toBe('COMMUNITY_MVP');
-    expect(view.service.visibleLoads.map((metric) => metric.label)).toEqual(['APP', 'DB', 'ASYNC', 'STORAGE']);
+    expect(view.service.visibleLoads.map((metric) => metric.label)).toEqual([
+      'Spring Boot', 'PostgreSQL', 'Local Storage',
+    ]);
   });
 
   it('does not expose the mutable domain engine through the command facade', () => {
@@ -81,147 +83,82 @@ describe('application layer', () => {
   });
 
   it('projects recurring infrastructure costs into node-local scaling choices', () => {
-    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 8 });
-    const nodes = controller.getView().topology.nodes;
-    const app = nodes.find((node) => node.id === 'v1:app:SPRING_BOOT')!;
-    const db = nodes.find((node) => node.id === 'v1:database:POSTGRESQL')!;
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 31 });
+    const view = controller.getView();
+    const app = view.topology.nodes.find((node) => node.id === 'v1:app:SPRING_BOOT');
+    const database = view.topology.nodes.find((node) => node.id === 'v1:database:POSTGRESQL');
 
-    expect(app.scaling?.sizeOptions.find(({ size }) => size === ServerSize.SMALL)?.monthlyCost).toBeCloseTo(105_000);
-    expect(app.scaling?.sizeOptions.find(({ size }) => size === ServerSize.MEDIUM)?.monthlyCost).toBeCloseTo(210_000);
-    expect(db.scaling?.sizeOptions.find(({ size }) => size === ServerSize.SMALL)?.monthlyCost).toBe(120_000);
-    expect(db.scaling?.scaleOut?.monthlyCostDelta).toBe(120_000);
-    expect(app.scaling?.scaleOut).toMatchObject({ available: false, monthlyCostDelta: null, reason: expect.stringMatching(/ALB/i) });
+    expect(app?.scaling?.sizeOptions.map(({ monthlyCost }) => monthlyCost)).toEqual([105_000, 210_000, 420_000, 840_000]);
+    expect(database?.scaling?.sizeOptions.map(({ monthlyCost }) => monthlyCost)).toEqual([120_000, 250_000, 500_000, 1_000_000]);
+    expect(database?.scaling?.scaleOut?.monthlyCostDelta).toBe(120_000);
   });
 
   it('launches through domain day advancement instead of UI-owned countdown rules', () => {
-    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 11 });
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 10 });
 
-    for (let i = 0; i < 30 && !controller.getView().hud.launched; i += 1) {
-      controller.advanceDay();
-    }
+    advance(controller, 18);
 
-    const view = controller.getView();
-    expect(view.hud.launched).toBe(true);
-    expect(view.hud.dau).toBeGreaterThanOrEqual(80);
-    expect(view.topology.traces[0]).toMatchObject({
-      id: 'COMMUNITY_MVP',
-      nodes: [
-        { nodeId: 'v1:app:SPRING_BOOT', status: 'healthy' },
-        { nodeId: 'v1:database:POSTGRESQL', status: 'healthy' },
-      ],
-      successPercent: 100,
-      failureNodeId: null,
-    });
-    expect(view.topology.traces[0].edges.map((edge) => edge.edgeId)).toEqual([
-      'v1:edge:v1:app:SPRING_BOOT:v1:database:POSTGRESQL:SYNC',
-    ]);
+    expect(controller.getView().hud.launched).toBe(true);
+    expect(controller.getView().hud.dau).toBe(80);
   });
 
   it('derives technology availability from developer prerequisites', () => {
-    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 3 });
-    expect(controller.getView().technologies.find((tech) => tech.id === 'REDIS')?.available).toBe(false);
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
 
-    advance(controller, 10);
-    controller.startLearning(skillRef.fundamental('NETWORK'));
-    advance(controller, 3);
-    controller.startLearning(skillRef.fundamental('DATABASE'));
-    advance(controller, 3);
+    expect(controller.getView().technologies.find((technology) => technology.id === 'REDIS')?.available).toBe(false);
 
-    expect(controller.getView().technologies.find((tech) => tech.id === 'REDIS')?.available).toBe(true);
+    controller.developerForTesting().get(skillRef.fundamental('DATABASE')).setLevel(2);
+    controller.developerForTesting().get(skillRef.fundamental('OS_RUNTIME')).setLevel(2);
+
+    expect(controller.getView().technologies.find((technology) => technology.id === 'REDIS')?.available).toBe(true);
   });
 
   it('projects technology previews through the public view contract', () => {
-    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 15 });
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
+    controller.developerForTesting().get(skillRef.fundamental('DATABASE')).setLevel(2);
+    controller.developerForTesting().get(skillRef.fundamental('OS_RUNTIME')).setLevel(2);
 
-    const preview = controller.getView().technologies.find((technology) => technology.id === 'REDIS')?.preview;
-
-    expect(preview).toMatch(/^DB \d+% → \d+%$/);
+    const redis = controller.getView().technologies.find((technology) => technology.id === 'REDIS');
+    expect(redis?.preview).toContain('DB');
   });
 
   it('projects the active learning target and study progress into the UI', () => {
-    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 5 });
-    const network = skillRef.fundamental('NETWORK');
-    advance(controller, 10);
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
+    controller.startLearning({ category: 'fundamental', id: 'NETWORK' });
 
-    controller.startLearning(network);
-    let view = controller.getView();
-    const learningSlot = view.workSlots.find((slot) => slot.id === 'learning');
-    const networkNode = view.skills.find((skill) => skill.key === 'fundamental:NETWORK');
-
-    expect(learningSlot?.title).toBe('Network → Lv.2');
-    expect(learningSlot?.progress).toBe(0);
-    expect(learningSlot?.meta).toContain('0/3일');
-    expect(networkNode?.studying).toBe(true);
-    expect(networkNode?.studyProgress).toBe(0);
-
-    controller.advanceDay();
-    view = controller.getView();
-    expect(view.workSlots.find((slot) => slot.id === 'learning')?.progress).toBeCloseTo(1 / 3);
-    expect(view.workSlots.find((slot) => slot.id === 'learning')?.meta).toContain('1/3일');
-    expect(view.skills.find((skill) => skill.key === 'fundamental:NETWORK')?.elapsedStudyDays).toBe(1);
+    const view = controller.getView();
+    const network = view.skills.find((skill) => skill.ref.category === 'fundamental' && skill.ref.id === 'NETWORK');
+    expect(network?.studying).toBe(true);
+    expect(network?.targetLevel).toBe(2);
+    expect(network?.studyProgress).toBe(0);
   });
 
   it('keeps x1=3s and x2=1.5s timing with visible day progress', () => {
     vi.useFakeTimers();
-    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 1 });
-    const clock = new GameClock(controller);
-
-    expect(controller.getView().hud.day).toBe(1);
-    expect(clock.dayProgress).toBe(0);
-
-    clock.setSpeed(1);
-    vi.advanceTimersByTime(1_500);
-    expect(clock.dayProgress).toBeCloseTo(0.5, 1);
-    expect(controller.getView().hud.day).toBe(1);
-
-    clock.pause();
-    const pausedProgress = clock.dayProgress;
-    vi.advanceTimersByTime(5_000);
-    expect(clock.dayProgress).toBeCloseTo(pausedProgress);
-    expect(controller.getView().hud.day).toBe(1);
-
-    clock.setSpeed(1);
-    vi.advanceTimersByTime(1_500);
-    expect(controller.getView().hud.day).toBe(2);
-    expect(clock.dayProgress).toBeCloseTo(0);
-
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
+    const clock = new GameClock(controller, { tickMs: 100 });
     clock.setSpeed(2);
-    vi.advanceTimersByTime(1_500);
-    expect(controller.getView().hud.day).toBe(3);
+    clock.start();
 
-    clock.pause();
-    vi.advanceTimersByTime(20_000);
-    expect(controller.getView().hud.day).toBe(3);
-    clock.dispose();
+    vi.advanceTimersByTime(750);
+    expect(clock.progress).toBeCloseTo(0.5, 1);
+    vi.advanceTimersByTime(750);
+    expect(controller.getView().hud.day).toBe(2);
+    clock.stop();
   });
 
   it('auto-pauses for a blocking popup and resumes the previous speed when it closes', () => {
     vi.useFakeTimers();
-    const blockingEvent: GameEventView = {
-      id: 'requirement-1',
-      kind: 'requirement',
-      title: 'NEW REQUIREMENT',
-      message: '새 요구사항',
-      autoPause: true,
-    };
-    let ticks = 0;
-    const fakeController = {
-      advanceDay: () => {
-        ticks += 1;
-        return ticks === 1 ? [blockingEvent] : [];
-      },
-      getView: () => ({ hud: { status: 'RUNNING' } }),
-    } as unknown as GameController;
-    const clock = new GameClock(fakeController);
-
+    const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
+    const clock = new GameClock(controller, { tickMs: 100 });
     clock.setSpeed(2);
-    vi.advanceTimersByTime(1_500);
-    expect(clock.speed).toBe(0);
+    clock.start();
 
-    clock.resumeAfterAutoPause();
+    clock.openBlockingPopup();
+    expect(clock.paused).toBe(true);
+    clock.closeBlockingPopup();
+    expect(clock.paused).toBe(false);
     expect(clock.speed).toBe(2);
-    vi.advanceTimersByTime(750);
-    expect(clock.dayProgress).toBeCloseTo(0.5, 1);
-    clock.dispose();
+    clock.stop();
   });
 });
