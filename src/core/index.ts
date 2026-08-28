@@ -27,6 +27,7 @@ export type {
   NodeResourceKind,
   NodeResourceLoad,
 } from './node-load';
+export * from './operational-pressure';
 export * from './progression';
 export * from './random';
 export * from './request-route';
