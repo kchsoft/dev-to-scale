@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed implementation design for `feature/generic-operational-bottleneck-engine`, based on the approved in-chat architecture discussion.
+Ready for user review on `feature/generic-operational-bottleneck-engine`, based on the approved in-chat architecture discussion and completed spec self-review.
 
 ## Goal
 
@@ -19,6 +19,7 @@ This is not an ALB/Redis special case. ALB and Redis exposed the gap because the
 5. Preserve observability progression: BASIC shows aggregate node load, METRICS shows resource detail, APM adds causal context and recommendations.
 6. Overload affects P95, Service Health, and Growth in this change. It does not create additional request `failureRate` directly.
 7. Remove hard-coded operational candidate lists wherever this change touches them so new node types do not disappear from another operational surface later.
+8. Core pressure analysis may be topology-scoped by node ID; Application must scope service-facing health/metrics to the supplied service topology so unrelated or decoy loads cannot become visible service bottlenecks.
 
 ## Current problem
 
@@ -87,28 +88,50 @@ interface OperationalPressure {
   readonly capacity: number;
   readonly ratio: number;
 }
+
+interface OperationalPressureScope {
+  readonly nodeIds?: ReadonlySet<InfrastructureNodeId>;
+}
 ```
 
 Add behavior equivalent to:
 
 ```ts
 class OperationalPressureAnalyzer {
-  static all(load: NodeLoadCollection): readonly OperationalPressure[];
-  static primary(load: NodeLoadCollection): OperationalPressure | null;
-  static forNode(load: NodeLoadCollection, nodeId: InfrastructureNodeId): readonly OperationalPressure[];
-  static primaryForNode(load: NodeLoadCollection, nodeId: InfrastructureNodeId): OperationalPressure | null;
+  static all(
+    load: NodeLoadCollection,
+    scope?: OperationalPressureScope,
+  ): readonly OperationalPressure[];
+
+  static primary(
+    load: NodeLoadCollection,
+    scope?: OperationalPressureScope,
+  ): OperationalPressure | null;
+
+  static forNode(
+    load: NodeLoadCollection,
+    nodeId: InfrastructureNodeId,
+  ): readonly OperationalPressure[];
+
+  static primaryForNode(
+    load: NodeLoadCollection,
+    nodeId: InfrastructureNodeId,
+  ): OperationalPressure | null;
 }
 ```
 
-Exact function/class naming may be adjusted if a smaller functional API fits the existing Core style better, but these responsibilities must remain available.
+Exact class/function naming may be adjusted if a smaller functional API fits the existing Core style better, but the contracts and responsibilities above must remain available.
 
 ### Candidate rules
 
-- Every resource from every `NodeLoadSnapshot` is a candidate.
+- Every resource from every eligible `NodeLoadSnapshot` is a candidate.
 - `EXTERNAL_SERVICE` nodes are excluded from operational capacity pressure because they are not player-operated infrastructure.
+- When `scope.nodeIds` is supplied, only those exact node IDs may contribute pressure.
 - No candidate is excluded because its ratio is below 1; the primary pressure is still useful below overload thresholds for P95 and diagnosis.
 - Nodes with no resource entries contribute no pressure.
 - The analyzer must not parse node IDs or know product IDs.
+- `forNode(load, unknownNodeId)` returns an empty array.
+- `primaryForNode(load, unknownNodeId)` returns `null`.
 
 ### Ordering and ties
 
@@ -153,7 +176,7 @@ capacity penalty = -min(30 percentage points, overload)
 
 Keep that policy and its balance constants unchanged in this refactor.
 
-Change only how `GameEngine.advanceGrowth()` obtains the pressure value:
+`GameEngine` owns the current load generated from its real service topology, so it can use the unscoped Core primary pressure:
 
 ```ts
 const bottleneck = OperationalPressureAnalyzer.primary(this._load);
@@ -243,25 +266,40 @@ Conceptually:
 OperationalViewProjector.project(snapshot, developer, topology)
 ```
 
+The projector should derive a topology scope:
+
+```ts
+const ownedNodeIds = new Set(
+  topology.graph.nodes
+    .filter((node) => node.kind !== 'EXTERNAL_SERVICE')
+    .map((node) => node.id),
+);
+
+const pressureScope = { nodeIds: ownedNodeIds };
+```
+
+It then uses that exact scope for service-facing primary pressure and metrics.
+
 The projector should:
 
-1. Obtain Core pressure data from `snapshot.load`.
+1. Obtain Core pressure data from `snapshot.load` scoped to actual player-owned topology node IDs.
 2. Use the topology graph to resolve player-owned node metadata/product labels.
 3. Exclude external services from operational metrics.
 4. Avoid requiring a role-specific APP/DB/Queue/Storage selection object.
+5. Ignore load snapshots that do not belong to the supplied topology, even if they have a valid player-owned node kind.
 
-This also makes same-kind decoy protection explicit: only nodes that are actually present in the supplied service topology are projected as service operational metrics. Core pressure analysis stays structural; Application topology membership determines what belongs to the current service view.
+This preserves the existing same-kind decoy safety while making the selection generic. Core pressure analysis stays structural; Application topology membership determines what belongs to the current service view.
 
-## 6. Service Health and P95 use the same primary pressure
+## 6. Service Health and P95 use the same topology-scoped primary pressure
 
 Keep the current latency curve and health thresholds unless tests reveal a regression requiring an intentional balance change.
 
-Replace the fixed bottleneck candidate array with the generic primary operational pressure.
+Replace the fixed bottleneck candidate array with the generic primary operational pressure **scoped to the supplied service topology**.
 
 Conceptually:
 
 ```ts
-const bottleneck = OperationalPressureAnalyzer.primary(load);
+const bottleneck = OperationalPressureAnalyzer.primary(load, pressureScope);
 const maxRatio = bottleneck?.ratio ?? 0;
 const p95LatencyMs = latencyFromPressure(maxRatio, load.failureRate);
 ```
@@ -274,6 +312,7 @@ This means any player-owned resource can now drive the same health behavior:
 - Redis throughput can degrade/critical the service.
 - Queue/storage continue to work.
 - APP/DB CPU/I/O behavior is preserved.
+- a decoy/out-of-topology load cannot become the visible service bottleneck.
 
 ### Failure-rate boundary
 
@@ -310,7 +349,7 @@ Storage  31%
 
 Do not expose CPU/I/O/resource signatures at BASIC.
 
-The BASIC summary headline should use the global primary pressure ratio rather than `max(APP, DB)`.
+The BASIC summary headline should use the topology-scoped global primary pressure ratio rather than `max(APP, DB)`.
 
 ### METRICS
 
@@ -350,6 +389,8 @@ OperationalPressureAnalyzer.primaryForNode(load, nodeId)
 ```
 
 rather than branching first on node kind to decide which resource is primary.
+
+The selected `nodeId` must also exist in the supplied service topology before Application projects diagnosis. An unknown/out-of-topology selection fails with the existing missing-node style error rather than borrowing another node of the same kind.
 
 Examples:
 
@@ -410,7 +451,7 @@ Feature impact preview must not continue using a hard-coded APP/DB/ASYNC/STORAGE
 For a previewed feature:
 
 1. Calculate current and projected `LoadSnapshot` as today.
-2. Convert both snapshots to operational pressure collections.
+2. Convert both snapshots to topology-scoped operational pressure collections.
 3. Match pressures by stable key `(nodeId, resourceKind)`.
 4. Compute before/after ratio and delta for each player-owned resource.
 5. Show the two largest pressure increases.
@@ -434,12 +475,14 @@ Owns:
 
 - raw node/resource loads
 - generic operational pressure extraction
+- optional exact-node-ID scoping
 - global primary pressure
 - selected-node primary pressure
 - Growth's use of the global primary ratio
 
 Core does not own:
 
+- service topology membership decisions beyond an optional supplied ID scope
 - Korean/English display labels
 - recommendation text
 - observability unlock copy
@@ -449,6 +492,7 @@ Core does not own:
 
 Owns:
 
+- deriving the current service's player-owned topology node-ID scope
 - topology membership/product metadata
 - pressure labels
 - Service Health/P95 projection
@@ -475,12 +519,13 @@ Preserve:
 - observability unlock skill requirements
 - traffic spike logic
 - feature progression, revenue, settlement, tech debt, and technology build behavior
+- exact topology-node selection safety in Application projections
 
 Intentional changes:
 
 - ALB and Redis can become the global bottleneck.
 - Any future player-owned resource can become the global bottleneck automatically.
-- Growth capacity penalty sees every player-owned resource.
+- Growth capacity penalty sees every player-owned resource generated by the actual engine topology.
 - BASIC metrics list all current player-owned nodes rather than only APP/DB/Queue/Storage.
 - METRICS lists all resource axes rather than a fixed six-item array.
 - Load alerts and feature impact preview include all player-owned resources.
@@ -499,10 +544,12 @@ Verify:
 - ALB/Redis/Queue throughput become candidates.
 - Storage becomes a candidate.
 - external service resources are excluded.
+- optional node-ID scope excludes otherwise valid owned-node decoys.
 - hottest resource is selected regardless of node kind.
 - exact ties use stable node/resource order.
 - node-local primary pressure selects only within the requested node.
-- unknown node local query returns null/empty according to the chosen API contract rather than matching another same-kind node.
+- `forNode` on an unknown node returns `[]`.
+- `primaryForNode` on an unknown node returns `null`.
 
 ### Growth integration
 
@@ -521,7 +568,8 @@ Verify:
 - ALB throughput can be `health.bottleneck`.
 - Redis throughput can be `health.bottleneck`.
 - APP/DB resource bottlenecks continue to work.
-- P95 rises from the generic primary ratio.
+- an out-of-topology same-kind decoy cannot become `health.bottleneck`.
+- P95 rises from the topology-scoped generic primary ratio.
 - failureRate still independently affects health/P95.
 
 ### Observability
@@ -530,7 +578,8 @@ Verify:
 
 - BASIC exposes aggregate metrics for every player-owned topology node and hides resource detail.
 - external service is omitted from operational capacity metrics.
-- BASIC headline uses the true global pressure.
+- out-of-topology load snapshots are omitted.
+- BASIC headline uses the true topology-scoped global pressure.
 - METRICS exposes every current player-owned resource.
 - APM keeps the same resource visibility but adds contextual diagnosis.
 
@@ -542,6 +591,7 @@ Verify:
 - selected DB chooses CPU or I/O by hottest ratio.
 - Redis signal is Redis throughput, not DB I/O.
 - ALB signal is ALB throughput, not APP.
+- unknown/out-of-topology selection does not borrow a same-kind node.
 - generic fallback exists for an otherwise unknown owned node/resource combination.
 
 ### Alerts
@@ -552,13 +602,14 @@ Verify:
 - overloaded Redis creates a load alert.
 - one load alert is emitted per overloaded node using its hottest resource.
 - APP/DB/Queue/Storage alerts remain available.
+- out-of-topology decoys cannot create service alerts.
 
 ### Feature impact
 
 Verify:
 
 - generic before/after resource matching includes ALB and Redis when their pressure changes.
-- top projected bottleneck is selected generically.
+- top projected bottleneck is selected generically within the service topology.
 - request failure preview remains intact.
 
 ### Regression gate
@@ -579,12 +630,13 @@ The feature is complete when all of the following are true:
 2. No global bottleneck enum needs one member per product/resource combination.
 3. ALB and Redis participate in the same bottleneck selection as APP/DB/Queue/Storage.
 4. Future owned node resources can participate without adding another hard-coded candidate list.
-5. Growth uses the same generic global pressure result.
-6. Service Health and P95 use the same generic global pressure result.
+5. Growth uses the same generic global pressure model.
+6. Service Health and P95 use the same generic pressure model scoped to the supplied service topology.
 7. BASIC observability uses node aggregate loads for every owned topology node.
 8. METRICS uses actual resource lists for every owned topology node.
 9. Selected-node diagnosis uses the hottest resource inside that node.
 10. Load alerts and feature release impact previews no longer omit ALB/Redis or future owned resources because of fixed axis lists.
-11. Resource overload does not directly mutate/generate request `failureRate` in this feature.
-12. Existing unrelated gameplay behavior remains regression-green.
-13. Full tests, typecheck, and production build pass before merge.
+11. Service-facing projections ignore out-of-topology decoy loads.
+12. Resource overload does not directly mutate/generate request `failureRate` in this feature.
+13. Existing unrelated gameplay behavior remains regression-green.
+14. Full tests, typecheck, and production build pass before merge.
