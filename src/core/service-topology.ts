@@ -269,13 +269,13 @@ export class ServiceTopology {
     const gatewayNodeId = deployment.bindingFor('ENTRY_GATEWAY');
     if (!gatewayNodeId || internalRoute.steps[0]?.role === 'ENTRY_GATEWAY') return internalRoute;
 
-    const firstNodeId = internalRoute.steps.find((step) => step.nodeId !== null)?.nodeId;
-    if (!firstNodeId) return internalRoute;
-    const ingressEdge = this.graph.edge(gatewayNodeId, firstNodeId, 'SYNC');
+    const entryNodeId = internalRoute.steps[0]?.nodeId;
+    if (!entryNodeId) return internalRoute;
+    const ingressEdge = this.graph.edge(gatewayNodeId, entryNodeId, 'SYNC');
     if (!ingressEdge) {
       throw new TopologyValidationError(
         'DISCONNECTED_ROUTE',
-        `Gateway is disconnected from module entry: ${gatewayNodeId} -> ${firstNodeId}`,
+        `Gateway is disconnected from module entry: ${gatewayNodeId} -> ${entryNodeId}`,
       );
     }
 
@@ -296,7 +296,7 @@ export class ServiceTopology {
           blueprintEdgeId: `ingress:${module.id}:${workloadId}`,
           topologyEdgeId: ingressEdge.id,
           fromNodeId: gatewayNodeId,
-          toNodeId: firstNodeId,
+          toNodeId: entryNodeId,
           mode: ingressEdge.mode,
         }),
         ...internalRoute.edges,

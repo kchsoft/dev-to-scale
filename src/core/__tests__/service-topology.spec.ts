@@ -356,6 +356,25 @@ describe('ServiceTopology aggregate', () => {
     expect(route.steps.some(({ nodeId }) => nodeId === 'gateway-community')).toBe(false);
   });
 
+  it('preserves an unbound required entry step without synthesizing ingress', () => {
+    const graph = new TopologyGraph([
+      node('gateway-community', 'LOAD_BALANCER'),
+      node('db-community', 'DATABASE'),
+    ], []);
+    const topology = new ServiceTopology(topologyInput({
+      graph,
+      deployments: [new ModuleDeployment('community', [
+        ['ENTRY_GATEWAY', 'gateway-community'],
+        ['PRIMARY_DATABASE', 'db-community'],
+      ])],
+    }));
+
+    expect(topology.resolveForTrace('comment').steps).toEqual([
+      { stepId: 'app', role: 'ENTRY_APP', requirement: 'REQUIRED', nodeId: null },
+      { stepId: 'db', role: 'PRIMARY_DATABASE', requirement: 'REQUIRED', nodeId: 'db-community' },
+    ]);
+  });
+
   it('rejects an unassigned workload without falling back to the first module', () => {
     expect(() => multiModuleTopology('community').resolve('comment')).toThrowError(
       expect.objectContaining({ code: 'UNKNOWN_WORKLOAD_ASSIGNMENT' }),
