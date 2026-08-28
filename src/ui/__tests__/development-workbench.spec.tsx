@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { GameController } from '../../application/game-controller';
-import { DevelopmentWorkbench, filterDevelopmentOptions, optionIdForWorkSlot } from '../DevelopmentWorkbench';
+import { DevelopmentWorkbench, filterDevelopmentOptions, optionIdForWorkSlot, shouldDismissInspector } from '../DevelopmentWorkbench';
 
 describe('DevelopmentWorkbench', () => {
   it('renders all filters, four work slots, the sorted option list, and an empty Inspector without auto-running anything', () => {
@@ -35,6 +35,21 @@ describe('DevelopmentWorkbench', () => {
     expect(initialSelectedId).toBe('feature:COMMUNITY_MVP');
     expect(html).not.toContain('NO SELECTION');
     expect(html).toContain('<code>feature:COMMUNITY_MVP</code>');
+  });
+
+  it('renders a selected Inspector as a focusable sheet with a mobile dismiss backdrop', () => {
+    const view = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 }).getView();
+    const featureSlot = view.development.workSlots.find(({ id }) => id === 'feature')!;
+    const selectedId = optionIdForWorkSlot(featureSlot, view.development.options);
+    const html = renderToStaticMarkup(
+      <DevelopmentWorkbench view={view.development} initialSelectedId={selectedId} onAction={vi.fn()} />,
+    );
+
+    expect(html).toContain('class="development-inspector-backdrop"');
+    expect(html).toContain('aria-label="Inspector 닫기"');
+    expect(html).toContain('tabindex="-1"');
+    expect(shouldDismissInspector('Escape')).toBe(true);
+    expect(shouldDismissInspector('Enter')).toBe(false);
   });
 
   it('filters without changing Application ordering', () => {
