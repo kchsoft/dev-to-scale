@@ -10,7 +10,8 @@ describe('GameProgressionProjector', () => {
     expect(result.technologies.map(({ id }) => id)).toEqual([
       'REDIS', 'SQS', 'RABBITMQ', 'KAFKA', 'ALB', 'OBJECT_STORAGE',
     ]);
-    expect(result.technologies.find(({ id }) => id === 'REDIS')?.preview).toMatch(/^DB \d+% → \d+%$/);
+    expect(result.technologies.find(({ id }) => id === 'REDIS')?.preview).toBe('DB 0% → 0%');
+    expect(result.technologies.find(({ id }) => id === 'SQS')?.preview).toBe('App 0% → 0% · Async 분리');
     expect(result.skills.some(({ key }) => key === 'fundamental:NETWORK')).toBe(true);
     expect(result.features).toHaveLength(10);
   });

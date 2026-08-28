@@ -40,11 +40,13 @@ describe('GameEventProjector', () => {
     const serviceProjector = new GameServiceProjector(engine);
     const eventProjector = new GameEventProjector(engine, serviceProjector);
     let requirementEvent;
+    let requirementSnapshot;
 
     for (let day = 0; day < 180 && !requirementEvent; day += 1) {
       const before = engine.snapshot;
       const after = engine.advanceDay();
       requirementEvent = eventProjector.project(before, after).find((event) => event.kind === 'requirement');
+      if (requirementEvent) requirementSnapshot = after;
     }
 
     expect(requirementEvent).toMatchObject({
@@ -54,6 +56,11 @@ describe('GameEventProjector', () => {
     });
     expect(requirementEvent?.message).toContain('개발이 자동으로 시작되었습니다. 출시 예상 ·');
     expect(requirementEvent?.message).toContain('현재 Capacity 안쪽');
+    const impact = serviceProjector.featureImpact(requirementSnapshot?.currentFeature?.id ?? 'COMMENT');
+    if (impact?.nodeId) {
+      const current = serviceProjector.project(requirementSnapshot!, { monthlyRevenue: 0, monthlyCost: 0, monthlyProfit: 0 });
+      expect(current.topology.nodes.some(({ id }) => id === impact.nodeId)).toBe(true);
+    }
   });
 
   it('rejects stale snapshots instead of mixing them with current engine state', () => {

@@ -5,7 +5,11 @@ import {
   DatabaseCluster,
   GameEngine,
   GameSnapshot,
-  RequestNodeKind,
+  InfrastructureNodeKind,
+  LoadSnapshot,
+  NodeResourceKind,
+  maxNodeLoad,
+  maxResourceLoad,
   ServerSize,
   SingleServiceTopology,
 } from '../core';
@@ -27,16 +31,18 @@ function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
 }
 
-function nodeIdForRequestNode(node: RequestNodeKind | null): string | undefined {
-  switch (node) {
-    case 'ALB': return 'ALB';
-    case 'APP': return 'application';
-    case 'DB': return 'database';
-    case 'CACHE': return 'REDIS';
-    case 'QUEUE': return 'queue';
-    case 'STORAGE': return 'storage';
-    default: return undefined;
-  }
+function pressure(
+  load: LoadSnapshot,
+  nodeKind: InfrastructureNodeKind,
+  resourceKind?: NodeResourceKind,
+): { readonly ratio: number; readonly nodeId?: string } {
+  const match = resourceKind
+    ? maxResourceLoad(load, { nodeKind, resourceKind })
+    : maxNodeLoad(load, { nodeKind });
+  if (!match) return { ratio: 0 };
+  return 'resource' in match
+    ? { ratio: match.resource.ratio, nodeId: match.node.nodeId }
+    : { ratio: match.loadRatio, nodeId: match.nodeId };
 }
 
 export interface FeatureImpactPreview {
@@ -169,13 +175,14 @@ export class GameServiceProjector {
       }
     }
 
-    const ratios: Array<[string, number, string]> = [
-      ['Application', snapshot.load.appRatio, 'application'],
-      ['Database', snapshot.load.dbRatio, 'database'],
-      ['Async', snapshot.load.asyncRatio, 'queue'],
-      ['Storage', snapshot.load.storageRatio, 'storage'],
+    const ratios: Array<[string, { ratio: number; nodeId?: string }]> = [
+      ['Application', pressure(snapshot.load, 'SERVER_GROUP')],
+      ['Database', pressure(snapshot.load, 'DATABASE')],
+      ['Async', pressure(snapshot.load, 'QUEUE', 'THROUGHPUT')],
+      ['Storage', pressure(snapshot.load, 'OBJECT_STORAGE', 'STORAGE')],
     ];
-    for (const [name, ratio, nodeId] of ratios) {
+    for (const [name, loadPressure] of ratios) {
+      const { ratio, nodeId } = loadPressure;
       if (ratio >= 0.9) {
         const overloadPenalty = ratio > 1 ? Math.min(30, Math.round((ratio - 1) * 100)) : 0;
         alerts.push({
@@ -190,16 +197,16 @@ export class GameServiceProjector {
       }
     }
     if (snapshot.load.failureRate > 0.001) {
-      const failed = snapshot.load.requestFlows.filter((flow) => flow.successRatio < 0.999);
-      const firstFailure = failed.find((flow) => flow.failureNode)?.failureNode ?? null;
+      const failed = snapshot.load.requestTraces.filter((trace) => trace.successRatio < 0.999);
+      const firstFailure = failed.find((trace) => trace.failureNodeId)?.failureNodeId ?? null;
       alerts.push({
         id: 'request-failure',
         tone: 'danger',
         title: `Request Failure ${percent(snapshot.load.failureRate)}%`,
         detail: failed.length > 0
-          ? `${failed.slice(0, 2).map((flow) => presentationCatalog.label(flow.featureId)).join(', ')} 요청 경로 확인 필요`
+          ? `${failed.slice(0, 2).map((trace) => presentationCatalog.label(trace.workloadId)).join(', ')} 요청 경로 확인 필요`
           : '요청 처리 성공률이 낮습니다.',
-        nodeId: nodeIdForRequestNode(firstFailure),
+        nodeId: firstFailure ?? undefined,
       });
     }
     for (const incident of snapshot.incidents) {
@@ -238,33 +245,33 @@ export class GameServiceProjector {
     if (!feature || !snapshot.launched) return null;
     const projected = this.#engine.previewLoadWithFeature(feature);
     const axes = [
-      { label: 'APP CPU', before: snapshot.load.appCpuRatio, after: projected.appCpuRatio, nodeId: 'application' },
-      { label: 'APP I/O', before: snapshot.load.appIoRatio, after: projected.appIoRatio, nodeId: 'application' },
-      { label: 'DB CPU', before: snapshot.load.dbCpuRatio, after: projected.dbCpuRatio, nodeId: 'database' },
-      { label: 'DB I/O', before: snapshot.load.dbIoRatio, after: projected.dbIoRatio, nodeId: 'database' },
-      { label: 'ASYNC', before: snapshot.load.asyncRatio, after: projected.asyncRatio, nodeId: 'queue' },
-      { label: 'STORAGE', before: snapshot.load.storageRatio, after: projected.storageRatio, nodeId: 'storage' },
+      { label: 'APP CPU', before: pressure(snapshot.load, 'SERVER_GROUP', 'CPU'), after: pressure(projected, 'SERVER_GROUP', 'CPU') },
+      { label: 'APP I/O', before: pressure(snapshot.load, 'SERVER_GROUP', 'IO'), after: pressure(projected, 'SERVER_GROUP', 'IO') },
+      { label: 'DB CPU', before: pressure(snapshot.load, 'DATABASE', 'CPU'), after: pressure(projected, 'DATABASE', 'CPU') },
+      { label: 'DB I/O', before: pressure(snapshot.load, 'DATABASE', 'IO'), after: pressure(projected, 'DATABASE', 'IO') },
+      { label: 'ASYNC', before: pressure(snapshot.load, 'QUEUE', 'THROUGHPUT'), after: pressure(projected, 'QUEUE', 'THROUGHPUT') },
+      { label: 'STORAGE', before: pressure(snapshot.load, 'OBJECT_STORAGE', 'STORAGE'), after: pressure(projected, 'OBJECT_STORAGE', 'STORAGE') },
     ];
-    const top = [...axes].sort((left, right) => right.after - left.after)[0];
+    const top = [...axes].sort((left, right) => right.after.ratio - left.after.ratio)[0];
     const changes = [...axes]
-      .sort((left, right) => (right.after - right.before) - (left.after - left.before))
+      .sort((left, right) => (right.after.ratio - right.before.ratio) - (left.after.ratio - left.before.ratio))
       .slice(0, 2)
-      .map((axis) => `${axis.label} ${percent(axis.before)}→${percent(axis.after)}%`);
+      .map((axis) => `${axis.label} ${percent(axis.before.ratio)}→${percent(axis.after.ratio)}%`);
     const failureIncrease = projected.failureRate - snapshot.load.failureRate;
     if (failureIncrease > 0.001) {
       changes.push(`FAIL ${percent(snapshot.load.failureRate)}→${percent(projected.failureRate)}%`);
     }
     const suffix = projected.failureRate >= 0.1
       ? ' · ⚠ 필수 요청 경로 확인 필요'
-      : top.after > 1
+      : top.after.ratio > 1
         ? ` · ⚠ ${top.label} OVERLOAD 예상`
-        : top.after >= 0.9
+        : top.after.ratio >= 0.9
           ? ` · △ ${top.label} Critical 근접`
           : ' · 현재 Capacity 안쪽';
     return {
       summary: `${changes.join(' · ')}${suffix}`,
-      tone: projected.failureRate >= 0.1 || top.after > 1 ? 'danger' : top.after >= 0.9 ? 'warning' : 'info',
-      nodeId: top.nodeId,
+      tone: projected.failureRate >= 0.1 || top.after.ratio > 1 ? 'danger' : top.after.ratio >= 0.9 ? 'warning' : 'info',
+      nodeId: top.after.nodeId ?? top.before.nodeId,
     };
   }
 

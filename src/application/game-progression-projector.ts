@@ -12,6 +12,11 @@ import {
   TECHNOLOGIES,
   TechnologySkillId,
   skillRef,
+  LoadSnapshot,
+  InfrastructureNodeKind,
+  NodeResourceKind,
+  maxNodeLoad,
+  maxResourceLoad,
 } from '../core';
 import { FeatureCardView, SkillNodeView, TechnologyOptionView } from './game-view';
 import { presentationCatalog } from './presentation-catalog';
@@ -29,6 +34,17 @@ const TECHNOLOGY_SKILLS: TechnologySkillId[] = ['POSTGRESQL', 'MYSQL', 'MONGODB'
 
 function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
+}
+
+function pressure(load: LoadSnapshot, nodeKind: InfrastructureNodeKind, resourceKind?: NodeResourceKind): number {
+  const match = resourceKind
+    ? maxResourceLoad(load, { nodeKind, resourceKind })
+    : maxNodeLoad(load, { nodeKind });
+  return match ? ('resource' in match ? match.resource.ratio : match.loadRatio) : 0;
+}
+
+function capacity(load: LoadSnapshot, nodeKind: InfrastructureNodeKind, resourceKind: NodeResourceKind): number {
+  return maxResourceLoad(load, { nodeKind, resourceKind })?.resource.capacity ?? 0;
 }
 
 function phaseForSlot(index: number): 1 | 2 | 3 {
@@ -110,11 +126,11 @@ export class GameProgressionProjector {
     if ((id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') && snapshot.load.failureRate > after.failureRate) {
       return `실패율 ${percent(snapshot.load.failureRate)}% → ${percent(after.failureRate)}% · 요청 경로 복구`;
     }
-    if (id === 'REDIS') return `DB ${percent(snapshot.load.dbRatio)}% → ${percent(after.dbRatio)}%`;
+    if (id === 'REDIS') return `DB ${percent(pressure(snapshot.load, 'DATABASE'))}% → ${percent(pressure(after, 'DATABASE'))}%`;
     if (id === 'SQS' || id === 'RABBITMQ' || id === 'KAFKA') {
-      return `App ${percent(snapshot.load.appRatio)}% → ${percent(after.appRatio)}% · Async 분리`;
+      return `App ${percent(pressure(snapshot.load, 'SERVER_GROUP'))}% → ${percent(pressure(after, 'SERVER_GROUP'))}% · Async 분리`;
     }
-    if (id === 'OBJECT_STORAGE') return `Storage Capacity ${snapshot.load.storageCapacity} → ${after.storageCapacity}`;
+    if (id === 'OBJECT_STORAGE') return `Storage Capacity ${capacity(snapshot.load, 'OBJECT_STORAGE', 'STORAGE')} → ${capacity(after, 'OBJECT_STORAGE', 'STORAGE')}`;
     if (id === 'ALB') return 'Application 서버 Scale-out 해금';
     return '';
   }

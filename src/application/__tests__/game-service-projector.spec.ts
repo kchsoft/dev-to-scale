@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createNodeLoadSnapshot, createNodeResourceLoad, GameEngine, V1_NODE_IDS } from '../../core';
+import { createNodeLoadSnapshot, createNodeResourceLoad, GameEngine, nodeLoad, V1_NODE_IDS } from '../../core';
 import { GameServiceProjector } from '../game-service-projector';
 
 describe('GameServiceProjector', () => {
@@ -61,5 +61,55 @@ describe('GameServiceProjector', () => {
     expect(result.topology.traces[0]).toMatchObject({
       id: 'COMMUNITY_MVP', successPercent: 100, failureNodeId: null,
     });
+  });
+
+  it('targets exact overloaded and failed nodes in alerts', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 10 });
+    for (let day = 0; day < 30 && !engine.launched; day += 1) engine.advanceDay();
+    const snapshot = engine.snapshot;
+    const databaseNodeId = 'v1:database:POSTGRESQL';
+    const database = nodeLoad(snapshot.load, databaseNodeId)!;
+    const overloadedDatabase = createNodeLoadSnapshot(database.nodeId, database.nodeKind, [
+      createNodeResourceLoad('CPU', 120, 100),
+      createNodeResourceLoad('IO', 80, 100),
+    ]);
+    const failedTrace = Object.freeze({
+      ...snapshot.load.requestTraces[0],
+      nodes: Object.freeze(snapshot.load.requestTraces[0].nodes.map((node) => node.nodeId === databaseNodeId
+        ? Object.freeze({ ...node, passThroughRatio: 0, status: 'FAILED' as const })
+        : node)),
+      successRatio: 0,
+      failureNodeId: databaseNodeId,
+    });
+    const failedSnapshot = {
+      ...snapshot,
+      load: {
+        ...snapshot.load,
+        failureRate: 1,
+        nodeLoads: snapshot.load.nodeLoads.map((load) => load.nodeId === databaseNodeId ? overloadedDatabase : load),
+        requestTraces: [failedTrace],
+      },
+    };
+    const result = new GameServiceProjector(engine).project(failedSnapshot, {
+      monthlyRevenue: 0, monthlyCost: 0, monthlyProfit: 0,
+    });
+
+    expect(result.alerts.find(({ id }) => id === 'load-Database')?.nodeId).toBe(databaseNodeId);
+    expect(result.alerts.find(({ id }) => id === 'request-failure')).toMatchObject({
+      title: expect.stringMatching(/^Request Failure \d+%$/),
+      nodeId: result.topology.traces.find(({ successPercent }) => successPercent < 100)?.failureNodeId,
+    });
+  });
+
+  it('returns an exact topology node for feature impact', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 10 });
+    for (let day = 0; day < 30 && !engine.launched; day += 1) engine.advanceDay();
+    const projector = new GameServiceProjector(engine);
+    const impact = projector.featureImpact('COMMENT');
+    const current = projector.project(engine.snapshot, { monthlyRevenue: 0, monthlyCost: 0, monthlyProfit: 0 });
+    if (impact?.nodeId) {
+      expect(current.topology.nodes.some(({ id }) => id === impact.nodeId)).toBe(true);
+      expect(['application', 'database', 'queue', 'storage']).not.toContain(impact.nodeId);
+    }
   });
 });

@@ -20,12 +20,7 @@ export function ServiceDashboard({ view, observability, onNode, onTab }: Service
 
 function topologyNodeIdForAlert(view: GameView, alertNodeId: string | undefined): string | null {
   if (!alertNodeId) return null;
-  const exact = view.topology.nodes.find((node) => node.id === alertNodeId);
-  if (exact) return exact.id;
-  if (alertNodeId === 'application' || alertNodeId.startsWith('framework:')) return view.topology.nodes.find((node) => node.kind === 'server-group')?.id ?? null;
-  if (alertNodeId === 'database' || alertNodeId.startsWith('database:')) return view.topology.nodes.find((node) => node.kind === 'database')?.id ?? null;
-  const productId = alertNodeId.replace('technology:', '');
-  return view.topology.nodes.find((node) => node.id.endsWith(`:${productId}`))?.id ?? null;
+  return view.topology.nodes.some(({ id }) => id === alertNodeId) ? alertNodeId : null;
 }
 
 export function LoadMini({ metric }: { metric: LoadMetricView }) {
