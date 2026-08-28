@@ -12,7 +12,7 @@ import {
 } from './request-trace';
 import { BuildableTechnologyId, TECHNOLOGIES } from './technology';
 import { InfrastructureNodeId } from './topology';
-import { SingleServiceTopology, V1_NODE_IDS } from './v1-topology';
+import { V1ServiceTopologyFactory, V1_NODE_IDS } from './v1-topology';
 
 export enum ServerSize {
   SMALL = 'SMALL',
@@ -273,7 +273,7 @@ export class LoadCalculator {
     context: LoadCalculationContext = {},
   ): LoadSnapshot {
     const queue = infrastructure.queueTechnology;
-    const topology = SingleServiceTopology.from(infrastructure, features);
+    const topology = V1ServiceTopologyFactory.create(infrastructure, features);
     const requestTraces = features.map((feature) => RequestTraceSimulator.simulate(
       topology.resolveForTrace(feature.id),
       context.nodeHealth,

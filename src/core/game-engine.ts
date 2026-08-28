@@ -21,7 +21,7 @@ import { SeededRandomSource } from './random';
 import { trafficHealthForSeverity } from './request-trace';
 import { TechDebtState } from './tech-debt';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
-import { SingleServiceTopology, v1NodeIdForTechnology } from './v1-topology';
+import { V1ServiceTopologyFactory, v1NodeIdForTechnology } from './v1-topology';
 
 export type GameStatus = 'RUNNING' | 'BANKRUPT' | 'WON';
 
@@ -548,7 +548,7 @@ export class GameEngine {
       databaseId: this.config.databaseId,
       developer: this.developer,
       infrastructure: this.infrastructure,
-      topology: SingleServiceTopology.from(
+      topology: V1ServiceTopologyFactory.create(
         this.infrastructure,
         this.activeFeaturesForLoad(),
       ).graph,

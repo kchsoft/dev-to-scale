@@ -3,7 +3,7 @@ import { COMMUNITY_FEATURES } from '../community';
 import { DeveloperProfile } from '../learning';
 import { IncidentTopology } from '../incident-topology';
 import { InfrastructureState, LoadCalculator } from '../infrastructure';
-import { SingleServiceTopology, V1_NODE_IDS } from '../v1-topology';
+import { V1ServiceTopologyFactory, V1_NODE_IDS } from '../v1-topology';
 
 describe('IncidentTopology', () => {
   it('uses actual topology node IDs and each node load ratio for candidates', () => {
@@ -12,7 +12,9 @@ describe('IncidentTopology', () => {
     infrastructure.deployTechnology('SQS');
     const features = [COMMUNITY_FEATURES.NOTIFICATION];
     const load = LoadCalculator.calculate(100_000, features, infrastructure);
-    const topology = SingleServiceTopology.from(infrastructure, features);
+    const topology = V1ServiceTopologyFactory.create(infrastructure, features);
+
+    expect(topology.graph.node(V1_NODE_IDS.app('SPRING_BOOT'))?.kind).toBe('SERVER_GROUP');
 
     const candidates = IncidentTopology.candidates({
       frameworkId: 'SPRING_BOOT',
