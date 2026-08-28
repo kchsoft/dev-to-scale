@@ -10,6 +10,13 @@ import {
 } from '../../core';
 import { OperationalViewProjector } from '../operational-view-projector';
 
+const selection = {
+  appNodeId: V1_NODE_IDS.app('SPRING_BOOT'),
+  databaseNodeId: V1_NODE_IDS.database('POSTGRESQL'),
+  queueNodeId: null,
+  storageNodeId: V1_NODE_IDS.storage,
+};
+
 function snapshot(loadOverrides: Partial<LoadSnapshot>): GameSnapshot {
   const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 22 });
   const ratioFor = (nodeId: string, resourceKind: 'CPU' | 'IO' | 'THROUGHPUT' | 'STORAGE', current: number) => {
@@ -46,9 +53,79 @@ function snapshot(loadOverrides: Partial<LoadSnapshot>): GameSnapshot {
 }
 
 describe('operational view projector', () => {
+  it('keeps selected V1 nodes when same-kind decoys precede them and flat fields disagree', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
+    engine.developer.get({ category: 'fundamental', id: 'OS_RUNTIME' }).setLevel(2);
+    const app = createNodeLoadSnapshot(selection.appNodeId, 'SERVER_GROUP', [
+      createNodeResourceLoad('CPU', 40, 100), createNodeResourceLoad('IO', 20, 100),
+    ]);
+    const database = createNodeLoadSnapshot(selection.databaseNodeId, 'DATABASE', [
+      createNodeResourceLoad('CPU', 60, 100), createNodeResourceLoad('IO', 20, 100),
+    ]);
+    const storage = createNodeLoadSnapshot(selection.storageNodeId, 'OBJECT_STORAGE', [
+      createNodeResourceLoad('STORAGE', 10, 100),
+    ]);
+    const state = {
+      ...engine.snapshot,
+      load: {
+        ...engine.snapshot.load,
+        appRatio: 9, dbRatio: 9, asyncRatio: 9, storageRatio: 9,
+        appCpuRatio: 9, appIoRatio: 9, dbCpuRatio: 9, dbIoRatio: 9,
+        appDemand: 999, dbDemand: 999, asyncDemand: 999, storageDemand: 999,
+        appCapacity: 1, dbCapacity: 1, asyncCapacity: 1, storageCapacity: 1,
+        nodeLoads: [
+          createNodeLoadSnapshot('decoy:app', 'SERVER_GROUP', [createNodeResourceLoad('CPU', 999, 100)]),
+          createNodeLoadSnapshot('decoy:db', 'DATABASE', [createNodeResourceLoad('CPU', 999, 100)]),
+          createNodeLoadSnapshot('decoy:storage', 'OBJECT_STORAGE', [createNodeResourceLoad('STORAGE', 999, 100)]),
+          app,
+          database,
+          storage,
+          ...engine.snapshot.load.nodeLoads.filter((node) => (
+            node.nodeId !== selection.appNodeId
+            && node.nodeId !== selection.databaseNodeId
+            && node.nodeId !== selection.storageNodeId
+          )),
+        ],
+      },
+    };
+
+    const service = OperationalViewProjector.project(state, engine.developer, selection);
+
+    expect(service.visibleLoads.map(({ nodeId, percent }) => ({ nodeId, percent }))).toEqual([
+      { nodeId: selection.appNodeId, percent: 40 },
+      { nodeId: selection.appNodeId, percent: 20 },
+      { nodeId: selection.databaseNodeId, percent: 60 },
+      { nodeId: selection.databaseNodeId, percent: 20 },
+      { nodeId: null, percent: 0 },
+      { nodeId: selection.storageNodeId, percent: 10 },
+    ]);
+    expect(service.summary.headline).toBe('P95 175ms');
+    expect(service.health).toMatchObject({ bottleneck: 'DB_CPU', bottleneckPercent: 60, bottleneckNodeId: selection.databaseNodeId });
+    expect(OperationalViewProjector.diagnosisText(selection.appNodeId, state, engine.developer)).toContain('APP CPU 40%');
+  });
+
+  it('fails when an exact required node load is absent despite a same-kind decoy', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
+    const state = {
+      ...engine.snapshot,
+      load: {
+        ...engine.snapshot.load,
+        nodeLoads: [
+          createNodeLoadSnapshot('decoy:app', 'SERVER_GROUP', [
+            createNodeResourceLoad('CPU', 1, 100), createNodeResourceLoad('IO', 1, 100),
+          ]),
+          ...engine.snapshot.load.nodeLoads.filter((node) => node.nodeId !== selection.appNodeId),
+        ],
+      },
+    };
+
+    expect(() => OperationalViewProjector.project(state, engine.developer, selection))
+      .toThrowError(`Missing load for topology node: ${selection.appNodeId}`);
+  });
+
   it('attaches exact node metadata to visible load metrics', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
-    const service = OperationalViewProjector.project(engine.snapshot, engine.developer);
+    const service = OperationalViewProjector.project(engine.snapshot, engine.developer, selection);
 
     expect(service.visibleLoads.map(({ id, nodeId, label }) => ({ id, nodeId, label }))).toEqual([
       { id: 'v1:app:SPRING_BOOT:load', nodeId: 'v1:app:SPRING_BOOT', label: 'APP' },
@@ -82,7 +159,7 @@ describe('operational view projector', () => {
           : node.nodeId === dbId ? quietDatabase : node),
       },
     };
-    const projected = OperationalViewProjector.project(state, engine.developer);
+    const projected = OperationalViewProjector.project(state, engine.developer, selection);
 
     expect(projected.health).toMatchObject({
       bottleneck: 'APP_CPU', bottleneckPercent: 120, bottleneckNodeId: appId,
@@ -92,7 +169,7 @@ describe('operational view projector', () => {
 
   it('projects BASIC observability without leaking detailed resource metrics', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 22 });
-    const service = OperationalViewProjector.project(engine.snapshot, engine.developer);
+    const service = OperationalViewProjector.project(engine.snapshot, engine.developer, selection);
 
     expect(service.observability).toEqual({
       level: 'BASIC',
@@ -109,7 +186,7 @@ describe('operational view projector', () => {
       appRatio: 0.4,
       dbRatio: 0.8,
       asyncRatio: 1.2,
-    }), new DeveloperProfile());
+    }), new DeveloperProfile(), selection);
 
     expect(service.summary.headline).toBe('LOAD 80%');
     expect(service.summary.detail).toContain('전체 Load');
@@ -120,7 +197,7 @@ describe('operational view projector', () => {
       appCpuRatio: 0.42,
       appIoRatio: 1.12,
       failureRate: 0,
-    }), new DeveloperProfile());
+    }), new DeveloperProfile(), selection);
 
     expect(service.health.bottleneck).toBe('APP_IO');
     expect(service.health.bottleneckPercent).toBe(112);
@@ -129,15 +206,15 @@ describe('operational view projector', () => {
 
   it('raises projected p95 latency as capacity pressure increases', () => {
     const developer = new DeveloperProfile();
-    const low = OperationalViewProjector.project(snapshot({ appCpuRatio: 0.4 }), developer);
-    const high = OperationalViewProjector.project(snapshot({ appCpuRatio: 1.2 }), developer);
+    const low = OperationalViewProjector.project(snapshot({ appCpuRatio: 0.4 }), developer, selection);
+    const high = OperationalViewProjector.project(snapshot({ appCpuRatio: 1.2 }), developer, selection);
 
     expect(high.health.p95LatencyMs).toBeGreaterThan(low.health.p95LatencyMs);
     expect(high.health.bottleneck).toBe('APP_CPU');
   });
 
   it('marks a failed required request path as critical', () => {
-    const service = OperationalViewProjector.project(snapshot({ failureRate: 1 }), new DeveloperProfile());
+    const service = OperationalViewProjector.project(snapshot({ failureRate: 1 }), new DeveloperProfile(), selection);
 
     expect(service.health.status).toBe('CRITICAL');
     expect(service.health.p95LatencyMs).toBeGreaterThanOrEqual(1_500);
@@ -147,7 +224,7 @@ describe('operational view projector', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 25 });
     engine.developer.get({ category: 'fundamental', id: 'OS_RUNTIME' }).setLevel(2);
 
-    const metrics = OperationalViewProjector.project(engine.snapshot, engine.developer);
+    const metrics = OperationalViewProjector.project(engine.snapshot, engine.developer, selection);
 
     expect(metrics.observability.level).toBe('METRICS');
     expect(metrics.visibleLoads.map((metric) => metric.label)).toEqual([
@@ -158,7 +235,7 @@ describe('operational view projector', () => {
     engine.developer.get({ category: 'fundamental', id: 'NETWORK' }).setLevel(2);
     engine.developer.get({ category: 'fundamental', id: 'SOFTWARE_DESIGN' }).setLevel(2);
 
-    expect(OperationalViewProjector.project(engine.snapshot, engine.developer).observability.level).toBe('APM');
+    expect(OperationalViewProjector.project(engine.snapshot, engine.developer, selection).observability.level).toBe('APM');
   });
 
   it('keeps incident diagnosis hidden at BASIC observability', () => {

@@ -2,16 +2,22 @@ import {
   DeveloperProfile,
   GameSnapshot,
   nodeLoad,
-  nodeLoadsOfKind,
   resourceLoad,
 } from '../core';
-import type { InfrastructureNodeKind, NodeLoadSnapshot, NodeResourceKind } from '../core';
+import type { NodeLoadSnapshot, NodeResourceKind } from '../core';
 import { BottleneckView, LoadMetricView, ObservabilityView, ServiceHealthView, ServiceOperationsView } from './game-view';
 
 const BOTTLENECK_LABELS: Record<BottleneckView, string> = {
   APP_CPU: 'APP CPU', APP_IO: 'APP I/O', DB_CPU: 'DB CPU', DB_IO: 'DB I/O',
   ASYNC: 'ASYNC QUEUE', STORAGE: 'STORAGE', NONE: 'NONE',
 };
+
+export interface OperationalNodeSelection {
+  readonly appNodeId: string;
+  readonly databaseNodeId: string;
+  readonly queueNodeId: string | null;
+  readonly storageNodeId: string;
+}
 
 function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
@@ -22,9 +28,9 @@ function metric(id: string, nodeId: string | null, label: string, ratio: number)
   return { id, nodeId, label, percent: percent(ratio), tone };
 }
 
-function requiredNodeLoad(load: GameSnapshot['load'], nodeKind: InfrastructureNodeKind): NodeLoadSnapshot {
-  const node = nodeLoadsOfKind(load, nodeKind)[0];
-  if (!node) throw new Error(`Missing load for required topology node kind: ${nodeKind}`);
+function requiredNodeLoad(load: GameSnapshot['load'], nodeId: string): NodeLoadSnapshot {
+  const node = nodeLoad(load, nodeId);
+  if (!node) throw new Error(`Missing load for topology node: ${nodeId}`);
   return node;
 }
 
@@ -40,26 +46,22 @@ interface BottleneckCandidate {
   readonly ratio: number;
 }
 
-function bottleneckCandidates(load: GameSnapshot['load']): readonly BottleneckCandidate[] {
-  const candidates: BottleneckCandidate[] = [];
-  for (const node of load.nodeLoads) {
-    if (node.nodeKind === 'SERVER_GROUP') {
-      candidates.push(
-        { bottleneck: 'APP_CPU', nodeId: node.nodeId, ratio: requiredResource(node, 'CPU').ratio },
-        { bottleneck: 'APP_IO', nodeId: node.nodeId, ratio: requiredResource(node, 'IO').ratio },
-      );
-    } else if (node.nodeKind === 'DATABASE') {
-      candidates.push(
-        { bottleneck: 'DB_CPU', nodeId: node.nodeId, ratio: requiredResource(node, 'CPU').ratio },
-        { bottleneck: 'DB_IO', nodeId: node.nodeId, ratio: requiredResource(node, 'IO').ratio },
-      );
-    } else if (node.nodeKind === 'QUEUE') {
-      candidates.push({ bottleneck: 'ASYNC', nodeId: node.nodeId, ratio: requiredResource(node, 'THROUGHPUT').ratio });
-    } else if (node.nodeKind === 'OBJECT_STORAGE') {
-      candidates.push({ bottleneck: 'STORAGE', nodeId: node.nodeId, ratio: requiredResource(node, 'STORAGE').ratio });
-    }
-  }
-  return candidates;
+function bottleneckCandidates(
+  load: GameSnapshot['load'],
+  selection: OperationalNodeSelection,
+): readonly BottleneckCandidate[] {
+  const app = requiredNodeLoad(load, selection.appNodeId);
+  const database = requiredNodeLoad(load, selection.databaseNodeId);
+  const storage = requiredNodeLoad(load, selection.storageNodeId);
+  const queue = selection.queueNodeId === null ? null : requiredNodeLoad(load, selection.queueNodeId);
+  return [
+    { bottleneck: 'APP_CPU', nodeId: app.nodeId, ratio: requiredResource(app, 'CPU').ratio },
+    { bottleneck: 'APP_IO', nodeId: app.nodeId, ratio: requiredResource(app, 'IO').ratio },
+    { bottleneck: 'DB_CPU', nodeId: database.nodeId, ratio: requiredResource(database, 'CPU').ratio },
+    { bottleneck: 'DB_IO', nodeId: database.nodeId, ratio: requiredResource(database, 'IO').ratio },
+    ...(queue === null ? [] : [{ bottleneck: 'ASYNC' as const, nodeId: queue.nodeId, ratio: requiredResource(queue, 'THROUGHPUT').ratio }]),
+    { bottleneck: 'STORAGE', nodeId: storage.nodeId, ratio: requiredResource(storage, 'STORAGE').ratio },
+  ];
 }
 
 function latencyFromPressure(maxRatio: number, failureRate: number): number {
@@ -74,14 +76,11 @@ function latencyFromPressure(maxRatio: number, failureRate: number): number {
   return Math.round(Math.max(100, Math.min(4_500, latency)));
 }
 
-function projectHealth(load: GameSnapshot['load']): ServiceHealthView {
-  requiredNodeLoad(load, 'SERVER_GROUP');
-  requiredNodeLoad(load, 'DATABASE');
-  requiredNodeLoad(load, 'OBJECT_STORAGE');
+function projectHealth(load: GameSnapshot['load'], selection: OperationalNodeSelection): ServiceHealthView {
   let bottleneck: BottleneckView = 'NONE';
   let bottleneckRatio = 0;
   let bottleneckNodeId: string | null = null;
-  for (const candidate of bottleneckCandidates(load)) {
+  for (const candidate of bottleneckCandidates(load, selection)) {
     if (candidate.ratio > bottleneckRatio) {
       bottleneck = candidate.bottleneck;
       bottleneckRatio = candidate.ratio;
@@ -209,13 +208,17 @@ function diagnose(nodeId: string, snapshot: GameSnapshot): Diagnosis {
 }
 
 export class OperationalViewProjector {
-  static project(snapshot: GameSnapshot, developer: DeveloperProfile): ServiceOperationsView {
+  static project(
+    snapshot: GameSnapshot,
+    developer: DeveloperProfile,
+    selection: OperationalNodeSelection,
+  ): ServiceOperationsView {
     const observability = projectObservability(developer);
-    const health = projectHealth(snapshot.load);
-    const app = requiredNodeLoad(snapshot.load, 'SERVER_GROUP');
-    const database = requiredNodeLoad(snapshot.load, 'DATABASE');
-    const queue = nodeLoadsOfKind(snapshot.load, 'QUEUE')[0];
-    const storage = requiredNodeLoad(snapshot.load, 'OBJECT_STORAGE');
+    const health = projectHealth(snapshot.load, selection);
+    const app = requiredNodeLoad(snapshot.load, selection.appNodeId);
+    const database = requiredNodeLoad(snapshot.load, selection.databaseNodeId);
+    const queue = selection.queueNodeId === null ? null : requiredNodeLoad(snapshot.load, selection.queueNodeId);
+    const storage = requiredNodeLoad(snapshot.load, selection.storageNodeId);
     const visibleLoads = observability.level === 'BASIC'
       ? [
           metric(`${app.nodeId}:load`, app.nodeId, 'APP', app.loadRatio),

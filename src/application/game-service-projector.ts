@@ -17,7 +17,7 @@ import {
   TopologyView,
 } from './game-view';
 import type { GameFinancialProjection } from './game-overview-projector';
-import { OperationalViewProjector } from './operational-view-projector';
+import { OperationalNodeSelection, OperationalViewProjector } from './operational-view-projector';
 import { presentationCatalog } from './presentation-catalog';
 import { TopologyViewProjector } from './topology-view-projector';
 
@@ -52,6 +52,24 @@ export interface GameServiceProjection {
   readonly service: ServiceOperationsView;
 }
 
+function requiredTopologyBinding(
+  topology: SingleServiceTopology,
+  role: 'ENTRY_APP' | 'PRIMARY_DATABASE' | 'OBJECT_STORAGE',
+): string {
+  const nodeId = topology.deployment.bindingFor(role);
+  if (!nodeId) throw new Error(`Missing required topology binding: ${role}`);
+  return nodeId;
+}
+
+function operationalNodeSelection(topology: SingleServiceTopology): OperationalNodeSelection {
+  return {
+    appNodeId: requiredTopologyBinding(topology, 'ENTRY_APP'),
+    databaseNodeId: requiredTopologyBinding(topology, 'PRIMARY_DATABASE'),
+    queueNodeId: topology.deployment.bindingFor('EVENT_BUS') ?? null,
+    storageNodeId: requiredTopologyBinding(topology, 'OBJECT_STORAGE'),
+  };
+}
+
 export class GameServiceProjector {
   readonly #engine: GameEngine;
 
@@ -60,10 +78,15 @@ export class GameServiceProjector {
   }
 
   project(snapshot: GameSnapshot, financials: GameFinancialProjection): GameServiceProjection {
-    const service = OperationalViewProjector.project(snapshot, this.#engine.developer);
+    const topology = this.serviceTopology(snapshot);
+    const service = OperationalViewProjector.project(
+      snapshot,
+      this.#engine.developer,
+      operationalNodeSelection(topology),
+    );
     return {
       alerts: this.alerts(snapshot, financials.monthlyProfit, service.observability),
-      topology: this.topology(snapshot),
+      topology: this.topology(snapshot, topology),
       infrastructureCosts: this.infrastructureCostView(),
       service,
     };
@@ -74,7 +97,7 @@ export class GameServiceProjector {
     return this.featureImpactFor(snapshot, featureId);
   }
 
-  private topology(snapshot: GameSnapshot): TopologyView {
+  private serviceTopology(snapshot: GameSnapshot): SingleServiceTopology {
     const activeFeatureDefinitions = snapshot.launched
       ? [
           COMMUNITY_BOOTSTRAP,
@@ -84,7 +107,10 @@ export class GameServiceProjector {
           }),
         ]
       : [];
-    const topology = SingleServiceTopology.from(this.#engine.infrastructure, activeFeatureDefinitions);
+    return SingleServiceTopology.from(this.#engine.infrastructure, activeFeatureDefinitions);
+  }
+
+  private topology(snapshot: GameSnapshot, topology: SingleServiceTopology): TopologyView {
     return TopologyViewProjector.project({
       graph: topology.graph,
       nodeLoads: snapshot.load.nodeLoads,
