@@ -48,6 +48,10 @@ describe('node-specific load calculation', () => {
     if (false) {
       // @ts-expect-error LoadSnapshot fields are immutable public contract.
       readonlyLoad.failureRate = 1;
+      // @ts-expect-error LoadSnapshot fields are immutable public contract.
+      readonlyLoad.nodeLoads = [];
+      // @ts-expect-error LoadSnapshot fields are immutable public contract.
+      readonlyLoad.requestTraces = [];
     }
     expect(Object.keys(load).sort()).toEqual(['failureRate', 'nodeLoads', 'requestTraces']);
     expect(Object.hasOwn(load, 'requestFlows')).toBe(false);

@@ -236,8 +236,8 @@ export interface LoadCalculationContext {
 
 export interface LoadSnapshot {
   readonly failureRate: number;
-  nodeLoads: readonly NodeLoadSnapshot[];
-  requestTraces: readonly RequestTrace[];
+  readonly nodeLoads: readonly NodeLoadSnapshot[];
+  readonly requestTraces: readonly RequestTrace[];
 }
 
 const LOAD_CURVE = {
