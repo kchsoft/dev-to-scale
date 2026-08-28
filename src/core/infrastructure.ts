@@ -5,7 +5,6 @@ import {
   ServerSize,
   SERVER_SIZE_VALUES,
 } from './infrastructure-sizing';
-import type { NodeSizeProfile } from './infrastructure-sizing';
 import {
   createNodeLoadSnapshot,
   createNodeResourceLoad,
@@ -319,10 +318,6 @@ function queueRequirement(feature: FeatureDefinition): 'REQUIRED' | 'OPTIONAL' |
   return queueStep ? queueStep.requirement ?? 'REQUIRED' : null;
 }
 
-function ratio(value: number, capacity: number): number {
-  return capacity > 0 ? value / capacity : 0;
-}
-
 function traceArrival(trace: RequestTrace, nodeId: InfrastructureNodeId): number {
   return trace.nodes.find((node) => node.nodeId === nodeId)?.arrivalRatio ?? 0;
 }
@@ -352,6 +347,7 @@ export class LoadCalculator {
     let asyncDemand = 0;
     let storageDemand = 0;
     let gatewayDemand = 0;
+    let cacheDemand = 0;
     let weightedSuccess = 0;
     let totalTrafficWeight = 0;
 
@@ -372,9 +368,12 @@ export class LoadCalculator {
         gatewayDemand += Math.max(appCpuBase, appIoBase) * traceArrival(trace, gatewayNodeId);
       }
 
-      // Redis is deliberately a targeted Read-heavy I/O solution rather than a
-      // generic DB capacity upgrade. Cache incidents weaken the benefit.
+      // Redis remains a targeted read-heavy optimization. Its own throughput is
+      // the traffic it attempts to serve; cache health only controls how much of
+      // that traffic is successfully offloaded from the database.
       if (redisActive && feature.tags.has('READ_HEAVY')) {
+        const databaseArrival = traceArrival(trace, databaseNodeId);
+        cacheDemand += Math.max(dbCpuBase * 0.12, dbIoBase * 0.40) * databaseArrival;
         dbCpuBase *= 1 - 0.12 * cacheHealth;
         dbIoBase *= 1 - 0.40 * cacheHealth;
       }
@@ -405,39 +404,18 @@ export class LoadCalculator {
       weightedSuccess += trafficWeight * trace.successRatio;
     });
 
-    const rawAppCapacity = infrastructure.app.capacity;
-    const rawDbCapacity = infrastructure.database.capacity;
-    const rawAsyncCapacity = infrastructure.asyncCapacity;
     const tuningApp = capacityTuningMultiplier(context.appProficiencyLevel ?? 1);
     const tuningDb = capacityTuningMultiplier(context.databaseProficiencyLevel ?? 1);
-    const appCapacity = rawAppCapacity * tuningApp;
-    const dbCapacity = rawDbCapacity * tuningDb;
-
-    const rawAppCpuCapacity = infrastructure.app.cpuCapacity;
-    const rawAppIoCapacity = infrastructure.app.ioCapacity;
-    const rawDbCpuCapacity = infrastructure.database.cpuCapacity;
-    const rawDbIoCapacity = infrastructure.database.ioCapacity;
-    const appCpuCapacity = rawAppCpuCapacity * tuningApp;
-    const appIoCapacity = rawAppIoCapacity * tuningApp;
-    const dbCpuCapacity = rawDbCpuCapacity * tuningDb;
-    const dbIoCapacity = rawDbIoCapacity * tuningDb;
+    const appCpuCapacity = infrastructure.app.cpuCapacity * tuningApp;
+    const appIoCapacity = infrastructure.app.ioCapacity * tuningApp;
+    const dbCpuCapacity = infrastructure.database.cpuCapacity * tuningDb;
+    const dbIoCapacity = infrastructure.database.ioCapacity * tuningDb;
 
     const queueLevel = queue ? context.technologyProficiencyLevels?.[queue] ?? 1 : 1;
-    const asyncCapacity = rawAsyncCapacity * capacityTuningMultiplier(queueLevel);
+    const asyncCapacity = infrastructure.asyncCapacity * capacityTuningMultiplier(queueLevel);
     const storageCapacity = infrastructure.storageCapacity;
-
-    const appCpuRatio = ratio(appCpuDemand, appCpuCapacity);
-    const appIoRatio = ratio(appIoDemand, appIoCapacity);
-    const dbCpuRatio = ratio(dbCpuDemand, dbCpuCapacity);
-    const dbIoRatio = ratio(dbIoDemand, dbIoCapacity);
     const failureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
-    const appDemand = Math.max(appCpuDemand, appIoDemand);
-    const dbDemand = Math.max(dbCpuDemand, dbIoDemand);
-    const appRatio = Math.max(appCpuRatio, appIoRatio);
-    const dbRatio = Math.max(dbCpuRatio, dbIoRatio);
-    const asyncRatio = queue && asyncCapacity > 0 ? asyncDemand / asyncCapacity : 0;
-    const storageRatio = storageCapacity > 0 ? storageDemand / storageCapacity : 0;
-    const dbBottleneckCapacity = dbCpuRatio >= dbIoRatio ? dbCpuCapacity : dbIoCapacity;
+
     const nodeLoads = topology.graph.nodes.map((node): NodeLoadSnapshot => {
       if (node.id === appNodeId) {
         return createNodeLoadSnapshot(node.id, node.kind, [
@@ -462,15 +440,17 @@ export class LoadCalculator {
         ]);
       }
       if (node.kind === 'LOAD_BALANCER') {
-        const gatewayCapacity = (node.capacity.throughput ?? rawAppCapacity) * tuningApp;
+        const gatewayLevel = context.technologyProficiencyLevels?.ALB ?? 1;
+        const gatewayCapacity = (node.capacity.throughput ?? 0) * capacityTuningMultiplier(gatewayLevel);
         return createNodeLoadSnapshot(node.id, node.kind, [
           createNodeResourceLoad('THROUGHPUT', gatewayDemand, gatewayCapacity),
         ]);
       }
       if (node.kind === 'CACHE') {
-        const cacheCapacity = dbRatio > 0 ? dbDemand / dbRatio : dbBottleneckCapacity;
+        const cacheLevel = context.technologyProficiencyLevels?.REDIS ?? 1;
+        const cacheCapacity = (node.capacity.throughput ?? 0) * capacityTuningMultiplier(cacheLevel);
         return createNodeLoadSnapshot(node.id, node.kind, [
-          createNodeResourceLoad('THROUGHPUT', dbDemand, cacheCapacity),
+          createNodeResourceLoad('THROUGHPUT', cacheDemand, cacheCapacity),
         ]);
       }
       return createNodeLoadSnapshot(node.id, node.kind, []);
