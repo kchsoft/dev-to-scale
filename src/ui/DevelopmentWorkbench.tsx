@@ -25,6 +25,7 @@ const KIND_LABEL: Readonly<Record<DevelopmentOptionKind, string>> = {
 
 interface DevelopmentWorkbenchProps {
   readonly view: DevelopmentWorkbenchView;
+  readonly initialSelectedId?: string | null;
   readonly onAction: (action: DevelopmentActionView) => void;
 }
 
@@ -52,9 +53,13 @@ export function optionIdForWorkSlot(
   return active.find((option) => option.id !== 'feature:refactor')?.id ?? active[0]?.id ?? null;
 }
 
-export function DevelopmentWorkbench({ view, onAction }: DevelopmentWorkbenchProps) {
+export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction }: DevelopmentWorkbenchProps) {
   const [filter, setFilter] = useState<DevelopmentFilter>('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => (
+    initialSelectedId && view.options.some((option) => option.id === initialSelectedId)
+      ? initialSelectedId
+      : null
+  ));
   const [pendingAction, setPendingAction] = useState<DevelopmentActionView | null>(null);
   const actionButtonRef = useRef<HTMLButtonElement | null>(null);
 
