@@ -10,6 +10,7 @@ import {
   RouteResolver,
   ResolvedRoute,
   ServiceModule,
+  ServiceTopology,
   WorkloadAssignment,
 } from './service-topology';
 import { TECHNOLOGIES } from './technology';
@@ -20,6 +21,8 @@ import {
   TopologyEdgeMode,
   TopologyGraph,
 } from './topology';
+
+export const V1_MODULE_ID = 'community';
 
 export const V1_NODE_IDS = Object.freeze({
   gateway: 'v1:gateway:ALB',
@@ -193,6 +196,32 @@ function topologyEdges(
     addEdge(V1_NODE_IDS.cache, databaseId, 'SYNC');
   }
   return edges;
+}
+
+export class V1ServiceTopologyFactory {
+  static create(
+    infrastructure: InfrastructureState,
+    features: readonly FeatureDefinition[],
+  ): ServiceTopology {
+    const blueprints = features.map((feature) => (
+      V1RouteBlueprintAdapter.fromFeature(feature, V1_MODULE_ID)
+    ));
+    const module = new ServiceModule(V1_MODULE_ID, blueprints);
+    const deployment = new ModuleDeployment(V1_MODULE_ID, deploymentBindings(infrastructure));
+    const graph = new TopologyGraph(
+      infrastructureNodes(infrastructure),
+      topologyEdges(blueprints, deployment, infrastructure),
+    );
+    const assignments = features.map((feature) => (
+      new WorkloadAssignment(feature.id, V1_MODULE_ID)
+    ));
+    return new ServiceTopology({
+      graph,
+      modules: [module],
+      deployments: [deployment],
+      assignments,
+    });
+  }
 }
 
 export class SingleServiceTopology {

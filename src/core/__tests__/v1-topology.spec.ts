@@ -4,8 +4,10 @@ import { InfrastructureState } from '../infrastructure';
 import { RequestTraceSimulator } from '../request-trace';
 import {
   SingleServiceTopology,
+  V1_MODULE_ID,
   V1_NODE_IDS,
   V1RouteBlueprintAdapter,
+  V1ServiceTopologyFactory,
 } from '../v1-topology';
 
 describe('V1RouteBlueprintAdapter', () => {
@@ -102,15 +104,15 @@ describe('SingleServiceTopology', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     infrastructure.deployTechnology('SQS');
     const feature = COMMUNITY_FEATURES.NOTIFICATION;
-    const before = SingleServiceTopology.from(infrastructure, [feature]);
+    const before = V1ServiceTopologyFactory.create(infrastructure, [feature]);
 
     const retired = infrastructure.deployTechnology('KAFKA');
-    const after = SingleServiceTopology.from(infrastructure, [feature]);
+    const after = V1ServiceTopologyFactory.create(infrastructure, [feature]);
 
     expect(retired).toEqual(['SQS']);
-    expect(before.module.blueprints).toEqual(after.module.blueprints);
-    expect(before.deployment.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('SQS'));
-    expect(after.deployment.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('KAFKA'));
+    expect(before.module(V1_MODULE_ID)?.blueprints).toEqual(after.module(V1_MODULE_ID)?.blueprints);
+    expect(before.deployment(V1_MODULE_ID)?.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('SQS'));
+    expect(after.deployment(V1_MODULE_ID)?.bindingFor('EVENT_BUS')).toBe(V1_NODE_IDS.queue('KAFKA'));
     expect(after.graph.node(V1_NODE_IDS.queue('SQS'))).toBeUndefined();
     expect(after.graph.node(V1_NODE_IDS.queue('KAFKA'))).toEqual(expect.objectContaining({
       productId: 'KAFKA',
@@ -122,13 +124,13 @@ describe('SingleServiceTopology', () => {
   it('composes ALB ingress into runtime traces without changing the module blueprint', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     const feature = COMMUNITY_FEATURES.COMMENT;
-    const before = SingleServiceTopology.from(infrastructure, [feature]);
+    const before = V1ServiceTopologyFactory.create(infrastructure, [feature]);
     infrastructure.deployTechnology('ALB');
-    const after = SingleServiceTopology.from(infrastructure, [feature]);
+    const after = V1ServiceTopologyFactory.create(infrastructure, [feature]);
 
     const trace = RequestTraceSimulator.simulate(after.resolveForTrace(feature.id));
 
-    expect(before.module.blueprints).toEqual(after.module.blueprints);
+    expect(before.module(V1_MODULE_ID)?.blueprints).toEqual(after.module(V1_MODULE_ID)?.blueprints);
     expect(trace.nodes.map(({ nodeId }) => nodeId)).toEqual([
       V1_NODE_IDS.gateway,
       V1_NODE_IDS.app('SPRING_BOOT'),
@@ -150,5 +152,27 @@ describe('SingleServiceTopology', () => {
       status: 'MISSING',
     }));
     expect(trace.successRatio).toBe(0);
+  });
+});
+
+describe('V1ServiceTopologyFactory', () => {
+  it('creates the community catalog through the generic aggregate', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    const topology = V1ServiceTopologyFactory.create(infrastructure, [COMMUNITY_FEATURES.COMMENT]);
+
+    expect(V1_MODULE_ID).toBe('community');
+    expect(topology.modules.map(({ id }) => id)).toEqual(['community']);
+    expect(topology.deployments.map(({ moduleId }) => moduleId)).toEqual(['community']);
+    expect(topology.assignments).toEqual([
+      expect.objectContaining({ workloadId: 'COMMENT', entryModuleId: 'community' }),
+    ]);
+    expect(topology.module(V1_MODULE_ID)?.blueprints).toHaveLength(1);
+    expect(topology.deployment(V1_MODULE_ID)?.bindingFor('ENTRY_APP')).toBe(
+      V1_NODE_IDS.app('SPRING_BOOT'),
+    );
+    expect(topology.resolve('COMMENT').steps.map(({ nodeId }) => nodeId)).toEqual([
+      V1_NODE_IDS.app('SPRING_BOOT'),
+      V1_NODE_IDS.database('POSTGRESQL'),
+    ]);
   });
 });
