@@ -65,6 +65,7 @@ describe('generic node scaling application projection', () => {
     engine.infrastructure.deployTechnology('ALB');
     engine.infrastructure.deployTechnology('REDIS');
     engine.infrastructure.deployTechnology('SQS');
+    engine.resizeInfrastructureNode(V1_NODE_IDS.app('SPRING_BOOT'), ServerSize.SMALL);
 
     const nodes = new GameServiceProjector(engine).project(engine.snapshot, {
       monthlyRevenue: 0,
