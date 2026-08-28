@@ -6,6 +6,7 @@ import {
   GameEngine,
   GameSnapshot,
   LoadSnapshot,
+  NodeResourceKind,
   V1_NODE_IDS,
 } from '../../core';
 import { OperationalViewProjector } from '../operational-view-projector';
@@ -17,23 +18,20 @@ const selection = {
   storageNodeId: V1_NODE_IDS.storage,
 };
 
-type LoadOverrides = Partial<LoadSnapshot> & Record<string, number>;
+interface LoadOverrides {
+  readonly failureRate?: number;
+  readonly resourceRatios?: readonly {
+    readonly nodeId: string;
+    readonly resourceKind: NodeResourceKind;
+    readonly ratio: number;
+  }[];
+}
 function snapshot(loadOverrides: LoadOverrides): GameSnapshot {
   const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 22 });
   const ratioFor = (nodeId: string, resourceKind: 'CPU' | 'IO' | 'THROUGHPUT' | 'STORAGE', current: number) => {
-    if (nodeId === V1_NODE_IDS.app('SPRING_BOOT')) {
-      return resourceKind === 'CPU'
-        ? loadOverrides.appCpuRatio ?? loadOverrides.appRatio ?? current
-        : loadOverrides.appIoRatio ?? loadOverrides.appRatio ?? current;
-    }
-    if (nodeId === V1_NODE_IDS.database('POSTGRESQL')) {
-      return resourceKind === 'CPU'
-        ? loadOverrides.dbCpuRatio ?? loadOverrides.dbRatio ?? current
-        : loadOverrides.dbIoRatio ?? loadOverrides.dbRatio ?? current;
-    }
-    if (resourceKind === 'THROUGHPUT') return loadOverrides.asyncRatio ?? current;
-    if (resourceKind === 'STORAGE') return loadOverrides.storageRatio ?? current;
-    return current;
+    return loadOverrides.resourceRatios?.find((override) => (
+      override.nodeId === nodeId && override.resourceKind === resourceKind
+    ))?.ratio ?? current;
   };
   return {
     ...engine.snapshot,
@@ -180,9 +178,10 @@ describe('operational view projector', () => {
 
   it('owns the BASIC service summary and preserves the app/database headline', () => {
     const service = OperationalViewProjector.project(snapshot({
-      appRatio: 0.4,
-      dbRatio: 0.8,
-      asyncRatio: 1.2,
+      resourceRatios: [
+        { nodeId: selection.appNodeId, resourceKind: 'CPU', ratio: 0.4 },
+        { nodeId: selection.databaseNodeId, resourceKind: 'CPU', ratio: 0.8 },
+      ],
     }), new DeveloperProfile(), selection);
 
     expect(service.summary.headline).toBe('LOAD 80%');
@@ -191,8 +190,10 @@ describe('operational view projector', () => {
 
   it('projects the hottest resource into service health', () => {
     const service = OperationalViewProjector.project(snapshot({
-      appCpuRatio: 0.42,
-      appIoRatio: 1.12,
+      resourceRatios: [
+        { nodeId: selection.appNodeId, resourceKind: 'CPU', ratio: 0.42 },
+        { nodeId: selection.appNodeId, resourceKind: 'IO', ratio: 1.12 },
+      ],
       failureRate: 0,
     }), new DeveloperProfile(), selection);
 
@@ -203,8 +204,8 @@ describe('operational view projector', () => {
 
   it('raises projected p95 latency as capacity pressure increases', () => {
     const developer = new DeveloperProfile();
-    const low = OperationalViewProjector.project(snapshot({ appCpuRatio: 0.4 }), developer, selection);
-    const high = OperationalViewProjector.project(snapshot({ appCpuRatio: 1.2 }), developer, selection);
+    const low = OperationalViewProjector.project(snapshot({ resourceRatios: [{ nodeId: selection.appNodeId, resourceKind: 'CPU', ratio: 0.4 }] }), developer, selection);
+    const high = OperationalViewProjector.project(snapshot({ resourceRatios: [{ nodeId: selection.appNodeId, resourceKind: 'CPU', ratio: 1.2 }] }), developer, selection);
 
     expect(high.health.p95LatencyMs).toBeGreaterThan(low.health.p95LatencyMs);
     expect(high.health.bottleneck).toBe('APP_CPU');
@@ -239,7 +240,7 @@ describe('operational view projector', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 23 });
     const text = OperationalViewProjector.diagnosisText(
       V1_NODE_IDS.app('SPRING_BOOT'),
-      snapshot({ appCpuRatio: 1.1, appIoRatio: 0.5 }),
+      snapshot({ resourceRatios: [{ nodeId: selection.appNodeId, resourceKind: 'CPU', ratio: 1.1 }, { nodeId: selection.appNodeId, resourceKind: 'IO', ratio: 0.5 }] }),
       engine.developer,
     );
 
@@ -252,7 +253,7 @@ describe('operational view projector', () => {
 
     const text = OperationalViewProjector.diagnosisText(
       V1_NODE_IDS.database('POSTGRESQL'),
-      snapshot({ dbCpuRatio: 0.55, dbIoRatio: 0.96 }),
+      snapshot({ resourceRatios: [{ nodeId: selection.databaseNodeId, resourceKind: 'CPU', ratio: 0.55 }, { nodeId: selection.databaseNodeId, resourceKind: 'IO', ratio: 0.96 }] }),
       engine.developer,
     );
 
@@ -264,7 +265,7 @@ describe('operational view projector', () => {
     engine.developer.get({ category: 'fundamental', id: 'OS_RUNTIME' }).setLevel(3);
     engine.developer.get({ category: 'fundamental', id: 'NETWORK' }).setLevel(2);
     engine.developer.get({ category: 'fundamental', id: 'SOFTWARE_DESIGN' }).setLevel(2);
-    const base = snapshot({ appCpuRatio: 0.72, appIoRatio: 0.51 });
+    const base = snapshot({ resourceRatios: [{ nodeId: selection.appNodeId, resourceKind: 'CPU', ratio: 0.72 }, { nodeId: selection.appNodeId, resourceKind: 'IO', ratio: 0.51 }] });
     const state = { ...base, techDebt: { ...base.techDebt, value: 72 } };
 
     const text = OperationalViewProjector.diagnosisText(

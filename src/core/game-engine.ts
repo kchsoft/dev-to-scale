@@ -387,7 +387,9 @@ export class GameEngine {
   private advanceGrowth(): void {
     this.growthEvent = GrowthPolicy.maybeStartEvent(this.growthEvent, this.random);
     const phase = this.progression.finished ? 3 : this.progression.currentRequirement.phase;
-    const maxLoadRatio = maxNodeLoad(this._load)?.loadRatio ?? 0;
+    const maxLoadRatio = (['SERVER_GROUP', 'DATABASE', 'QUEUE', 'OBJECT_STORAGE'] as const)
+      .map((nodeKind) => maxNodeLoad(this._load, { nodeKind })?.loadRatio ?? 0)
+      .reduce((maximum, ratio) => Math.max(maximum, ratio), 0);
     const result = GrowthPolicy.calculate({
       phase,
       completedFeatureGrowthBonus: this.completedFeatureDefinitions.reduce(
