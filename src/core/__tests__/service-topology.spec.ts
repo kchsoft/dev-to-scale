@@ -8,6 +8,7 @@ import {
   WorkloadAssignment,
 } from '../service-topology';
 import { InfrastructureNode, TopologyGraph } from '../topology';
+import { multiModuleTopology } from './fixtures/multi-module-topology';
 
 function node(id: string, kind: InfrastructureNode['kind']): InfrastructureNode {
   return { id, kind, productId: id, capacity: {}, monthlyCost: 0 };
@@ -319,6 +320,45 @@ describe('ServiceTopology aggregate', () => {
   ])('rejects $name during aggregate construction', ({ code, deployment }) => {
     expect(() => new ServiceTopology(topologyInput({ deployments: [deployment] }))).toThrowError(
       expect.objectContaining({ code }),
+    );
+  });
+
+  it('resolves the same workload through its assigned module and shared queue', () => {
+    const community = multiModuleTopology('community').resolve('search');
+    const search = multiModuleTopology('search').resolve('search');
+
+    expect(community.moduleId).toBe('community');
+    expect(community.steps.map(({ nodeId }) => nodeId)).toEqual([
+      'app-community', 'db-community', 'shared-queue',
+    ]);
+    expect(search.moduleId).toBe('search');
+    expect(search.steps.map(({ nodeId }) => nodeId)).toEqual([
+      'app-search', 'db-search', 'shared-queue',
+    ]);
+  });
+
+  it('composes ingress from only the selected deployment', () => {
+    const route = multiModuleTopology('search').resolveForTrace('search');
+
+    expect(route.steps[0]).toEqual({
+      stepId: 'ingress:search:search:gateway',
+      role: 'ENTRY_GATEWAY',
+      requirement: 'REQUIRED',
+      nodeId: 'gateway-search',
+    });
+    expect(route.edges[0]).toEqual({
+      blueprintEdgeId: 'ingress:search:search',
+      topologyEdgeId: 'ingress-search',
+      fromNodeId: 'gateway-search',
+      toNodeId: 'app-search',
+      mode: 'SYNC',
+    });
+    expect(route.steps.some(({ nodeId }) => nodeId === 'gateway-community')).toBe(false);
+  });
+
+  it('rejects an unassigned workload without falling back to the first module', () => {
+    expect(() => multiModuleTopology('community').resolve('comment')).toThrowError(
+      expect.objectContaining({ code: 'UNKNOWN_WORKLOAD_ASSIGNMENT' }),
     );
   });
 });

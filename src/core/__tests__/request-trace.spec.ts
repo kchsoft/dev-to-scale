@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RequestTraceSimulator, trafficHealthForSeverity } from '../request-trace';
 import type { ResolvedRoute } from '../service-topology';
+import { multiModuleTopology } from './fixtures/multi-module-topology';
 
 function queueRoute(queueNodeId: string): ResolvedRoute {
   return {
@@ -101,5 +102,13 @@ describe('RequestTraceSimulator', () => {
     expect(trafficHealthForSeverity('MINOR')).toBe(0.8);
     expect(trafficHealthForSeverity('MAJOR')).toBe(0.4);
     expect(trafficHealthForSeverity('CRITICAL')).toBe(0);
+  });
+
+  it('isolates exact-node health across module-selected routes', () => {
+    const communityRoute = multiModuleTopology('community').resolveForTrace('search');
+    const searchRoute = multiModuleTopology('search').resolveForTrace('search');
+
+    expect(RequestTraceSimulator.simulate(communityRoute, { 'app-community': 0 }).successRatio).toBe(0);
+    expect(RequestTraceSimulator.simulate(searchRoute, { 'app-community': 0 }).successRatio).toBe(1);
   });
 });

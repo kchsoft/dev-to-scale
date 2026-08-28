@@ -238,6 +238,71 @@ export class ServiceTopology {
   assignment(workloadId: string): WorkloadAssignment | undefined {
     return this.assignmentsByWorkloadId.get(workloadId);
   }
+
+  private resolutionTarget(workloadId: string): {
+    readonly assignment: WorkloadAssignment;
+    readonly module: ServiceModule;
+    readonly deployment: ModuleDeployment;
+    readonly blueprint: RouteBlueprint;
+  } {
+    const assignment = this.assignment(workloadId);
+    if (!assignment) {
+      throw new TopologyValidationError(
+        'UNKNOWN_WORKLOAD_ASSIGNMENT',
+        `Workload has no entry-module assignment: ${workloadId}`,
+      );
+    }
+    const module = this.module(assignment.entryModuleId)!;
+    const deployment = this.deployment(assignment.entryModuleId)!;
+    const blueprint = module.blueprints.find((candidate) => candidate.workloadId === workloadId)!;
+    return { assignment, module, deployment, blueprint };
+  }
+
+  resolve(workloadId: string): ResolvedRoute {
+    const { blueprint, deployment } = this.resolutionTarget(workloadId);
+    return RouteResolver.resolve(blueprint, deployment, this.graph);
+  }
+
+  resolveForTrace(workloadId: string): ResolvedRoute {
+    const { module, blueprint, deployment } = this.resolutionTarget(workloadId);
+    const internalRoute = RouteResolver.resolveForTrace(blueprint, deployment, this.graph);
+    const gatewayNodeId = deployment.bindingFor('ENTRY_GATEWAY');
+    if (!gatewayNodeId || internalRoute.steps[0]?.role === 'ENTRY_GATEWAY') return internalRoute;
+
+    const firstNodeId = internalRoute.steps.find((step) => step.nodeId !== null)?.nodeId;
+    if (!firstNodeId) return internalRoute;
+    const ingressEdge = this.graph.edge(gatewayNodeId, firstNodeId, 'SYNC');
+    if (!ingressEdge) {
+      throw new TopologyValidationError(
+        'DISCONNECTED_ROUTE',
+        `Gateway is disconnected from module entry: ${gatewayNodeId} -> ${firstNodeId}`,
+      );
+    }
+
+    return Object.freeze({
+      workloadId: internalRoute.workloadId,
+      moduleId: internalRoute.moduleId,
+      steps: Object.freeze([
+        Object.freeze({
+          stepId: `ingress:${module.id}:${workloadId}:gateway`,
+          role: 'ENTRY_GATEWAY' as const,
+          requirement: 'REQUIRED' as const,
+          nodeId: gatewayNodeId,
+        }),
+        ...internalRoute.steps,
+      ]),
+      edges: Object.freeze([
+        Object.freeze({
+          blueprintEdgeId: `ingress:${module.id}:${workloadId}`,
+          topologyEdgeId: ingressEdge.id,
+          fromNodeId: gatewayNodeId,
+          toNodeId: firstNodeId,
+          mode: ingressEdge.mode,
+        }),
+        ...internalRoute.edges,
+      ]),
+    });
+  }
 }
 
 export interface ResolvedRouteStep {
