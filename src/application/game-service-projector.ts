@@ -10,7 +10,6 @@ import {
   maxResourceLoad,
   ServerSize,
   ServiceTopology,
-  V1_MODULE_ID,
   V1ServiceTopologyFactory,
 } from '../core';
 import {
@@ -21,7 +20,7 @@ import {
   TopologyView,
 } from './game-view';
 import type { GameFinancialProjection } from './game-overview-projector';
-import { OperationalNodeSelection, OperationalViewProjector } from './operational-view-projector';
+import { OperationalViewProjector } from './operational-view-projector';
 import { presentationCatalog } from './presentation-catalog';
 import { TopologyViewProjector } from './topology-view-projector';
 
@@ -57,31 +56,6 @@ export interface GameServiceProjection {
   readonly service: ServiceOperationsView;
 }
 
-function requiredV1Deployment(topology: ServiceTopology) {
-  const deployment = topology.deployment(V1_MODULE_ID);
-  if (!deployment) throw new Error(`Missing required module deployment: ${V1_MODULE_ID}`);
-  return deployment;
-}
-
-function requiredTopologyBinding(
-  topology: ServiceTopology,
-  role: 'ENTRY_APP' | 'PRIMARY_DATABASE' | 'OBJECT_STORAGE',
-): string {
-  const nodeId = requiredV1Deployment(topology).bindingFor(role);
-  if (!nodeId) throw new Error(`Missing required topology binding: ${role}`);
-  return nodeId;
-}
-
-function operationalNodeSelection(topology: ServiceTopology): OperationalNodeSelection {
-  const deployment = requiredV1Deployment(topology);
-  return {
-    appNodeId: requiredTopologyBinding(topology, 'ENTRY_APP'),
-    databaseNodeId: requiredTopologyBinding(topology, 'PRIMARY_DATABASE'),
-    queueNodeId: deployment.bindingFor('EVENT_BUS') ?? null,
-    storageNodeId: requiredTopologyBinding(topology, 'OBJECT_STORAGE'),
-  };
-}
-
 export class GameServiceProjector {
   readonly #engine: GameEngine;
 
@@ -94,7 +68,7 @@ export class GameServiceProjector {
     const service = OperationalViewProjector.project(
       snapshot,
       this.#engine.developer,
-      operationalNodeSelection(topology),
+      topology,
     );
     return {
       alerts: this.alerts(snapshot, financials.monthlyProfit, service.observability),
