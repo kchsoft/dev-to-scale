@@ -9,7 +9,6 @@ export type GameEventKind = 'requirement' | 'incident' | 'traffic' | 'launch' | 
 export type GameStatusView = 'RUNNING' | 'BANKRUPT' | 'WON';
 export type ObservabilityLevelView = 'BASIC' | 'METRICS' | 'APM';
 export type ServiceHealthStatusView = 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
-export type BottleneckView = 'APP_CPU' | 'APP_IO' | 'DB_CPU' | 'DB_IO' | 'ASYNC' | 'STORAGE' | 'NONE';
 export type RequestNodeViewKind = 'ALB' | 'APP' | 'DB' | 'CACHE' | 'QUEUE' | 'STORAGE' | 'AI';
 
 export interface GameStartConfig {
@@ -163,6 +162,15 @@ export interface TopologyNodeView {
   readonly incidentSeverity?: string;
 }
 
+export interface BottleneckView {
+  readonly nodeId: string;
+  readonly nodeKind: TopologyNodeView['kind'];
+  readonly resourceKind: 'CPU' | 'IO' | 'THROUGHPUT' | 'STORAGE';
+  readonly ratio: number;
+  readonly percent: number;
+  readonly label: string;
+}
+
 export interface TopologyEdgeView {
   readonly id: string;
   readonly fromNodeId: string;
@@ -214,10 +222,7 @@ export interface LoadMetricView {
 export interface ServiceHealthView {
   readonly status: ServiceHealthStatusView;
   readonly p95LatencyMs: number;
-  readonly bottleneck: BottleneckView;
-  readonly bottleneckLabel: string;
-  readonly bottleneckPercent: number;
-  readonly bottleneckNodeId: string | null;
+  readonly bottleneck: BottleneckView | null;
 }
 
 export interface ServiceOperationsView {
