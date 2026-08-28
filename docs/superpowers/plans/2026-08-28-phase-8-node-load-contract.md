@@ -234,6 +234,8 @@ rtk git commit -m "feat: define node resource load contract"
 - Modify: `src/core/index.ts`
 - Modify: `src/core/__tests__/node-load.spec.ts`
 - Modify: `src/core/__tests__/infrastructure-load.spec.ts`
+- Modify: `src/application/topology-view-projector.ts`
+- Modify: `src/application/__tests__/topology-view-projector.spec.ts`
 
 **Interfaces:**
 - Consumes: Task 1's `NodeLoadSnapshot`, `createNodeResourceLoad`, and `createNodeLoadSnapshot`.
@@ -298,6 +300,8 @@ Expected: FAIL because current node loads do not have `nodeKind` or `resources`.
 
 Import the contract from `./node-load` and remove the local `NodeLoadSnapshot` declaration from `infrastructure.ts`. In the same change, export the canonical `NodeLoadSnapshot` type from `src/core/index.ts`; this intentionally completes the barrel-export requirement deferred from Task 1 because the legacy declaration currently owns that name. Keep the legacy flat fields in `LoadSnapshot` until Task 6.
 
+Migrate the existing topology view consumer in the same atomic contract change: derive its displayed capacity as the maximum capacity across `load.resources`, retaining the graph-capacity fallback when no node load exists, and rebuild its test fixtures with the canonical factories. This is a representation-only adaptation; preserve all rendered values, topology filtering, trace behavior, and copy.
+
 Inside the existing `topology.graph.nodes.map`, construct these resources without changing any formula:
 
 ```ts
@@ -336,7 +340,7 @@ Expected: all tests PASS with both representations numerically identical.
 - [ ] **Step 5: Commit**
 
 ```bash
-rtk git add src/core/infrastructure.ts src/core/index.ts src/core/__tests__/node-load.spec.ts src/core/__tests__/infrastructure-load.spec.ts
+rtk git add src/core/infrastructure.ts src/core/index.ts src/core/__tests__/node-load.spec.ts src/core/__tests__/infrastructure-load.spec.ts src/application/topology-view-projector.ts src/application/__tests__/topology-view-projector.spec.ts
 rtk git commit -m "refactor: publish per-node resource loads"
 ```
 
