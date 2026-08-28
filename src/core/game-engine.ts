@@ -21,7 +21,8 @@ import { SeededRandomSource } from './random';
 import { trafficHealthForSeverity } from './request-trace';
 import { TechDebtState } from './tech-debt';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
-import { V1ServiceTopologyFactory, v1NodeIdForTechnology } from './v1-topology';
+import type { InfrastructureNodeId } from './topology';
+import { V1ServiceTopologyFactory, V1_NODE_IDS, v1NodeIdForTechnology } from './v1-topology';
 
 export type GameStatus = 'RUNNING' | 'BANKRUPT' | 'WON';
 
@@ -291,28 +292,36 @@ export class GameEngine {
     this.incidents.startResponse(incidentId, context.proficiencyLevel, context.fundamentalAverage);
   }
 
+  resizeInfrastructureNode(nodeId: InfrastructureNodeId, size: ServerSize): void {
+    this.ensureRunning();
+    this.infrastructure.resizeNode(nodeId, size);
+    this.refreshLoad();
+  }
+
+  scaleOutInfrastructureNode(nodeId: InfrastructureNodeId): void {
+    this.ensureRunning();
+    this.infrastructure.scaleOutNode(nodeId);
+    this.refreshLoad();
+  }
+
+  /** @deprecated Use resizeInfrastructureNode with the APP topology node ID. */
   scaleApplication(size: ServerSize): void {
-    this.ensureRunning();
-    this.infrastructure.app.scaleUp(size);
-    this.refreshLoad();
+    this.resizeInfrastructureNode(V1_NODE_IDS.app(this.config.frameworkId), size);
   }
 
+  /** @deprecated Use scaleOutInfrastructureNode with the APP topology node ID. */
   addApplicationServer(): void {
-    this.ensureRunning();
-    this.infrastructure.app.addServer();
-    this.refreshLoad();
+    this.scaleOutInfrastructureNode(V1_NODE_IDS.app(this.config.frameworkId));
   }
 
+  /** @deprecated Use resizeInfrastructureNode with the DB topology node ID. */
   scaleDatabase(size: ServerSize): void {
-    this.ensureRunning();
-    this.infrastructure.database.scaleUp(size);
-    this.refreshLoad();
+    this.resizeInfrastructureNode(V1_NODE_IDS.database(this.config.databaseId), size);
   }
 
+  /** @deprecated Use scaleOutInfrastructureNode with the DB topology node ID. */
   addDatabaseReplica(): void {
-    this.ensureRunning();
-    this.infrastructure.database.addReplica();
-    this.refreshLoad();
+    this.scaleOutInfrastructureNode(V1_NODE_IDS.database(this.config.databaseId));
   }
 
   fastTrackCurrentFeature(): { addedWork: number; addedDebt: number } {
