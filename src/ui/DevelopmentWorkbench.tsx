@@ -53,6 +53,10 @@ export function optionIdForWorkSlot(
   return active.find((option) => option.id !== 'feature:refactor')?.id ?? active[0]?.id ?? null;
 }
 
+export function shouldDismissInspector(key: string): boolean {
+  return key === 'Escape';
+}
+
 export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction }: DevelopmentWorkbenchProps) {
   const [filter, setFilter] = useState<DevelopmentFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(() => (
@@ -62,6 +66,7 @@ export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction 
   ));
   const [pendingAction, setPendingAction] = useState<DevelopmentActionView | null>(null);
   const actionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const inspectorRef = useRef<HTMLElement | null>(null);
 
   const visibleOptions = useMemo(
     () => filterDevelopmentOptions(view.options, filter),
@@ -77,6 +82,17 @@ export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction 
       setPendingAction(null);
     }
   }, [selectedId, visibleOptions]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const frame = requestAnimationFrame(() => inspectorRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [selected?.id]);
+
+  const closeInspector = () => {
+    setSelectedId(null);
+    setPendingAction(null);
+  };
 
   const selectSlot = (slot: WorkSlotView) => {
     const optionId = optionIdForWorkSlot(slot, view.options);
@@ -111,10 +127,17 @@ export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction 
         selectedId={selectedId}
         onSelect={setSelectedId}
       />
+      {selected && <button
+        type="button"
+        className="development-inspector-backdrop"
+        aria-label="Inspector 닫기"
+        onClick={closeInspector}
+      />}
       <DevelopmentInspector
         option={selected}
+        inspectorRef={inspectorRef}
         actionButtonRef={actionButtonRef}
-        onClose={() => setSelectedId(null)}
+        onClose={closeInspector}
         onAction={(action) => setPendingAction(action)}
       />
     </div>
@@ -228,11 +251,13 @@ function DevelopmentOptionRow({ option, selected, onSelect }: { readonly option:
 
 function DevelopmentInspector({
   option,
+  inspectorRef,
   actionButtonRef,
   onClose,
   onAction,
 }: {
   readonly option: DevelopmentOptionView | null;
+  readonly inspectorRef: RefObject<HTMLElement | null>;
   readonly actionButtonRef: RefObject<HTMLButtonElement | null>;
   readonly onClose: () => void;
   readonly onAction: (action: DevelopmentActionView) => void;
@@ -248,7 +273,19 @@ function DevelopmentInspector({
     </aside>;
   }
 
-  return <aside className="development-inspector panel-shell" aria-labelledby="development-inspector-title">
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!shouldDismissInspector(event.key)) return;
+    event.preventDefault();
+    onClose();
+  };
+
+  return <aside
+    ref={inspectorRef}
+    className="development-inspector panel-shell"
+    aria-labelledby="development-inspector-title"
+    tabIndex={-1}
+    onKeyDown={onKeyDown}
+  >
     <header><div><span>INSPECTOR · {KIND_LABEL[option.kind]}</span><strong id="development-inspector-title">{option.title}</strong></div><button type="button" onClick={onClose} aria-label="Inspector 닫기">×</button></header>
     <div className="development-inspector-body">
       <div className="development-inspector-status"><em className={`development-state ${option.state}`}>{option.statusLabel}</em><code>{option.id}</code></div>

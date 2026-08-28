@@ -1,0 +1,21 @@
+.development-inspector-backdrop {
+  display: none;
+}
+
+.development-inspector:focus {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+
+@media (max-width: 900px) {
+  .development-inspector-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    border: 0;
+    padding: 0;
+    background: rgba(2, 5, 8, .62);
+    cursor: pointer;
+  }
+}
