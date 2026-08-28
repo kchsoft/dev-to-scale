@@ -32,8 +32,14 @@ interface IndexedOption {
 
 export class DevelopmentWorkbenchProjector {
   project(view: GameView): DevelopmentWorkbenchView {
+    const featureOptions = view.features.map((feature) => this.featureOption(feature, view));
+    const currentFeature = view.operations.currentFeature;
+    if (currentFeature && !view.features.some(({ id }) => id === currentFeature.id)) {
+      featureOptions.unshift(this.currentFeatureFallbackOption(view));
+    }
+
     const options = [
-      ...view.features.map((feature) => this.featureOption(feature, view)),
+      ...featureOptions,
       this.refactorOption(view),
       ...view.technologies.map((technology) => this.technologyOption(technology, view)),
       ...view.skills.map((skill) => this.learningOption(skill, view)),
@@ -48,6 +54,50 @@ export class DevelopmentWorkbenchProjector {
       workSlots: view.workSlots,
       options: sorted,
     };
+  }
+
+  private currentFeatureFallbackOption(view: GameView): DevelopmentOptionView {
+    const current = view.operations.currentFeature;
+    if (!current) throw new Error('Current feature fallback requires an active feature');
+
+    const slot = view.workSlots.find(({ id }) => id === 'feature');
+    const action: DevelopmentActionView | null = view.hud.status === 'RUNNING'
+      && view.hud.launched
+      && view.operations.techDebt.canFastTrack
+      ? { kind: 'fast-track-feature', featureId: current.id }
+      : null;
+    const unavailableReason = action
+      ? null
+      : view.hud.status !== 'RUNNING'
+        ? '게임이 종료되어 Fast Track을 적용할 수 없음'
+        : !view.hud.launched
+          ? '서비스 출시 전에는 Fast Track을 적용할 수 없음'
+          : view.operations.techDebt.refactoring
+            ? 'Refactor 진행 중에는 Fast Track을 적용할 수 없음'
+            : '이미 Fast Track을 적용했거나 현재 기능에는 적용할 수 없음';
+
+    return this.option({
+      id: `feature:${current.id}`,
+      kind: 'feature',
+      title: slot?.title && slot.title !== 'REFACTORING' ? slot.title : current.id,
+      eyebrow: 'FEATURE · ACTIVE ROADMAP',
+      summary: view.hud.launched
+        ? '현재 자동 개발 중인 커뮤니티 요구사항'
+        : '서비스 출시를 위해 자동 개발 중인 초기 기능',
+      state: 'active',
+      progress: current.requiredWork > 0 ? current.progress / current.requiredWork : null,
+      durationLabel: `약 ${current.estimatedRemainingDays}일 남음`,
+      upfrontCost: null,
+      monthlyCost: null,
+      benefits: [
+        view.hud.launched ? '현재 로드맵 기능을 완료해 다음 요구사항으로 진행' : '초기 서비스 기능을 완료해 서비스 출시 단계로 진행',
+      ],
+      risks: [`Fast Track 사용 시 Tech Debt 증가 · 현재 ${view.operations.techDebt.value}/100`],
+      requirements: ['로드맵 규칙에 따라 자동으로 진행되는 기능'],
+      unavailableReason,
+      actionLabel: action ? 'FAST TRACK · +30% PROGRESS' : null,
+      action,
+    });
   }
 
   private featureOption(feature: FeatureCardView, view: GameView): DevelopmentOptionView {
