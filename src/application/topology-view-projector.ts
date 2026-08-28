@@ -4,6 +4,7 @@ import type {
   RequestTrace,
   TopologyGraph,
 } from '../core';
+import { maxResourceLoad } from '../core';
 import type {
   LoadTone,
   RequestTraceView,
@@ -76,7 +77,7 @@ export class TopologyViewProjector {
       const load = loadByNode.get(node.id);
       const incident = incidentByNode.get(node.id);
       const capacity = Math.round(load
-        ? Math.max(0, ...load.resources.map((resource) => resource.capacity))
+        ? maxResourceLoad({ nodeLoads: [load] })?.resource.capacity ?? 0
         : Math.max(
           node.capacity.cpu ?? 0,
           node.capacity.io ?? 0,

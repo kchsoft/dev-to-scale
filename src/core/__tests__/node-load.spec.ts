@@ -17,6 +17,18 @@ const posts = new FeatureDefinition({
   requestRoute: [{ node: 'APP' }, { node: 'DB' }],
 });
 
+function expectResourceParity(
+  node: { readonly resources: readonly { readonly resourceKind: string; readonly demand: number; readonly capacity: number; readonly ratio: number }[] },
+  resourceKind: string,
+  demand: number,
+  capacity: number,
+  ratio: number,
+): void {
+  const resource = node.resources.find((candidate) => candidate.resourceKind === resourceKind);
+  expect(resource).toMatchObject({ demand, capacity });
+  expect(resource?.ratio).toBeCloseTo(ratio);
+}
+
 describe('node-specific load calculation', () => {
   it('uses exact Node ID trace arrival to remove downstream demand', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
@@ -137,6 +149,55 @@ describe('node-specific load calculation', () => {
     expect(queue.resources.map(({ resourceKind }) => resourceKind)).toEqual(['THROUGHPUT']);
     expect(storage.resources.map(({ resourceKind }) => resourceKind)).toEqual(['STORAGE']);
     expect(external.resources).toEqual([]);
+  });
+
+  it('keeps nonzero resource demand, capacity, and ratio in parity with every optional infrastructure node', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    infrastructure.deployTechnology('ALB');
+    infrastructure.deployTechnology('REDIS');
+    infrastructure.deployTechnology('SQS');
+    infrastructure.deployTechnology('OBJECT_STORAGE');
+    const feature = new FeatureDefinition({
+      id: 'PARITY',
+      name: 'Parity',
+      baseWork: 1,
+      complexity: 'NORMAL',
+      load: { app: 2, db: 3, async: 4, storage: 5 },
+      resourceLoad: {
+        app: { cpu: 1.2, io: 1.8 },
+        db: { cpu: 1.4, io: 2.2 },
+      },
+      tags: ['READ_HEAVY'],
+      requestRoute: [
+        { node: 'APP' },
+        { node: 'DB' },
+        { node: 'QUEUE', requirement: 'OPTIONAL' },
+        { node: 'STORAGE' },
+      ],
+    });
+
+    const load = LoadCalculator.calculate(100_000, [feature], infrastructure);
+    const app = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.app('SPRING_BOOT'))!;
+    const database = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.database('POSTGRESQL'))!;
+    const queue = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.queue('SQS'))!;
+    const storage = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.storage)!;
+    const gateway = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.gateway)!;
+    const cache = load.nodeLoads.find(({ nodeId }) => nodeId === V1_NODE_IDS.cache)!;
+
+    expectResourceParity(app, 'CPU', load.appCpuDemand, load.appCpuCapacity, load.appCpuRatio);
+    expectResourceParity(app, 'IO', load.appIoDemand, load.appIoCapacity, load.appIoRatio);
+    expectResourceParity(database, 'CPU', load.dbCpuDemand, load.dbCpuCapacity, load.dbCpuRatio);
+    expectResourceParity(database, 'IO', load.dbIoDemand, load.dbIoCapacity, load.dbIoRatio);
+    expectResourceParity(queue, 'THROUGHPUT', load.asyncDemand, load.asyncCapacity, load.asyncRatio);
+    expectResourceParity(storage, 'STORAGE', load.storageDemand, load.storageCapacity, load.storageRatio);
+    expectResourceParity(
+      gateway,
+      'THROUGHPUT',
+      Math.max(load.appCpuDemand, load.appIoDemand),
+      load.rawAppCapacity,
+      Math.max(load.appCpuDemand, load.appIoDemand) / load.rawAppCapacity,
+    );
+    expectResourceParity(cache, 'THROUGHPUT', load.dbDemand, load.dbDemand / load.dbRatio, load.dbRatio);
   });
 
   it('keeps ingress demand on a failed ALB while removing downstream APP demand', () => {

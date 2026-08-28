@@ -116,4 +116,19 @@ describe('TopologyViewProjector', () => {
       particleCount: 1,
     });
   });
+
+  it('uses the capacity of the highest-pressure resource rather than the largest resource', () => {
+    const view = TopologyViewProjector.project({
+      graph,
+      nodeLoads: [createNodeLoadSnapshot('app', 'SERVER_GROUP', [
+        createNodeResourceLoad('CPU', 90, 100),
+        createNodeResourceLoad('IO', 80, 50),
+      ])],
+      traces: [],
+      incidents: [],
+      dau: 0,
+    });
+
+    expect(view.nodes.find((node) => node.id === 'app')?.detail).toBe('CAP 50');
+  });
 });
