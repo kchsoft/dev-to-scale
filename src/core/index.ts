@@ -10,6 +10,22 @@ export * from './incident-manager';
 export * from './incident-topology';
 export * from './infrastructure';
 export * from './learning';
+export {
+  NODE_RESOURCE_KINDS,
+  LoadValidationError,
+  createNodeLoadSnapshot,
+  createNodeResourceLoad,
+  maxNodeLoad,
+  maxResourceLoad,
+  nodeLoad,
+  nodeLoadsOfKind,
+  resourceLoad,
+} from './node-load';
+export type {
+  NodeLoadCollection,
+  NodeResourceKind,
+  NodeResourceLoad,
+} from './node-load';
 export * from './progression';
 export * from './random';
 export * from './request-flow';
