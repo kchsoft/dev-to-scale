@@ -226,16 +226,41 @@ function topologyInput(overrides: Partial<ConstructorParameters<typeof ServiceTo
 }
 
 describe('ServiceTopology aggregate', () => {
-  it('preserves immutable input order and provides exact lookups', () => {
-    const input = topologyInput();
-    const topology = new ServiceTopology(input);
+  it('preserves non-lexicographic collection order after source arrays mutate', () => {
+    const modules = [
+      new ServiceModule('zeta', [new RouteBlueprint('z-workload', 'zeta', [], [])]),
+      new ServiceModule('alpha', [new RouteBlueprint('a-workload', 'alpha', [], [])]),
+      new ServiceModule('mid', [new RouteBlueprint('m-workload', 'mid', [], [])]),
+    ];
+    const deployments = [
+      new ModuleDeployment('mid', []),
+      new ModuleDeployment('zeta', []),
+      new ModuleDeployment('alpha', []),
+    ];
+    const assignments = [
+      new WorkloadAssignment('z-workload', 'zeta'),
+      new WorkloadAssignment('m-workload', 'mid'),
+      new WorkloadAssignment('a-workload', 'alpha'),
+    ];
+    const topology = new ServiceTopology({
+      graph: new TopologyGraph([], []),
+      modules,
+      deployments,
+      assignments,
+    });
 
-    expect(topology.modules.map(({ id }) => id)).toEqual(['community']);
-    expect(topology.deployments.map(({ moduleId }) => moduleId)).toEqual(['community']);
-    expect(topology.assignments.map(({ workloadId }) => workloadId)).toEqual(['comment']);
-    expect(topology.module('community')).toBe(input.modules[0]);
-    expect(topology.deployment('community')).toBe(input.deployments[0]);
-    expect(topology.assignment('comment')).toBe(input.assignments[0]);
+    modules.push(new ServiceModule('later', []));
+    deployments.reverse();
+    assignments.push(new WorkloadAssignment('later-workload', 'later'));
+
+    expect(topology.modules.map(({ id }) => id)).toEqual(['zeta', 'alpha', 'mid']);
+    expect(topology.deployments.map(({ moduleId }) => moduleId)).toEqual(['mid', 'zeta', 'alpha']);
+    expect(topology.assignments.map(({ workloadId }) => workloadId)).toEqual([
+      'z-workload', 'm-workload', 'a-workload',
+    ]);
+    expect(topology.module('alpha')).toBe(modules[1]);
+    expect(topology.deployment('zeta')).toBe(deployments[1]);
+    expect(topology.assignment('m-workload')).toBe(assignments[1]);
     expect(Object.isFrozen(topology.modules)).toBe(true);
     expect(Object.isFrozen(topology.deployments)).toBe(true);
     expect(Object.isFrozen(topology.assignments)).toBe(true);
@@ -354,6 +379,27 @@ describe('ServiceTopology aggregate', () => {
       mode: 'SYNC',
     });
     expect(route.steps.some(({ nodeId }) => nodeId === 'gateway-community')).toBe(false);
+  });
+
+  it('rejects a selected bound gateway disconnected from its bound entry app', () => {
+    const topology = new ServiceTopology(topologyInput({
+      graph: new TopologyGraph([
+        node('gateway-community', 'LOAD_BALANCER'),
+        node('app-community', 'SERVER_GROUP'),
+        node('db-community', 'DATABASE'),
+      ], [
+        { id: 'community-app-db', from: 'app-community', to: 'db-community', mode: 'SYNC' },
+      ]),
+      deployments: [new ModuleDeployment('community', [
+        ['ENTRY_GATEWAY', 'gateway-community'],
+        ['ENTRY_APP', 'app-community'],
+        ['PRIMARY_DATABASE', 'db-community'],
+      ])],
+    }));
+
+    expect(() => topology.resolveForTrace('comment')).toThrowError(
+      expect.objectContaining({ code: 'DISCONNECTED_ROUTE' }),
+    );
   });
 
   it('preserves an unbound required entry step without synthesizing ingress', () => {
