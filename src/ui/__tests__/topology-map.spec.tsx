@@ -13,9 +13,9 @@ const observability: ObservabilityView = {
 
 const topology: TopologyView = {
   nodes: [
-    { id: 'app', kind: 'server-group', name: 'Spring Boot', icon: '◈', loadPercent: 76, tone: 'busy', detail: 'CAP 100' },
-    { id: 'db', kind: 'database', name: 'PostgreSQL', icon: '◉', loadPercent: 92, tone: 'incident', detail: 'CAP 80', incidentId: 'db-down', incidentSeverity: 'MAJOR' },
-    { id: 'queue', kind: 'queue', name: 'Kafka', icon: '⇢', loadPercent: 41, tone: 'stable', detail: 'CAP 1000' },
+    { id: 'app', kind: 'server-group', name: 'Spring Boot', icon: '◈', loadPercent: 76, tone: 'busy', detail: 'CAP 100', monthlyCost: 100_000, scaling: null },
+    { id: 'db', kind: 'database', name: 'PostgreSQL', icon: '◉', loadPercent: 92, tone: 'incident', detail: 'CAP 80', monthlyCost: 120_000, scaling: null, incidentId: 'db-down', incidentSeverity: 'MAJOR' },
+    { id: 'queue', kind: 'queue', name: 'Kafka', icon: '⇢', loadPercent: 41, tone: 'stable', detail: 'CAP 1000', monthlyCost: 350_000, scaling: null },
   ],
   edges: [
     { id: 'edge-app-db', fromNodeId: 'app', toNodeId: 'db', mode: 'sync' },
