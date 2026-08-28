@@ -1,5 +1,11 @@
-import { DatabaseDefinition, DatabaseId } from './database';
-import { FeatureDefinition, FrameworkDefinition, FrameworkId } from './feature';
+import { DatabaseId } from './database';
+import { FeatureDefinition, FrameworkId } from './feature';
+import {
+  nodeSizeProfile,
+  ServerSize,
+  SERVER_SIZE_VALUES,
+} from './infrastructure-sizing';
+import type { NodeSizeProfile } from './infrastructure-sizing';
 import {
   createNodeLoadSnapshot,
   createNodeResourceLoad,
@@ -10,17 +16,12 @@ import {
   RequestTrace,
   RequestTraceSimulator,
 } from './request-trace';
-import { BuildableTechnologyId, TECHNOLOGIES } from './technology';
-import { InfrastructureNodeId } from './topology';
-import { V1ServiceTopologyFactory, V1_NODE_IDS } from './v1-topology';
+import { BuildableTechnologyId } from './technology';
+import type { InfrastructureNodeId, ResourceCapacity } from './topology';
+import { V1ServiceTopologyFactory, V1_NODE_IDS, v1NodeIdForTechnology } from './v1-topology';
 
-export enum ServerSize {
-  SMALL = 'SMALL',
-  MEDIUM = 'MEDIUM',
-  LARGE = 'LARGE',
-  XLARGE = 'XLARGE',
-}
-
+export { nodeSizeProfile, ServerSize, SERVER_SIZE_VALUES } from './infrastructure-sizing';
+export type { NodeSizeProfile } from './infrastructure-sizing';
 export type { DatabaseId } from './database';
 export type TechnologyId = BuildableTechnologyId;
 export type QueueTechnologyId = 'SQS' | 'RABBITMQ' | 'KAFKA';
@@ -30,26 +31,6 @@ export const QUEUE_TECHNOLOGY_IDS: readonly QueueTechnologyId[] = ['SQS', 'RABBI
 export function isQueueTechnology(technology: TechnologyId): technology is QueueTechnologyId {
   return QUEUE_TECHNOLOGY_IDS.includes(technology as QueueTechnologyId);
 }
-
-const APP_SIZE: Record<ServerSize, { capacity: number; cost: number }> = {
-  [ServerSize.SMALL]: { capacity: 100, cost: 100_000 },
-  [ServerSize.MEDIUM]: { capacity: 180, cost: 200_000 },
-  [ServerSize.LARGE]: { capacity: 320, cost: 400_000 },
-  [ServerSize.XLARGE]: { capacity: 520, cost: 800_000 },
-};
-
-const DB_SIZE: Record<ServerSize, { capacity: number; cost: number }> = {
-  [ServerSize.SMALL]: { capacity: 80, cost: 120_000 },
-  [ServerSize.MEDIUM]: { capacity: 150, cost: 250_000 },
-  [ServerSize.LARGE]: { capacity: 270, cost: 500_000 },
-  [ServerSize.XLARGE]: { capacity: 450, cost: 1_000_000 },
-};
-
-const ASYNC_CAPACITY: Partial<Record<TechnologyId, number>> = {
-  SQS: 300,
-  RABBITMQ: 500,
-  KAFKA: 1_000,
-};
 
 const CAPACITY_TUNING: Record<number, number> = {
   1: 1,
@@ -97,23 +78,19 @@ export class AppCluster {
 
   /** Legacy aggregate capacity retained for existing economy/UI previews. */
   get capacity(): number {
-    const framework = FrameworkDefinition.byId(this.frameworkId);
-    return APP_SIZE[this._size].capacity * this._count * framework.capacityModifier;
+    return (nodeSizeProfile(this.frameworkId, this._size).capacity.throughput ?? 0) * this._count;
   }
 
   get cpuCapacity(): number {
-    const framework = FrameworkDefinition.byId(this.frameworkId);
-    return APP_SIZE[this._size].capacity * this._count * framework.cpuCapacityModifier;
+    return (nodeSizeProfile(this.frameworkId, this._size).capacity.cpu ?? 0) * this._count;
   }
 
   get ioCapacity(): number {
-    const framework = FrameworkDefinition.byId(this.frameworkId);
-    return APP_SIZE[this._size].capacity * this._count * framework.ioCapacityModifier;
+    return (nodeSizeProfile(this.frameworkId, this._size).capacity.io ?? 0) * this._count;
   }
 
   get monthlyCost(): number {
-    const framework = FrameworkDefinition.byId(this.frameworkId);
-    return APP_SIZE[this._size].cost * this._count * framework.costModifier;
+    return nodeSizeProfile(this.frameworkId, this._size).monthlyCost * this._count;
   }
 }
 
@@ -138,29 +115,31 @@ export class DatabaseCluster {
 
   /** Legacy aggregate capacity retained for backwards compatibility. */
   get capacity(): number {
-    const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].capacity * (1 + 0.6 * this._replicaCount) * database.capacityModifier;
+    const base = nodeSizeProfile(this.databaseId, this._size).capacity.throughput ?? 0;
+    return base * (1 + 0.6 * this._replicaCount);
   }
 
   /** Read replicas distribute query CPU as well, but remain stronger for I/O. */
   get cpuCapacity(): number {
-    const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].capacity * (1 + 0.55 * this._replicaCount) * database.capacityModifier;
+    const base = nodeSizeProfile(this.databaseId, this._size).capacity.cpu ?? 0;
+    return base * (1 + 0.55 * this._replicaCount);
   }
 
   get ioCapacity(): number {
-    const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].capacity * (1 + 0.75 * this._replicaCount) * database.capacityModifier;
+    const base = nodeSizeProfile(this.databaseId, this._size).capacity.io ?? 0;
+    return base * (1 + 0.75 * this._replicaCount);
   }
 
   get monthlyCost(): number {
-    const database = DatabaseDefinition.byId(this.databaseId);
-    return DB_SIZE[this._size].cost * (1 + this._replicaCount) * database.costModifier;
+    return nodeSizeProfile(this.databaseId, this._size).monthlyCost * (1 + this._replicaCount);
   }
 }
 
 export class InfrastructureState {
   private readonly technologies = new Set<TechnologyId>();
+  private readonly nodeSizes = new Map<InfrastructureNodeId, ServerSize>([
+    [V1_NODE_IDS.storage, ServerSize.SMALL],
+  ]);
 
   constructor(readonly app: AppCluster, readonly database: DatabaseCluster) {}
 
@@ -177,6 +156,12 @@ export class InfrastructureState {
       new DatabaseCluster(this.database.databaseId, this.database.size, this.database.replicaCount),
     );
     for (const technology of this.deployedTechnologies) clone.deployTechnology(technology);
+    clone.nodeSizes.set(V1_NODE_IDS.storage, this.nodeSize(V1_NODE_IDS.storage));
+    for (const technology of this.deployedTechnologies) {
+      if (technology === 'OBJECT_STORAGE') continue;
+      const nodeId = v1NodeIdForTechnology(technology);
+      clone.nodeSizes.set(nodeId, this.nodeSize(nodeId));
+    }
     return clone;
   }
 
@@ -186,17 +171,26 @@ export class InfrastructureState {
    */
   deployTechnology(technology: TechnologyId): readonly TechnologyId[] {
     const retired: TechnologyId[] = [];
+    const alreadyDeployed = this.technologies.has(technology);
 
     if (isQueueTechnology(technology)) {
       for (const queue of this.queueTechnologies) {
         if (queue === technology) continue;
         this.technologies.delete(queue);
+        this.nodeSizes.delete(V1_NODE_IDS.queue(queue));
         retired.push(queue);
       }
     }
 
     this.technologies.add(technology);
     if (technology === 'ALB') this.app.enableAlb();
+    if (!alreadyDeployed) {
+      if (technology === 'OBJECT_STORAGE') {
+        this.nodeSizes.set(V1_NODE_IDS.storage, ServerSize.SMALL);
+      } else {
+        this.nodeSizes.set(v1NodeIdForTechnology(technology), ServerSize.SMALL);
+      }
+    }
     return retired;
   }
 
@@ -211,17 +205,85 @@ export class InfrastructureState {
     return this.queueTechnologies[0] ?? null;
   }
 
-  get asyncCapacity(): number {
-    const queue = this.queueTechnology;
-    return queue ? ASYNC_CAPACITY[queue] ?? 0 : 0;
+  nodeSize(nodeId: InfrastructureNodeId): ServerSize {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) return this.app.size;
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) return this.database.size;
+    if (nodeId === V1_NODE_IDS.storage) return this.nodeSizes.get(nodeId) ?? ServerSize.SMALL;
+    this.assertDeployedOwnedNode(nodeId);
+    const size = this.nodeSizes.get(nodeId);
+    if (!size) throw new Error(`Unknown or non-owned infrastructure node: ${nodeId}`);
+    return size;
   }
 
-  get storageCapacity(): number { return this.hasTechnology('OBJECT_STORAGE') ? 1_000 : 100; }
+  resizeNode(nodeId: InfrastructureNodeId, size: ServerSize): void {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) {
+      this.app.scaleUp(size);
+      return;
+    }
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) {
+      this.database.scaleUp(size);
+      return;
+    }
+    this.nodeSize(nodeId);
+    this.nodeSizes.set(nodeId, size);
+  }
+
+  nodeCapacity(nodeId: InfrastructureNodeId): ResourceCapacity {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) {
+      return {
+        cpu: this.app.cpuCapacity,
+        io: this.app.ioCapacity,
+        throughput: this.app.capacity,
+      };
+    }
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) {
+      return {
+        cpu: this.database.cpuCapacity,
+        io: this.database.ioCapacity,
+        throughput: this.database.capacity,
+      };
+    }
+    const productId = this.productIdForNode(nodeId);
+    return { ...nodeSizeProfile(productId, this.nodeSize(nodeId)).capacity };
+  }
+
+  nodeMonthlyCost(nodeId: InfrastructureNodeId): number {
+    if (nodeId === V1_NODE_IDS.app(this.app.frameworkId)) return this.app.monthlyCost;
+    if (nodeId === V1_NODE_IDS.database(this.database.databaseId)) return this.database.monthlyCost;
+    const productId = this.productIdForNode(nodeId);
+    return nodeSizeProfile(productId, this.nodeSize(nodeId)).monthlyCost;
+  }
+
+  get asyncCapacity(): number {
+    const queue = this.queueTechnology;
+    return queue ? this.nodeCapacity(V1_NODE_IDS.queue(queue)).throughput ?? 0 : 0;
+  }
+
+  get storageCapacity(): number {
+    return this.nodeCapacity(V1_NODE_IDS.storage).storage ?? 0;
+  }
 
   get monthlyCost(): number {
-    let total = this.app.monthlyCost + this.database.monthlyCost;
-    for (const technology of this.technologies) total += TECHNOLOGIES[technology].monthlyCost;
+    let total = this.app.monthlyCost + this.database.monthlyCost + this.nodeMonthlyCost(V1_NODE_IDS.storage);
+    if (this.hasTechnology('ALB')) total += this.nodeMonthlyCost(V1_NODE_IDS.gateway);
+    if (this.hasTechnology('REDIS')) total += this.nodeMonthlyCost(V1_NODE_IDS.cache);
+    if (this.queueTechnology) total += this.nodeMonthlyCost(V1_NODE_IDS.queue(this.queueTechnology));
     return total;
+  }
+
+  private productIdForNode(nodeId: InfrastructureNodeId): string {
+    if (nodeId === V1_NODE_IDS.storage) {
+      return this.hasTechnology('OBJECT_STORAGE') ? 'OBJECT_STORAGE' : 'LOCAL_STORAGE';
+    }
+    if (nodeId === V1_NODE_IDS.gateway && this.hasTechnology('ALB')) return 'ALB';
+    if (nodeId === V1_NODE_IDS.cache && this.hasTechnology('REDIS')) return 'REDIS';
+    const queue = this.queueTechnology;
+    if (queue && nodeId === V1_NODE_IDS.queue(queue)) return queue;
+    throw new Error(`Unknown or non-owned infrastructure node: ${nodeId}`);
+  }
+
+  private assertDeployedOwnedNode(nodeId: InfrastructureNodeId): void {
+    this.productIdForNode(nodeId);
   }
 }
 
