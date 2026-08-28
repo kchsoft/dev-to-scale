@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { InfrastructureState, ServerSize } from '../infrastructure';
+import { InfrastructureState, nodeSizeProfile, ServerSize, SERVER_SIZE_VALUES } from '../infrastructure';
 import { V1_NODE_IDS } from '../v1-topology';
 import type { ResourceCapacity } from '../topology';
 
@@ -24,6 +24,18 @@ function maxCapacity(capacity: ResourceCapacity): number {
 }
 
 describe('generic infrastructure node sizing', () => {
+  it('gives every fixed owned product four monotonic capacity and cost tiers', () => {
+    for (const productId of ['ALB', 'REDIS', 'SQS', 'RABBITMQ', 'KAFKA', 'LOCAL_STORAGE', 'OBJECT_STORAGE']) {
+      const profiles = SERVER_SIZE_VALUES.map((size) => nodeSizeProfile(productId, size));
+
+      expect(profiles).toHaveLength(4);
+      for (let index = 1; index < profiles.length; index += 1) {
+        expect(maxCapacity(profiles[index].capacity)).toBeGreaterThan(maxCapacity(profiles[index - 1].capacity));
+        expect(profiles[index].monthlyCost).toBeGreaterThan(profiles[index - 1].monthlyCost);
+      }
+    }
+  });
+
   it('gives every player-owned initial/deployed node an independent SMALL tier that can resize', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     infrastructure.deployTechnology('ALB');
@@ -65,6 +77,22 @@ describe('generic infrastructure node sizing', () => {
     expect(state.nodeSize(V1_NODE_IDS.app('SPRING_BOOT'))).toBe(ServerSize.SMALL);
     expect(state.nodeSize(V1_NODE_IDS.cache)).toBe(ServerSize.SMALL);
     expect(state.nodeSize(V1_NODE_IDS.database('POSTGRESQL'))).toBe(ServerSize.SMALL);
+  });
+
+  it('changes total monthly cost by exactly the resized node tier delta', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    infrastructure.deployTechnology('REDIS');
+    infrastructure.deployTechnology('SQS');
+    const state = sizing(infrastructure);
+    const redisNodeId = V1_NODE_IDS.cache;
+
+    const totalBefore = infrastructure.monthlyCost;
+    const nodeBefore = state.nodeMonthlyCost(redisNodeId);
+    state.resizeNode(redisNodeId, ServerSize.LARGE);
+    const nodeAfter = state.nodeMonthlyCost(redisNodeId);
+
+    expect(infrastructure.monthlyCost - totalBefore).toBeCloseTo(nodeAfter - nodeBefore);
+    expect(state.nodeSize(V1_NODE_IDS.queue('SQS'))).toBe(ServerSize.SMALL);
   });
 
   it('starts replacement queue and object storage at SMALL instead of inheriting replaced capacity', () => {
