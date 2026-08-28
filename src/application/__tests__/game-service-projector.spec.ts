@@ -48,7 +48,7 @@ describe('GameServiceProjector', () => {
     });
   });
 
-  it('projects canonical topology, operations, alerts, and costs', () => {
+  it('projects canonical topology, operations, alerts, and node-local scaling', () => {
     const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 });
     const result = new GameServiceProjector(engine).project(engine.snapshot, {
       monthlyRevenue: 0,
@@ -61,7 +61,7 @@ describe('GameServiceProjector', () => {
     }));
     expect(result.service.observability.level).toBe('BASIC');
     expect(result.alerts.some(({ id }) => id === 'bootstrap')).toBe(true);
-    expect(result.infrastructureCosts.addDbReplicaMonthlyCostDelta).toBe(120_000);
+    expect(result.topology.nodes.find(({ id }) => id === V1_NODE_IDS.database('POSTGRESQL'))?.scaling?.scaleOut?.monthlyCostDelta).toBe(120_000);
   });
 
   it('preserves the launched canonical request trace', () => {
