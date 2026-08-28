@@ -82,6 +82,15 @@ export class GameServiceProjector {
     return this.featureImpactFor(snapshot, featureId);
   }
 
+  diagnosisText(nodeId: string, snapshot: GameSnapshot = this.#engine.snapshot): string {
+    return OperationalViewProjector.diagnosisText(
+      nodeId,
+      snapshot,
+      this.#engine.developer,
+      this.serviceTopology(snapshot),
+    );
+  }
+
   private serviceTopology(snapshot: GameSnapshot): ServiceTopology {
     const activeFeatureDefinitions = snapshot.launched
       ? [
