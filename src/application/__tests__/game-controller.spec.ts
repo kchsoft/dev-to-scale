@@ -56,10 +56,11 @@ describe('application layer', () => {
     const unsubscribe = controller.subscribe(listener);
 
     expect(listener).toHaveBeenCalledTimes(1);
-    controller.scaleApplication(ServerSize.MEDIUM);
+    controller.resizeInfrastructureNode('v1:app:SPRING_BOOT', ServerSize.MEDIUM);
 
     expect(listener).toHaveBeenCalledTimes(2);
-    expect(listener.mock.lastCall?.[0].appSize).toBe(ServerSize.MEDIUM);
+    const app = listener.mock.lastCall?.[0].topology.nodes.find((node) => node.id === 'v1:app:SPRING_BOOT');
+    expect(app?.scaling?.currentSize).toBe(ServerSize.MEDIUM);
     unsubscribe();
   });
 
@@ -79,15 +80,17 @@ describe('application layer', () => {
     expect(settlement?.title).toBe('M1 SETTLEMENT');
   });
 
-  it('projects recurring infrastructure costs before scale actions', () => {
+  it('projects recurring infrastructure costs into node-local scaling choices', () => {
     const controller = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 8 });
-    const costs = controller.getView().infrastructureCosts;
+    const nodes = controller.getView().topology.nodes;
+    const app = nodes.find((node) => node.id === 'v1:app:SPRING_BOOT')!;
+    const db = nodes.find((node) => node.id === 'v1:database:POSTGRESQL')!;
 
-    expect(costs.appSizeMonthlyCosts[ServerSize.SMALL]).toBeCloseTo(105_000);
-    expect(costs.appSizeMonthlyCosts[ServerSize.MEDIUM]).toBeCloseTo(210_000);
-    expect(costs.dbSizeMonthlyCosts[ServerSize.SMALL]).toBe(120_000);
-    expect(costs.addDbReplicaMonthlyCostDelta).toBe(120_000);
-    expect(costs.addAppServerMonthlyCostDelta).toBeNull();
+    expect(app.scaling?.sizeOptions.find(({ size }) => size === ServerSize.SMALL)?.monthlyCost).toBeCloseTo(105_000);
+    expect(app.scaling?.sizeOptions.find(({ size }) => size === ServerSize.MEDIUM)?.monthlyCost).toBeCloseTo(210_000);
+    expect(db.scaling?.sizeOptions.find(({ size }) => size === ServerSize.SMALL)?.monthlyCost).toBe(120_000);
+    expect(db.scaling?.scaleOut?.monthlyCostDelta).toBe(120_000);
+    expect(app.scaling?.scaleOut).toMatchObject({ available: false, monthlyCostDelta: null, reason: expect.stringMatching(/ALB/i) });
   });
 
   it('launches through domain day advancement instead of UI-owned countdown rules', () => {
