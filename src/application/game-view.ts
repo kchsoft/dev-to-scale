@@ -121,6 +121,34 @@ export interface FeatureCardView {
   readonly route: readonly RequestNodeViewKind[] | null;
 }
 
+export interface ResourceCapacityView {
+  readonly cpu?: number;
+  readonly io?: number;
+  readonly throughput?: number;
+  readonly storage?: number;
+}
+
+export interface NodeSizeOptionView {
+  readonly size: ServerSizeView;
+  readonly capacity: ResourceCapacityView;
+  readonly monthlyCost: number;
+}
+
+export interface NodeScaleOutView {
+  readonly kind: 'INSTANCE' | 'READ_REPLICA';
+  readonly count: number;
+  readonly maxCount: number;
+  readonly monthlyCostDelta: number | null;
+  readonly available: boolean;
+  readonly reason: string | null;
+}
+
+export interface NodeScalingView {
+  readonly currentSize: ServerSizeView;
+  readonly sizeOptions: readonly NodeSizeOptionView[];
+  readonly scaleOut: NodeScaleOutView | null;
+}
+
 export interface TopologyNodeView {
   readonly id: string;
   readonly kind: 'load-balancer' | 'server-group' | 'database' | 'cache' | 'queue' | 'object-storage' | 'worker' | 'external-service';
@@ -129,6 +157,8 @@ export interface TopologyNodeView {
   readonly loadPercent: number;
   readonly tone: LoadTone;
   readonly detail: string;
+  readonly monthlyCost: number;
+  readonly scaling: NodeScalingView | null;
   readonly incidentId?: string;
   readonly incidentSeverity?: string;
 }
@@ -165,6 +195,7 @@ export interface TopologyView {
   readonly traces: readonly RequestTraceView[];
 }
 
+/** @deprecated Node-local scaling data is now projected on TopologyNodeView.scaling. */
 export interface InfrastructureCostView {
   readonly appSizeMonthlyCosts: Readonly<Record<ServerSizeView, number>>;
   readonly dbSizeMonthlyCosts: Readonly<Record<ServerSizeView, number>>;
@@ -242,13 +273,18 @@ export interface GameView {
   readonly skills: readonly SkillNodeView[];
   readonly features: readonly FeatureCardView[];
   readonly topology: TopologyView;
+  /** @deprecated Read node.scaling instead. */
   readonly infrastructureCosts: InfrastructureCostView;
   readonly service: ServiceOperationsView;
   readonly operations: FeatureOperationsView;
   readonly frameworkId: FrameworkOptionId;
   readonly databaseId: DatabaseOptionId;
+  /** @deprecated Read the APP topology node scaling state instead. */
   readonly appSize: ServerSizeView;
+  /** @deprecated Read the APP topology node scaleOut state instead. */
   readonly appCount: number;
+  /** @deprecated Read the DB topology node scaling state instead. */
   readonly dbSize: ServerSizeView;
+  /** @deprecated Read the DB topology node scaleOut state instead. */
   readonly dbReplicaCount: number;
 }
