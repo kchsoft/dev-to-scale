@@ -804,10 +804,15 @@ return Object.freeze({
 });
 ```
 
-Change `GameEngine.advanceGrowth()` to:
+Change `GameEngine.advanceGrowth()` to preserve the legacy policy boundary: take the maximum only across `SERVER_GROUP`, `DATABASE`, `QUEUE`, and `OBJECT_STORAGE` node kinds. Do not include `LOAD_BALANCER` or `CACHE` in growth until a later balance-design phase. For example:
 
 ```ts
-const maxLoadRatio = maxNodeLoad(this._load)?.loadRatio ?? 0;
+const maxLoadRatio = Math.max(
+  maxNodeLoad(this._load, { nodeKind: 'SERVER_GROUP' })?.loadRatio ?? 0,
+  maxNodeLoad(this._load, { nodeKind: 'DATABASE' })?.loadRatio ?? 0,
+  maxNodeLoad(this._load, { nodeKind: 'QUEUE' })?.loadRatio ?? 0,
+  maxNodeLoad(this._load, { nodeKind: 'OBJECT_STORAGE' })?.loadRatio ?? 0,
+);
 ```
 
 Update every remaining Core and Application test fixture to construct node resources through Task 1 factories. Do not add legacy fields to fixtures to satisfy stale tests.
