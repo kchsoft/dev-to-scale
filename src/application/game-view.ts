@@ -195,14 +195,6 @@ export interface TopologyView {
   readonly traces: readonly RequestTraceView[];
 }
 
-/** @deprecated Node-local scaling data is now projected on TopologyNodeView.scaling. */
-export interface InfrastructureCostView {
-  readonly appSizeMonthlyCosts: Readonly<Record<ServerSizeView, number>>;
-  readonly dbSizeMonthlyCosts: Readonly<Record<ServerSizeView, number>>;
-  readonly addAppServerMonthlyCostDelta: number | null;
-  readonly addDbReplicaMonthlyCostDelta: number | null;
-}
-
 export interface ObservabilityView {
   readonly level: ObservabilityLevelView;
   readonly label: string;
@@ -273,18 +265,8 @@ export interface GameView {
   readonly skills: readonly SkillNodeView[];
   readonly features: readonly FeatureCardView[];
   readonly topology: TopologyView;
-  /** @deprecated Read node.scaling instead. */
-  readonly infrastructureCosts: InfrastructureCostView;
   readonly service: ServiceOperationsView;
   readonly operations: FeatureOperationsView;
   readonly frameworkId: FrameworkOptionId;
   readonly databaseId: DatabaseOptionId;
-  /** @deprecated Read the APP topology node scaling state instead. */
-  readonly appSize: ServerSizeView;
-  /** @deprecated Read the APP topology node scaleOut state instead. */
-  readonly appCount: number;
-  /** @deprecated Read the DB topology node scaling state instead. */
-  readonly dbSize: ServerSizeView;
-  /** @deprecated Read the DB topology node scaleOut state instead. */
-  readonly dbReplicaCount: number;
 }
