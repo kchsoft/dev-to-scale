@@ -22,7 +22,7 @@ import { trafficHealthForSeverity } from './request-trace';
 import { TechDebtState } from './tech-debt';
 import { BuildableTechnologyId, TECHNOLOGIES, TechnologyBuildSlot } from './technology';
 import type { InfrastructureNodeId } from './topology';
-import { V1ServiceTopologyFactory, V1_NODE_IDS, v1NodeIdForTechnology } from './v1-topology';
+import { V1ServiceTopologyFactory, v1NodeIdForTechnology } from './v1-topology';
 
 export type GameStatus = 'RUNNING' | 'BANKRUPT' | 'WON';
 
@@ -302,26 +302,6 @@ export class GameEngine {
     this.ensureRunning();
     this.infrastructure.scaleOutNode(nodeId);
     this.refreshLoad();
-  }
-
-  /** @deprecated Use resizeInfrastructureNode with the APP topology node ID. */
-  scaleApplication(size: ServerSize): void {
-    this.resizeInfrastructureNode(V1_NODE_IDS.app(this.config.frameworkId), size);
-  }
-
-  /** @deprecated Use scaleOutInfrastructureNode with the APP topology node ID. */
-  addApplicationServer(): void {
-    this.scaleOutInfrastructureNode(V1_NODE_IDS.app(this.config.frameworkId));
-  }
-
-  /** @deprecated Use resizeInfrastructureNode with the DB topology node ID. */
-  scaleDatabase(size: ServerSize): void {
-    this.resizeInfrastructureNode(V1_NODE_IDS.database(this.config.databaseId), size);
-  }
-
-  /** @deprecated Use scaleOutInfrastructureNode with the DB topology node ID. */
-  addDatabaseReplica(): void {
-    this.scaleOutInfrastructureNode(V1_NODE_IDS.database(this.config.databaseId));
   }
 
   fastTrackCurrentFeature(): { addedWork: number; addedDebt: number } {
