@@ -1,0 +1,45 @@
+name: Balance Pass 1 Calibration
+
+on:
+  pull_request:
+    branches: [feature/playable-mvp]
+
+jobs:
+  calibration:
+    if: github.head_ref == 'feature/deterministic-balance-simulation-harness'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - framework: SPRING_BOOT
+            database: POSTGRESQL
+            seed: 5
+          - framework: SPRING_BOOT
+            database: POSTGRESQL
+            seed: 17
+          - framework: SPRING_BOOT
+            database: POSTGRESQL
+            seed: 29
+          - framework: NESTJS
+            database: MYSQL
+            seed: 23
+          - framework: GIN
+            database: MONGODB
+            seed: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run six-strategy calibration tuple
+        run: |
+          mkdir -p artifacts/balance
+          npm run balance -- --framework "${{ matrix.framework }}" --db "${{ matrix.database }}" --seed "${{ matrix.seed }}" > artifacts/balance/console.log
+          node -e "const fs=require('fs');const rows=fs.readFileSync('artifacts/balance/runs.csv','utf8').trimEnd().split('\n').length-1;if(rows!==6)throw new Error('expected 6 rows, got '+rows);const s=JSON.parse(fs.readFileSync('artifacts/balance/summary.json','utf8'));if(s.runCount!==6)throw new Error('expected runCount=6, got '+s.runCount);"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-pass-1-calibration-${{ matrix.framework }}-${{ matrix.database }}-seed-${{ matrix.seed }}
+          path: artifacts/balance/
+          if-no-files-found: error
