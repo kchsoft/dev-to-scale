@@ -215,7 +215,7 @@ export class GameServiceProjector {
         ? Math.min(30, Math.round((pressure.ratio - 1) * 100))
         : 0;
       alerts.push({
-        id: `load:${node.id}`,
+        id: `load-${node.id}`,
         tone: pressure.ratio > 1 ? 'danger' : 'warning',
         title: `${operationalPressureLabel(topology, pressure)} ${percent(pressure.ratio)}%`,
         detail: pressure.ratio > 1
