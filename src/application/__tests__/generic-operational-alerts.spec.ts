@@ -5,9 +5,11 @@ import {
   GameEngine,
   GameSnapshot,
   LoadSnapshot,
+  operationalPressures,
   V1_NODE_IDS,
 } from '../../core';
 import { FeatureImpactPreview, GameServiceProjector } from '../game-service-projector';
+import { operationalPressureChanges } from '../operational-pressure-presenter';
 
 function ownedLoad(ratios: {
   readonly alb: number;
@@ -55,6 +57,26 @@ function engineWithOperationalTechnologies(): GameEngine {
 }
 
 describe('generic operational alerts and feature impact', () => {
+  it('matches pressure changes by node id and resource kind while preserving after order', () => {
+    const selected = new Set([V1_NODE_IDS.gateway, V1_NODE_IDS.cache]);
+    const before = operationalPressures(ownedLoad({ alb: 0.82, redis: 0.76 }))
+      .filter(({ nodeId }) => selected.has(nodeId));
+    const after = operationalPressures(ownedLoad({ alb: 1.01, redis: 1.09 }))
+      .filter(({ nodeId }) => selected.has(nodeId));
+
+    const changes = operationalPressureChanges(before, after);
+
+    expect(changes.map(({ pressure }) => `${pressure.nodeId}:${pressure.resourceKind}`)).toEqual([
+      `${V1_NODE_IDS.gateway}:THROUGHPUT`,
+      `${V1_NODE_IDS.cache}:THROUGHPUT`,
+    ]);
+    expect(changes[0]).toMatchObject({ beforeRatio: 0.82, afterRatio: 1.01 });
+    expect(changes[0].delta).toBeCloseTo(0.19);
+    expect(changes[1]).toMatchObject({ beforeRatio: 0.76, afterRatio: 1.09 });
+    expect(changes[1].delta).toBeCloseTo(0.33);
+    expect([...changes].sort((left, right) => right.delta - left.delta)[0].pressure.nodeId).toBe(V1_NODE_IDS.cache);
+  });
+
   it('creates one pressure alert per overloaded owned node including ALB and Redis', () => {
     const engine = engineWithOperationalTechnologies();
     const snapshot: GameSnapshot = {
