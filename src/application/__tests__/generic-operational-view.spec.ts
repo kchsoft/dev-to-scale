@@ -99,4 +99,67 @@ describe('generic operational view', () => {
     expect(alb).toContain('ALB THROUGHPUT 72%');
     expect(alb).not.toContain('APP 72%');
   });
+
+  it('shows nominal percentages while technical health follows effective hard limits', () => {
+    const { engine, topology, snapshot } = fixture();
+    engine.developer.get({ category: 'fundamental', id: 'OS_RUNTIME' }).setLevel(2);
+    const appId = V1_NODE_IDS.app('SPRING_BOOT');
+    const dbId = V1_NODE_IDS.database('POSTGRESQL');
+    const dualLoads = new Map<string, ReturnType<typeof createNodeLoadSnapshot>>([
+      [V1_NODE_IDS.gateway, createNodeLoadSnapshot(V1_NODE_IDS.gateway, 'LOAD_BALANCER', [
+        createNodeResourceLoad('THROUGHPUT', 20, 100, 100),
+      ])],
+      [appId, createNodeLoadSnapshot(appId, 'SERVER_GROUP', [
+        createNodeResourceLoad('CPU', 105, 100, 118),
+        createNodeResourceLoad('IO', 20, 100, 96),
+      ])],
+      [V1_NODE_IDS.cache, createNodeLoadSnapshot(V1_NODE_IDS.cache, 'CACHE', [
+        createNodeResourceLoad('THROUGHPUT', 20, 100, 100),
+      ])],
+      [dbId, createNodeLoadSnapshot(dbId, 'DATABASE', [
+        createNodeResourceLoad('CPU', 20, 100, 100),
+        createNodeResourceLoad('IO', 95, 100, 93),
+      ])],
+      [V1_NODE_IDS.storage, createNodeLoadSnapshot(V1_NODE_IDS.storage, 'OBJECT_STORAGE', [
+        createNodeResourceLoad('STORAGE', 20, 100, 100),
+      ])],
+    ]);
+    const dualSnapshot = {
+      ...snapshot,
+      load: {
+        ...snapshot.load,
+        failureRate: 0,
+        nodeLoads: topology.graph.nodes.map((node) => (
+          dualLoads.get(node.id) ?? createNodeLoadSnapshot(node.id, node.kind, [])
+        )),
+      },
+    };
+
+    const service = OperationalViewProjector.project(dualSnapshot, engine.developer, topology);
+    expect(service.health.bottleneck).toMatchObject({
+      nodeId: dbId,
+      resourceKind: 'IO',
+      nominalRatio: 0.95,
+      effectiveRatio: 95 / 93,
+      percent: 95,
+      hardLimitPercent: 93,
+      status: 'OVERLOAD',
+    });
+
+    expect(service.visibleLoads.find(({ id }) => id === `${appId}:CPU`)).toMatchObject({
+      percent: 105,
+      effectivePercent: 89,
+      hardLimitPercent: 118,
+      capacityFailurePercent: 0,
+      status: 'WARNING',
+      tone: 'critical',
+    });
+    expect(service.visibleLoads.find(({ id }) => id === `${dbId}:IO`)).toMatchObject({
+      percent: 95,
+      effectivePercent: 102,
+      hardLimitPercent: 93,
+      status: 'OVERLOAD',
+      tone: 'overload',
+    });
+  });
 });
