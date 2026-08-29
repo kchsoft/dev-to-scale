@@ -17,7 +17,7 @@ import {
   operationalPressuresForNode,
   primaryOperationalPressureForNode,
 } from '../core/operational-pressure';
-import type { BuildableTechnologyId } from '../core/technology';
+import { TECHNOLOGIES, type BuildableTechnologyId } from '../core/technology';
 import type { InfrastructureNodeId, InfrastructureNodeKind } from '../core/topology';
 import { V1ServiceTopologyFactory } from '../core/v1-topology';
 import type { SimulationAction } from './balance-action';
@@ -44,6 +44,14 @@ export interface BalanceNodeObservation {
   readonly hardLimitPercent: number;
   readonly status: CapacityStatusView;
   readonly scaleOut: BalanceScaleOutObservation | null;
+}
+
+export interface BalanceTechnologyOption {
+  readonly id: BuildableTechnologyId;
+  readonly buildCost: number;
+  readonly monthlyCost: number;
+  readonly deployed: boolean;
+  readonly available: boolean;
 }
 
 export interface BalanceResourceLoadObservation {
@@ -80,6 +88,7 @@ export interface CommonBalanceObservation {
   };
   readonly currentTechnologyBuildId: BuildableTechnologyId | null;
   readonly deployedTechnologies: readonly TechnologyId[];
+  readonly technologyOptions: readonly BalanceTechnologyOption[];
   readonly nodes: readonly BalanceNodeObservation[];
 }
 
@@ -201,6 +210,23 @@ function nodeObservations(engine: GameEngine): readonly BalanceNodeObservation[]
     }));
 }
 
+function technologyObservations(engine: GameEngine): readonly BalanceTechnologyOption[] {
+  const buildInProgress = engine.snapshot.currentTechnologyBuild !== null;
+  return Object.freeze(Object.values(TECHNOLOGIES).map((definition) => {
+    const deployed = engine.infrastructure.hasTechnology(definition.id);
+    const prerequisitesMet = Object.entries(definition.prerequisites).every(([fundamental, level]) => (
+      engine.developer.get({ category: 'fundamental', id: fundamental as 'NETWORK' | 'OS_RUNTIME' | 'DATABASE' | 'DSA' | 'SECURITY' | 'SOFTWARE_DESIGN' }).level >= (level ?? 1)
+    ));
+    return Object.freeze({
+      id: definition.id,
+      buildCost: definition.buildCost,
+      monthlyCost: definition.monthlyCost,
+      deployed,
+      available: !deployed && !buildInProgress && prerequisitesMet,
+    });
+  }));
+}
+
 function commonObservation(
   engine: GameEngine,
   level: ObservationCeiling,
@@ -228,6 +254,7 @@ function commonObservation(
     }) : null,
     currentTechnologyBuildId: snapshot.currentTechnologyBuild?.id as BuildableTechnologyId | undefined ?? null,
     deployedTechnologies: Object.freeze([...engine.infrastructure.deployedTechnologies]),
+    technologyOptions: technologyObservations(engine),
     nodes: nodeObservations(engine),
   });
 }
