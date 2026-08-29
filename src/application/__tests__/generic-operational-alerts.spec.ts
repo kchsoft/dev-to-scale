@@ -92,12 +92,12 @@ describe('generic operational alerts and feature impact', () => {
 
     expect(result.alerts).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: `load:${V1_NODE_IDS.gateway}`,
+        id: `load-${V1_NODE_IDS.gateway}`,
         nodeId: V1_NODE_IDS.gateway,
         title: 'ALB THROUGHPUT 118%',
       }),
       expect.objectContaining({
-        id: `load:${V1_NODE_IDS.cache}`,
+        id: `load-${V1_NODE_IDS.cache}`,
         nodeId: V1_NODE_IDS.cache,
         title: 'Redis THROUGHPUT 105%',
       }),
