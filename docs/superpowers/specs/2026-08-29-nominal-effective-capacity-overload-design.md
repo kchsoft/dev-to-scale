@@ -8,42 +8,63 @@ Feature branch: `feature/nominal-effective-capacity`
 
 Make capacity limits behave like a real operational system while keeping the simulation readable and gameable.
 
-The player should be able to distinguish:
+The player must be able to distinguish:
 
 1. a common recommended capacity baseline,
-2. the actual hard limit of the chosen technology / size / proficiency,
-3. overload that immediately causes request loss,
-4. incidents that independently degrade or fully disable a node,
+2. the actual hard limit of the chosen technology / scale / proficiency,
+3. overload that immediately causes partial request loss,
+4. incidents that independently degrade or disable a node,
 5. downstream load that changes according to how much traffic actually passed upstream bottlenecks.
 
-This design intentionally keeps the current four resource axes only:
+This iteration keeps exactly four generic resource axes:
 
 - `CPU`
 - `IO`
 - `THROUGHPUT`
 - `STORAGE`
 
-No new Memory, Connection Pool, Network Bandwidth, or other axes are introduced in this iteration.
+No Memory, Connection Pool, Network Bandwidth, or other new resource axis is added.
 
 ---
 
-## 1. Core Capacity Model
+## 1. Capacity Has Two Meanings
 
 ### 1.1 Nominal Capacity
 
-`nominalCapacity` is the technology-neutral baseline for a given node size and resource axis.
+`nominalCapacity` is the common player-facing baseline after structural scaling, but before product/runtime/proficiency advantages or disadvantages.
 
-It defines the common UI reference point where `100%` means:
+Conceptually:
 
-> the recommended baseline for this size has been fully consumed.
+```text
+Nominal Capacity
+= Size Baseline
+× Structural Scale
+```
 
-For example, if APP SMALL has nominal CPU capacity `100`, a demand of `105` must display as `105%` regardless of framework choice.
+Structural scale includes capacity added by actions such as:
 
-Nominal capacity is the value used for player-facing load percentages and warning states.
+- adding APP instances,
+- adding DB replicas using their existing resource-specific CPU / IO factors,
+- resizing a node to MEDIUM / LARGE / XLARGE.
+
+This rule is important: scaling the infrastructure must reduce the displayed percentage as well as the real hard-limit usage.
+
+`100%` in the UI means:
+
+> the common recommended baseline of the currently provisioned structure is fully consumed.
+
+Example:
+
+```text
+APP SMALL nominal CPU per instance = 100
+2 APP instances                    = 200 nominal CPU
+Demand                             = 160
+Displayed Load                     = 80%
+```
 
 ### 1.2 Effective Capacity
 
-`effectiveCapacity` is the actual hard processing limit after technology characteristics and proficiency/tuning are applied.
+`effectiveCapacity` is the actual hard processing limit after technology/product characteristics and proficiency/tuning are applied to nominal capacity.
 
 Conceptually:
 
@@ -52,56 +73,45 @@ Effective Capacity
 = Nominal Capacity
 × Product / Framework Modifier
 × Proficiency / Tuning Modifier
-× Structural Scale Modifier
 ```
 
-Structural scale includes things such as APP instance count and DB read replicas where applicable.
-
-The exact factors already represented in the current engine remain authoritative; this change separates their semantic roles instead of inventing duplicate threshold constants.
-
-### 1.3 Why the two values must be separate
-
-A framework can exceed the common recommended baseline while still having headroom.
+Do not create duplicate product-specific overload thresholds. Existing real modifiers remain the source of truth.
 
 Example:
 
 ```text
 Spring Boot SMALL CPU
-Nominal Capacity   100
-Framework Modifier 1.18
-Effective Capacity 118
-Demand             105
+Nominal Capacity    100
+Framework Modifier  1.18
+Effective Capacity  118
+Demand              105
 
 Displayed Load      105%
 Effective Usage      89%
 State               WARNING
 ```
 
-A framework can also have an effective limit below the nominal baseline.
-
-Example:
+A technology can also fail before nominal 100% if its effective modifier is below 1.
 
 ```text
 NestJS SMALL CPU
-Nominal Capacity   100
-Framework Modifier 0.92
-Effective Capacity 92
-Demand             95
+Nominal Capacity    100
+Framework Modifier  0.92
+Effective Capacity   92
+Demand               95
 
-Displayed Load      95%
-Effective Usage     103%
+Displayed Load       95%
+Effective Usage      103%
 State               OVERLOAD
 ```
 
-This lets framework differences become directly visible gameplay rather than hidden arithmetic.
+This is intentional gameplay: framework characteristics are visible rather than hidden arithmetic.
 
 ---
 
 ## 2. Resource Load Contract
 
-`NodeResourceLoad` should distinguish display load from hard-limit usage.
-
-Target shape:
+Target resource-load semantics:
 
 ```ts
 export interface NodeResourceLoad {
@@ -123,21 +133,21 @@ effectiveRatio = demand / effectiveCapacity
 
 Zero-capacity handling must remain safe and deterministic.
 
-Compatibility aliases may temporarily exist during migration if necessary, but the final operational model should not rely on a single ambiguous `capacity` or `ratio` field.
+Compatibility aliases may exist temporarily during migration, but the final operational model must not depend on one ambiguous `capacity` or `ratio` field.
 
 ---
 
-## 3. Node Load Semantics
+## 3. Node Load Is the Hottest Resource
 
-A node's overall displayed load is not an average.
+A node's overall load is never an average.
 
-It is the hottest resource's nominal ratio:
+Displayed node load:
 
 ```text
 node.nominalLoadRatio = max(resource.nominalRatio)
 ```
 
-A node's actual hard-limit pressure is the hottest effective ratio:
+Actual technical pressure:
 
 ```text
 node.effectiveLoadRatio = max(resource.effectiveRatio)
@@ -146,17 +156,17 @@ node.effectiveLoadRatio = max(resource.effectiveRatio)
 Example:
 
 ```text
-APP CPU 100%
-APP IO   30%
+CPU 100%
+IO   30%
 
 Overall displayed load = 100%
 ```
 
-This preserves the existing bottleneck philosophy: one saturated resource is enough to constrain the node even when other resources have headroom.
+One saturated resource constrains the node even when every other resource has headroom.
 
 ---
 
-## 4. Player-Facing Status Rules
+## 4. Player-Facing Status
 
 Red always wins over orange.
 
@@ -174,37 +184,34 @@ if (effectiveRatio > 1) {
 
 Examples:
 
-### Spring Boot CPU
-
 ```text
+Spring CPU
 Load       105%
 Hard Limit 118%
-State      WARNING / orange
+WARNING
 ```
 
 ```text
+Spring CPU
 Load       119%
 Hard Limit 118%
-State      OVERLOAD / red
+OVERLOAD
 ```
-
-### NestJS CPU
 
 ```text
+Nest CPU
 Load       95%
 Hard Limit 92%
-State      OVERLOAD / red
+OVERLOAD
 ```
 
-The UI should therefore be able to show both the common displayed load and the effective hard limit.
+Therefore the UI must be able to expose both common load percentage and effective hard limit.
 
 ---
 
-## 5. Overload Immediately Causes Capacity Failure
+## 5. Effective-Capacity Overload Causes Immediate Partial Failure
 
-Exceeding effective capacity must have immediate operational consequences.
-
-The service does not wait for an Incident before requests begin to fail.
+A node does not wait for an Incident before requests begin failing.
 
 For one resource:
 
@@ -224,15 +231,19 @@ Capacity Health = 118 / 130 = 0.9077
 Capacity Failure = 9.23%
 ```
 
+At or below effective capacity, capacity failure is zero.
+
+Above effective capacity, failure begins immediately.
+
 ### 5.1 Multiple resources on one node
 
-CPU and IO failures are not added together.
+CPU and IO failure percentages are not added.
 
-The most constrained resource defines the node's capacity processing ratio:
+The most constrained resource controls the node's processing ratio:
 
 ```text
 nodeCapacityHealth
-= min(resourceCapacityHealth for all resources)
+= min(resourceCapacityHealth for every resource)
 = min(1, 1 / maxEffectiveRatio)
 ```
 
@@ -242,34 +253,22 @@ Example:
 CPU effectiveRatio = 1.10
 IO  effectiveRatio = 0.73
 
-Node capacity health = 1 / 1.10 = 0.909
+Node Capacity Health = 0.909
 ```
 
-The CPU bottleneck limits the node even though IO still has headroom.
+CPU limits the node even though IO has headroom.
 
 ---
 
-## 6. Capacity Failure and Incident Failure Are Independent
+## 6. Capacity Failure and Incident Failure Are Separate
 
-Capacity overload and Incidents represent different failure mechanisms.
+Capacity overload means too much workload is arriving for the actual processing limit.
 
-### Capacity overload
+Incident failure means the node itself is unhealthy because of an operational event.
 
-Too much traffic arrives for the node's effective processing limit.
+Existing incident traffic-health semantics remain separate.
 
-It causes immediate partial failure according to the processing ratio.
-
-### Incident
-
-The node itself is unhealthy because of an operational event.
-
-Existing incident traffic health remains conceptually separate:
-
-- MINOR -> partial degradation
-- MAJOR -> heavy degradation
-- CRITICAL -> node unavailable
-
-When both exist:
+When both apply:
 
 ```text
 effectiveNodeHealth
@@ -282,112 +281,122 @@ Example:
 ```text
 Capacity Health = 0.91
 Incident Health = 0.80
-
-Effective Node Health = 0.728
+Effective Health = 0.728
 ```
 
-Existing incident probability rules remain in place. Overload may therefore simultaneously cause immediate capacity failure and increase the chance of a separate incident.
+A CRITICAL incident can still reduce node health to zero regardless of spare capacity.
 
-This feature must not remove the distinction between overload and incident.
+Overload can therefore simultaneously:
+
+- cause immediate partial capacity failure,
+- increase incident risk,
+- later coexist with a separate incident.
+
+Do not conflate the two mechanisms.
 
 ---
 
-## 7. Request-Flow-Based Downstream Demand
+## 7. Downstream Demand Follows Actual Request Flow
 
-This is a core gameplay rule.
+Demand must reflect the traffic that really reaches a node.
 
-Demand must follow the traffic that actually passed upstream nodes.
-
-If an upstream node drops traffic because of capacity or incident health, downstream nodes must only receive the surviving traffic.
+If an upstream required node drops traffic because of capacity or incident health, downstream nodes receive only surviving traffic.
 
 Example:
 
 ```text
-Incoming: 100
+Incoming 100
 
 ALB passes 80%
 -> APP receives 80
 
-APP passes 90% of what arrived
+APP passes 90% of arrivals
 -> DB receives 72
 ```
 
-Therefore an upstream bottleneck can mask downstream bottlenecks.
+A downstream node must not be charged for requests that never reached it.
 
-When the player fixes the upstream bottleneck, the next bottleneck can become visible.
+A downstream failure also must not retroactively reduce work already performed upstream.
 
-Expected gameplay loop:
+This creates the intended operating-game loop:
 
 ```text
 Traffic growth
   -> ALB bottleneck
   -> ALB scale-up
   -> APP bottleneck revealed
-  -> APP scale-out / scale-up
+  -> APP scale-out / resize
   -> DB bottleneck revealed
   -> Redis / replica / DB resize decision
 ```
 
-This is intentional and should be treated as a core operating-game mechanic rather than an incidental side effect.
+An upstream bottleneck masking downstream bottlenecks is intentional gameplay.
 
 ---
 
 ## 8. Request Trace Integration
 
-The existing request-trace model already propagates a node health ratio through the resolved route.
+The existing request trace already propagates node health through the route.
 
-Capacity health should become another node-health source that participates in the same request flow.
-
-Conceptually:
+Capacity health becomes an additional node-health source:
 
 ```text
-Node Capacity Health
-       ×
+Capacity Health
+      ×
 Incident Health
-       =
+      =
 Effective Node Health
-       -> Request Trace
-       -> Downstream arrival ratio
-       -> Final success ratio
+      -> Request Trace
+      -> Downstream Arrival
+      -> Downstream Demand
+      -> Final Success Ratio
 ```
 
-The implementation may require iterative or staged load calculation because capacity health depends on demand, while downstream demand depends on upstream pass-through.
+The implementation may require staged or iterative load calculation because downstream demand depends on pass-through while pass-through depends on effective capacity calculated from demand.
 
-The design requirement is the result, not a particular algorithm:
+The algorithm is an implementation detail, but these results are mandatory:
 
-> each node's demand must reflect the traffic that actually reached that node after all upstream required steps.
-
-The implementation must remain deterministic and must not introduce simulation instability or order-dependent results unrelated to route order.
+- each node's demand reflects actual upstream pass-through,
+- calculations are deterministic,
+- results do not depend on arbitrary collection iteration order,
+- request-route order remains authoritative.
 
 ---
 
-## 9. Required vs Optional Route Steps
+## 9. Required vs Optional Steps
 
-`REQUIRED` and `OPTIONAL` steps must not be treated identically.
+`REQUIRED` and `OPTIONAL` route steps have different flow semantics.
 
 ### REQUIRED
 
-Capacity or incident degradation reduces the primary request success ratio and therefore reduces traffic reaching later required nodes.
+A required node's effective health gates the main request.
+
+Its capacity/incident loss:
+
+- reduces primary request success,
+- reduces traffic reaching later main-path nodes.
 
 ### OPTIONAL
 
-An optional secondary step must not automatically cause the primary synchronous request to fail merely because that optional component is degraded.
+An optional side step receives the traffic that reaches that step and has its own demand, capacity health, alerts, metrics, and diagnosis.
 
-Examples include asynchronous queue work that can be decoupled from the primary request.
+However its failure does **not** gate the main synchronous route by default.
 
-For this iteration:
+For the primary request flow:
 
-- required path capacity health affects primary request success,
-- optional path overload must still generate its own resource pressure / alert / operational diagnosis,
-- optional failure should not be multiplied into primary request success unless the route contract explicitly requires it.
+```text
+optional step pass-through = arrival ratio
+```
 
-The existing optional queue fallback-to-APP behavior when no queue is deployed remains separate and should continue to work.
+unless the route contract explicitly marks the dependency as required.
+
+This prevents an overloaded async queue from automatically failing an otherwise successful HTTP request.
+
+The existing no-queue optional fallback into APP remains separate and must continue to work.
 
 ---
 
 ## 10. Capacity Sources by Node Type
-
-The four generic resource axes remain unchanged.
 
 ### APP
 
@@ -396,19 +405,17 @@ Resources:
 - CPU
 - IO
 
-Nominal capacity comes from the APP size baseline.
+Nominal capacity:
 
-Effective capacity applies framework characteristics, instance count, and proficiency/tuning.
+- APP size baseline,
+- multiplied by APP instance count.
 
-Framework characteristics should remain resource-specific.
+Effective capacity additionally applies:
 
-Examples from the current model:
+- framework resource-specific modifier,
+- framework proficiency/tuning.
 
-- Spring Boot: stronger CPU, weaker IO
-- NestJS: weaker CPU, stronger IO
-- Gin: strong CPU
-- FastAPI: stronger IO than CPU
-- ASP.NET Core: balanced
+Current framework differences remain meaningful, including Spring CPU strength / IO weakness and Nest CPU weakness / IO strength.
 
 ### DB
 
@@ -417,11 +424,17 @@ Resources:
 - CPU
 - IO
 
-Nominal capacity comes from the DB size baseline.
+Nominal capacity:
 
-Effective capacity applies database characteristics, replica effects, and proficiency/tuning.
+- DB size baseline,
+- existing resource-specific replica structural factors.
 
-Read replicas may continue to affect CPU and IO differently.
+Effective capacity additionally applies:
+
+- database product capacity characteristic,
+- database proficiency/tuning.
+
+Replica CPU and IO factors remain distinct.
 
 ### ALB / Redis / Queue
 
@@ -429,9 +442,9 @@ Resource:
 
 - THROUGHPUT
 
-Nominal capacity comes from the size profile.
+Nominal capacity comes from the selected node-size profile.
 
-Effective capacity applies technology proficiency/tuning where the current engine already supports it.
+Effective capacity additionally applies existing technology proficiency/tuning where supported.
 
 ### Storage
 
@@ -439,19 +452,162 @@ Resource:
 
 - STORAGE
 
-Nominal and effective capacity are identical unless a real technology/tuning modifier exists. This design does not invent one merely for symmetry.
+Nominal capacity comes from the size profile.
+
+Effective capacity equals nominal capacity unless a real modifier already exists or is explicitly introduced by a future feature.
+
+Do not invent a modifier for symmetry.
 
 ---
 
-## 11. Observability and UI
+## 11. Which Ratio Each System Uses
 
-The player-facing load percentage should use nominal load.
+This distinction is fixed, not deferred to implementation.
 
-Recommended resource presentation:
+### Nominal ratio is used for
+
+- player-facing load percentage,
+- orange `WARNING` threshold,
+- BASIC aggregate load display,
+- METRICS/APM displayed load percentages,
+- preview percentages shown to the player.
+
+### Effective ratio is used for
+
+- red `OVERLOAD` threshold,
+- capacity health / immediate request failure,
+- incident load-risk input,
+- actual technical-pressure bottleneck selection,
+- GrowthPolicy capacity-pressure input,
+- service-health technical pressure,
+- P95 technical pressure,
+- overload danger alerts.
+
+This means Spring may display `105%` orange while service-health calculations see only about `89%` effective usage.
+
+### Failure rate
+
+Request-trace success after capacity and incident health remains the authoritative source for `failureRate`.
+
+Existing consumers of `failureRate` continue to receive the resulting real user impact.
+
+---
+
+## 12. Operational Pressure Engine
+
+The Generic Operational Bottleneck Engine remains the structural source of bottleneck selection.
+
+It must not reintroduce fixed APP / DB / ALB candidate lists.
+
+Operational pressure should carry enough information to distinguish nominal and effective pressure.
+
+For actual technical bottleneck selection, effective ratio is authoritative.
+
+For displayed percentages, nominal ratio is authoritative.
+
+Exact current topology node IDs remain the scope boundary; external services and same-kind decoys must not participate in player-owned operational pressure.
+
+---
+
+## 13. Alerts and Diagnosis
+
+Alert semantics:
+
+```text
+nominalRatio >= 1 && effectiveRatio <= 1
+-> warning / orange
+
+ effectiveRatio > 1
+-> danger / red
+```
+
+Diagnosis should identify the exact node and resource responsible for the highest effective technical pressure.
+
+APM can explain both values, for example:
+
+```text
+Spring Boot CPU
+Displayed load: 110%
+Hard limit:     118%
+Still within effective capacity
+```
+
+or:
+
+```text
+Spring Boot CPU
+Displayed load: 130%
+Hard limit:     118%
+Capacity failures occurring
+```
+
+---
+
+## 14. Feature and Change Preview
+
+Live and preview calculations must use the same capacity and request-flow engine.
+
+A preview may display nominal percentages while determining projected overload using effective pressure.
+
+Example desired semantics:
+
+```text
+ALB SMALL -> MEDIUM
+
+ALB 125% -> 63%
+APP 82%  -> 117%  projected next bottleneck
+```
+
+This is how the game explains hidden downstream bottlenecks before the player spends money.
+
+A brand-new resize-preview UI is not mandatory in this iteration if none exists, but current preview APIs must be compatible with the new semantics.
+
+---
+
+## 15. Incident Risk
+
+Incident risk uses **effective node pressure**, not nominal display pressure.
+
+Reason: incident probability should represent actual technical stress.
+
+Example:
+
+```text
+Spring CPU displayed load = 105%
+Effective usage           = 89%
+```
+
+Incident risk should behave like an 89%-loaded Spring node, not like a technically overloaded node.
+
+Existing incident probability bands, base risks, proficiency multipliers, severity distributions, and resolution rules remain unchanged.
+
+Only the load-ratio source changes from ambiguous load to effective technical pressure.
+
+---
+
+## 16. Growth, Service Health, and P95
+
+Existing formulas and thresholds remain unchanged.
+
+Their technical-pressure input becomes effective pressure.
+
+This prevents the common nominal warning line from pretending that a product-specific hard limit has already been reached.
+
+`failureRate` continues to affect these systems wherever it already does, now including immediate capacity loss because request traces include overload health.
+
+No unrelated balance rebasing is authorized.
+
+If regression tests expose genuine double-counting caused by the new real failure source, only the minimum correction needed to preserve the intended existing formula semantics may be made and must be separately tested.
+
+---
+
+## 17. Observability UI
+
+Recommended presentation:
 
 ```text
 Spring Boot APP
-Overall Load 105%   WARNING
+Overall Load 105%  WARNING
 
 CPU 105%
 Hard Limit 118%
@@ -469,117 +625,48 @@ OVERLOAD
 Capacity Failure 0.8%
 ```
 
-The exact visual wording can remain an Application/UI concern, but the view model must expose enough information to distinguish:
+BASIC can continue to expose one aggregate displayed load per owned node.
 
-- displayed nominal load,
-- effective hard limit,
-- warning vs overload,
-- capacity-induced failure where relevant.
+METRICS/APM expose resource-level nominal/effective values.
 
-BASIC observability can continue to expose aggregate node load.
-
-METRICS/APM should expose resource-level nominal/effective information.
-
-APM/diagnosis should be able to explain which exact resource exceeded its effective hard limit.
+APM diagnosis exposes the actual effective bottleneck and capacity-failure explanation.
 
 ---
 
-## 12. Growth, Health, P95, Alerts, and Existing Generic Bottleneck Logic
+## 18. Invariants
 
-The previous Generic Operational Bottleneck Engine remains the structural source of bottleneck selection.
-
-However, consumers must use the correct ratio for their purpose.
-
-### Player-facing load and warning
-
-Use nominal ratio.
-
-### Actual overload / request failure
-
-Use effective ratio.
-
-### Primary operational bottleneck
-
-The structural engine should support selecting the meaningful hottest resource without reintroducing APP/DB/ALB-specific whitelists.
-
-Where a consumer cares about actual service failure, effective pressure is authoritative.
-
-Where a consumer displays the common 100% baseline, nominal pressure is authoritative.
-
-Growth / Health / P95 must continue to use generic topology-scoped pressure and request success semantics rather than fixed node-kind candidate lists.
-
-Existing failure-rate effects, P95 curve, health thresholds, and incident semantics should be preserved unless a direct inconsistency is exposed by the new capacity failure source.
-
-Any necessary formula adjustment must be narrowly scoped and regression-tested; this design does not authorize unrelated balance changes.
+1. Resource axes remain `CPU`, `IO`, `THROUGHPUT`, `STORAGE`.
+2. Overall node load uses the hottest resource, never an average.
+3. Nominal capacity includes structural scale.
+4. Effective capacity adds technology/product/proficiency characteristics to nominal capacity.
+5. Player-facing `100%` means the common nominal baseline.
+6. Actual overload begins only when effective ratio exceeds 1.
+7. No duplicate product-specific overload-threshold table is introduced.
+8. Effective overload causes immediate partial request failure.
+9. Incidents remain a separate failure mechanism.
+10. Upstream required-node pass-through limits downstream demand.
+11. Downstream failure does not retroactively erase upstream work.
+12. Fixing an upstream bottleneck may reveal the next bottleneck.
+13. Optional steps do not gate primary request success by default.
+14. Incident risk uses effective pressure.
+15. Growth/Health/P95 technical pressure uses effective pressure.
+16. Player-visible percentages use nominal pressure.
+17. External services remain outside player-owned capacity pressure.
+18. Same-kind decoy nodes never affect the current topology.
+19. Live and preview load use identical engine semantics.
+20. No fixed node-kind bottleneck whitelist may return.
 
 ---
 
-## 13. Feature / Change Impact Preview
-
-Previewed load must use the same nominal/effective and request-flow rules as live load.
-
-A preview must not use a simplified capacity model that disagrees with the running simulation.
-
-Example desired output semantics:
-
-```text
-ALB SMALL -> MEDIUM
-
-ALB 125% -> 63%
-APP 82%  -> 117%  projected next bottleneck
-```
-
-This makes hidden downstream bottlenecks legible before the player spends money and prevents the flow-based model from feeling arbitrary.
-
-The first implementation does not require a new dedicated resize-preview UI if one does not already exist, but all existing preview APIs must compute against the same engine rules so a future UI can expose this safely.
-
----
-
-## 14. Incident Risk
-
-Existing incident generation behavior remains.
-
-The current engine already raises incident risk as node load rises.
-
-This feature must ensure that incident risk uses the ratio representing actual technical stress, not a misleading display-only ratio where that distinction matters.
-
-The exact mapping must be chosen consistently during implementation and covered by tests.
-
-No new incident types, probability bands, or severity distributions are introduced by this design.
-
----
-
-## 15. Invariants
-
-The implementation must preserve these invariants:
-
-1. The generic resource axes remain `CPU`, `IO`, `THROUGHPUT`, `STORAGE`.
-2. Overall node load is based on the hottest resource, never an average.
-3. `100%` in player-facing load means the common nominal baseline.
-4. Actual failure begins only when demand exceeds effective capacity.
-5. Effective capacity is derived from real capacity modifiers; do not maintain duplicate per-product overload thresholds.
-6. Capacity overload causes immediate partial request failure.
-7. Incidents remain a separate health/failure mechanism.
-8. Upstream pass-through limits downstream demand.
-9. Fixing an upstream bottleneck may reveal a downstream bottleneck.
-10. Required path failure affects primary request success.
-11. Optional path failure does not automatically fail the primary request.
-12. External services remain outside player-owned operational capacity pressure unless explicitly modeled in a future feature.
-13. Same-kind decoy nodes must never affect the current service topology.
-14. Live load and preview load must use the same engine semantics.
-15. No fixed node-kind bottleneck whitelist may be reintroduced.
-
----
-
-## 16. Non-Goals
+## 19. Non-Goals
 
 This iteration does not add:
 
 - Memory pressure
 - Connection pool pressure
-- Network bandwidth as a separate axis
+- Network bandwidth as a new resource axis
 - Retry storms
-- Backpressure queues as a new simulation subsystem
+- A new backpressure-queue subsystem
 - Per-request timeout distributions
 - Autoscaling policies
 - New incident types
@@ -588,101 +675,111 @@ This iteration does not add:
 - CDN
 - Redis clustering
 - Worker autoscaling
-- Cost rebalance unrelated to the capacity semantics
-
-Those may be future layers, but they are not required to make this model coherent.
+- Unrelated cost rebalance
 
 ---
 
-## 17. Testing Requirements
-
-At minimum, implementation tests must cover:
+## 20. Testing Requirements
 
 ### Capacity contract
 
 - nominal and effective capacity are both exposed,
-- nominal ratio and effective ratio differ correctly for framework modifiers,
-- node aggregate load uses hottest resource.
+- nominal and effective ratios are correct,
+- node aggregate displayed load uses hottest nominal resource,
+- node technical pressure uses hottest effective resource.
+
+### Structural scaling
+
+- APP instance count increases nominal and effective capacity,
+- DB replicas increase nominal capacity using existing CPU / IO structural factors,
+- resizing changes nominal baseline correctly.
 
 ### Framework behavior
 
-- Spring Boot CPU can be above nominal 100% but below effective hard limit,
-- Spring Boot IO can overload before nominal 100% when its effective limit is lower,
-- NestJS CPU can overload before nominal 100%,
-- NestJS IO can remain healthy above nominal 100% when effective headroom exists.
+- Spring CPU can exceed nominal 100% and remain below effective hard limit,
+- Spring IO can overload before nominal 100%,
+- Nest CPU can overload before nominal 100%,
+- Nest IO can remain healthy above nominal 100%.
 
 ### Immediate capacity failure
 
-- no capacity failure at or below effective capacity,
-- capacity failure begins immediately above effective capacity,
+- no capacity failure at or below effective limit,
+- capacity failure starts immediately above effective limit,
 - failure ratio matches `1 - effectiveCapacity / demand`,
 - hottest effective resource controls node capacity health.
 
 ### Request flow
 
-- upstream overload reduces downstream arrival and demand,
-- relieving the upstream bottleneck can reveal a downstream bottleneck,
-- downstream overload does not retroactively reduce work already done upstream,
-- required nodes affect primary request success,
-- optional nodes do not automatically fail primary request success.
+- upstream required overload reduces downstream arrival and demand,
+- relieving upstream bottleneck can reveal downstream bottleneck,
+- downstream overload does not retroactively reduce upstream demand,
+- required steps affect primary request success,
+- optional step failure does not gate primary request success,
+- optional step still has its own demand and operational pressure.
 
 ### Incident composition
 
 - capacity health and incident health multiply,
 - CRITICAL incident can still fully stop a node,
-- overload can coexist with incident risk without conflating the two mechanisms.
+- incident risk uses effective pressure,
+- overload and incident remain distinguishable.
 
-### Generic topology behavior
+### Generic topology
 
-- ALB, APP, Redis, DB, Queue, and Storage continue to use the generic operational model,
-- external services are excluded,
-- same-kind decoy loads are excluded,
-- no fixed APP/DB-only whitelist returns.
+- ALB, APP, Redis, DB, Queue, Storage remain generic participants,
+- external service is excluded,
+- same-kind decoys are excluded,
+- no fixed candidate whitelist returns.
+
+### Consumers
+
+- displayed metrics use nominal ratio,
+- overload alerts use effective ratio,
+- Growth technical pressure uses effective ratio,
+- Health/P95 technical pressure uses effective ratio,
+- live and preview calculations agree.
 
 ### Regression
 
-- existing growth semantics remain unless directly affected by the new real failure rate,
-- existing P95/health thresholds remain,
-- existing finance/progression/feature development behavior remains,
-- live and preview calculations agree on capacity semantics,
-- full test suite, typecheck, and production build pass.
+- existing finance/progression/development semantics remain,
+- existing incident probability formulas remain apart from ratio source,
+- existing P95/health threshold formulas remain,
+- full tests, typecheck, and production build pass.
 
 ---
 
-## 18. Success Criteria
+## 21. Success Criteria
 
-This feature is complete when the following player experience is possible:
+The player can observe:
 
 ```text
 Spring Boot APP
-CPU 108%  WARNING
-Hard limit 118%
-No capacity failure yet
+CPU 108% WARNING
+Hard Limit 118%
+No capacity failure
 ```
 
 then later:
 
 ```text
 Spring Boot APP
-CPU 130%  OVERLOAD
-Hard limit 118%
-Capacity failures are occurring
+CPU 130% OVERLOAD
+Hard Limit 118%
+Capacity failures occurring
 ```
 
-and, after an upstream scale action:
+and can experience bottleneck revelation:
 
 ```text
-Before:
+Before
 ALB 125% OVERLOAD
 APP 82%
 DB 61%
 
-After ALB resize:
+After ALB resize
 ALB 63%
 APP 113% OVERLOAD
 DB 79%
 ```
 
-The player should understand that fixing one bottleneck changes the traffic reaching the rest of the topology and can reveal the next operational constraint.
-
-That sequence is the intended gameplay loop.
+The player should understand that infrastructure choices determine both the visible 100% baseline and the real hard limit, while traffic only reaches downstream systems when upstream systems actually pass it.
