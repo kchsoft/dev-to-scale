@@ -53,6 +53,25 @@ describe('independent infrastructure node capacity', () => {
     expect(afterApp.demand).toBeCloseTo(beforeApp.demand);
   });
 
+  it('reduces request failures when an overloaded ALB is resized above demand', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    infrastructure.deployTechnology('ALB');
+    infrastructure.resizeNode(V1_NODE_IDS.app('SPRING_BOOT'), ServerSize.XLARGE);
+    infrastructure.resizeNode(V1_NODE_IDS.database('POSTGRESQL'), ServerSize.XLARGE);
+
+    const overloaded = LoadCalculator.calculate(2_000_000, [webFeature], infrastructure);
+    const overloadedAlb = resource(overloaded, V1_NODE_IDS.gateway, 'THROUGHPUT');
+
+    infrastructure.resizeNode(V1_NODE_IDS.gateway, ServerSize.MEDIUM);
+    const relieved = LoadCalculator.calculate(2_000_000, [webFeature], infrastructure);
+    const relievedAlb = resource(relieved, V1_NODE_IDS.gateway, 'THROUGHPUT');
+
+    expect(overloadedAlb.ratio).toBeGreaterThan(1);
+    expect(overloaded.failureRate).toBeGreaterThan(0);
+    expect(relievedAlb.ratio).toBeLessThan(1);
+    expect(relieved.failureRate).toBe(0);
+  });
+
   it('scales Redis throughput without changing DB capacity or its read-offload effect', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     infrastructure.deployTechnology('REDIS');
