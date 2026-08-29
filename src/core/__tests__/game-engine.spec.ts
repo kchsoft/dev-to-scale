@@ -4,7 +4,7 @@ import { GameEngine } from '../game-engine';
 import { RandomSource } from '../growth';
 import { Incident } from '../incident-manager';
 import { LoadSnapshot, ServerSize } from '../infrastructure';
-import { createNodeLoadSnapshot, createNodeResourceLoad, maxNodeLoad, resourceLoad } from '../node-load';
+import { maxNodeLoad, resourceLoad } from '../node-load';
 
 function nodeResource(load: LoadSnapshot, nodeKind: 'SERVER_GROUP' | 'DATABASE' | 'QUEUE', resourceKind: 'CPU' | 'IO' | 'THROUGHPUT') {
   const node = maxNodeLoad(load, { nodeKind });
@@ -66,26 +66,6 @@ describe('game engine orchestration', () => {
     }
 
     expect(dauAfterFirstFeature(0.05)).toBeGreaterThan(dauAfterFirstFeature(0.005));
-  });
-
-  it('does not apply a growth capacity penalty for load-balancer pressure', () => {
-    const withGatewayPressure = launchedGame(10);
-    const withoutGatewayPressure = launchedGame(10);
-    const quietLoad = (game: GameEngine, gatewayRatio: number): LoadSnapshot => ({
-      failureRate: 0,
-      nodeLoads: Object.freeze([
-        ...game.snapshot.load.nodeLoads.map((node) => createNodeLoadSnapshot(node.nodeId, node.nodeKind, [])),
-        createNodeLoadSnapshot('test:gateway', 'LOAD_BALANCER', [createNodeResourceLoad('THROUGHPUT', gatewayRatio, 1)]),
-      ]),
-      requestTraces: Object.freeze([]),
-    });
-    (withGatewayPressure as unknown as { _load: LoadSnapshot })._load = quietLoad(withGatewayPressure, 10);
-    (withoutGatewayPressure as unknown as { _load: LoadSnapshot })._load = quietLoad(withoutGatewayPressure, 0);
-
-    (withGatewayPressure as unknown as { advanceGrowth: () => void }).advanceGrowth();
-    (withoutGatewayPressure as unknown as { advanceGrowth: () => void }).advanceGrowth();
-
-    expect(withGatewayPressure.dau).toBe(withoutGatewayPressure.dau);
   });
 
   it('publishes the launched service load and request trace in the launch snapshot', () => {

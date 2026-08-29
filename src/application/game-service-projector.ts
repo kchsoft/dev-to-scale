@@ -3,14 +3,11 @@ import {
   COMMUNITY_FEATURES,
   GameEngine,
   GameSnapshot,
-  InfrastructureNodeKind,
-  LoadSnapshot,
-  NodeResourceKind,
-  maxNodeLoad,
-  maxResourceLoad,
+  operationalPressures,
+  primaryOperationalPressure,
+  primaryOperationalPressureForNode,
   ServerSize,
   ServiceTopology,
-  V1_MODULE_ID,
   V1ServiceTopologyFactory,
 } from '../core';
 import {
@@ -21,7 +18,13 @@ import {
   TopologyView,
 } from './game-view';
 import type { GameFinancialProjection } from './game-overview-projector';
-import { OperationalNodeSelection, OperationalViewProjector } from './operational-view-projector';
+import { OperationalViewProjector } from './operational-view-projector';
+import {
+  operationalPressureChanges,
+  operationalPressureLabel,
+  playerOwnedTopologyNodeIds,
+  playerOwnedTopologyNodes,
+} from './operational-pressure-presenter';
 import { presentationCatalog } from './presentation-catalog';
 import { TopologyViewProjector } from './topology-view-projector';
 
@@ -29,20 +32,6 @@ const SERVER_SIZES: readonly ServerSize[] = [ServerSize.SMALL, ServerSize.MEDIUM
 
 function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
-}
-
-function pressure(
-  load: LoadSnapshot,
-  nodeKind: InfrastructureNodeKind,
-  resourceKind?: NodeResourceKind,
-): { readonly ratio: number; readonly nodeId?: string } {
-  const match = resourceKind
-    ? maxResourceLoad(load, { nodeKind, resourceKind })
-    : maxNodeLoad(load, { nodeKind });
-  if (!match) return { ratio: 0 };
-  return 'resource' in match
-    ? { ratio: match.resource.ratio, nodeId: match.node.nodeId }
-    : { ratio: match.loadRatio, nodeId: match.nodeId };
 }
 
 export interface FeatureImpactPreview {
@@ -57,31 +46,6 @@ export interface GameServiceProjection {
   readonly service: ServiceOperationsView;
 }
 
-function requiredV1Deployment(topology: ServiceTopology) {
-  const deployment = topology.deployment(V1_MODULE_ID);
-  if (!deployment) throw new Error(`Missing required module deployment: ${V1_MODULE_ID}`);
-  return deployment;
-}
-
-function requiredTopologyBinding(
-  topology: ServiceTopology,
-  role: 'ENTRY_APP' | 'PRIMARY_DATABASE' | 'OBJECT_STORAGE',
-): string {
-  const nodeId = requiredV1Deployment(topology).bindingFor(role);
-  if (!nodeId) throw new Error(`Missing required topology binding: ${role}`);
-  return nodeId;
-}
-
-function operationalNodeSelection(topology: ServiceTopology): OperationalNodeSelection {
-  const deployment = requiredV1Deployment(topology);
-  return {
-    appNodeId: requiredTopologyBinding(topology, 'ENTRY_APP'),
-    databaseNodeId: requiredTopologyBinding(topology, 'PRIMARY_DATABASE'),
-    queueNodeId: deployment.bindingFor('EVENT_BUS') ?? null,
-    storageNodeId: requiredTopologyBinding(topology, 'OBJECT_STORAGE'),
-  };
-}
-
 export class GameServiceProjector {
   readonly #engine: GameEngine;
 
@@ -94,10 +58,10 @@ export class GameServiceProjector {
     const service = OperationalViewProjector.project(
       snapshot,
       this.#engine.developer,
-      operationalNodeSelection(topology),
+      topology,
     );
     return {
-      alerts: this.alerts(snapshot, financials.monthlyProfit, service.observability),
+      alerts: this.alerts(snapshot, financials.monthlyProfit, service.observability, topology),
       topology: this.topology(snapshot, topology),
       service,
     };
@@ -106,6 +70,15 @@ export class GameServiceProjector {
   featureImpact(featureId: string): FeatureImpactPreview | null {
     const snapshot = this.#engine.snapshot;
     return this.featureImpactFor(snapshot, featureId);
+  }
+
+  diagnosisText(nodeId: string, snapshot: GameSnapshot = this.#engine.snapshot): string {
+    return OperationalViewProjector.diagnosisText(
+      nodeId,
+      snapshot,
+      this.#engine.developer,
+      this.serviceTopology(snapshot),
+    );
   }
 
   private serviceTopology(snapshot: GameSnapshot): ServiceTopology {
@@ -180,7 +153,12 @@ export class GameServiceProjector {
     return scaling;
   }
 
-  private alerts(snapshot: GameSnapshot, profit: number, observability: ObservabilityView): AlertView[] {
+  private alerts(
+    snapshot: GameSnapshot,
+    profit: number,
+    observability: ObservabilityView,
+    topology: ServiceTopology,
+  ): AlertView[] {
     const alerts: AlertView[] = [];
 
     if (snapshot.growthEvent?.type === 'VIRAL') {
@@ -229,27 +207,24 @@ export class GameServiceProjector {
       }
     }
 
-    const ratios: Array<[string, { ratio: number; nodeId?: string }]> = [
-      ['Application', pressure(snapshot.load, 'SERVER_GROUP')],
-      ['Database', pressure(snapshot.load, 'DATABASE')],
-      ['Async', pressure(snapshot.load, 'QUEUE', 'THROUGHPUT')],
-      ['Storage', pressure(snapshot.load, 'OBJECT_STORAGE', 'STORAGE')],
-    ];
-    for (const [name, loadPressure] of ratios) {
-      const { ratio, nodeId } = loadPressure;
-      if (ratio >= 0.9) {
-        const overloadPenalty = ratio > 1 ? Math.min(30, Math.round((ratio - 1) * 100)) : 0;
-        alerts.push({
-          id: `load-${name}`,
-          tone: ratio > 1 ? 'danger' : 'warning',
-          title: `${name} Load ${percent(ratio)}%`,
-          detail: ratio > 1
-            ? `Capacity ${Math.round((ratio - 1) * 100)}% 초과 · 다음 날 DAU 최대 -${overloadPenalty}% 압력`
-            : 'Critical 구간 · Scale 검토 필요',
-          nodeId,
-        });
-      }
+    for (const node of playerOwnedTopologyNodes(topology)) {
+      const pressure = primaryOperationalPressureForNode(snapshot.load, node.id);
+      if (!pressure || pressure.ratio < 0.9) continue;
+
+      const overloadPenalty = pressure.ratio > 1
+        ? Math.min(30, Math.round((pressure.ratio - 1) * 100))
+        : 0;
+      alerts.push({
+        id: `load-${node.id}`,
+        tone: pressure.ratio > 1 ? 'danger' : 'warning',
+        title: `${operationalPressureLabel(topology, pressure)} ${percent(pressure.ratio)}%`,
+        detail: pressure.ratio > 1
+          ? `Capacity ${Math.round((pressure.ratio - 1) * 100)}% 초과 · 다음 날 DAU 최대 -${overloadPenalty}% 압력`
+          : 'Critical 구간 · Scale 검토 필요',
+        nodeId: node.id,
+      });
     }
+
     if (snapshot.load.failureRate > 0.001) {
       const failed = snapshot.load.requestTraces.filter((trace) => trace.successRatio < 0.999);
       const firstFailure = failed.find((trace) => trace.failureNodeId)?.failureNodeId ?? null;
@@ -297,35 +272,39 @@ export class GameServiceProjector {
   private featureImpactFor(snapshot: GameSnapshot, featureId: string): FeatureImpactPreview | null {
     const feature = COMMUNITY_FEATURES[featureId as keyof typeof COMMUNITY_FEATURES];
     if (!feature || !snapshot.launched) return null;
+
     const projected = this.#engine.previewLoadWithFeature(feature);
-    const axes = [
-      { label: 'APP CPU', before: pressure(snapshot.load, 'SERVER_GROUP', 'CPU'), after: pressure(projected, 'SERVER_GROUP', 'CPU') },
-      { label: 'APP I/O', before: pressure(snapshot.load, 'SERVER_GROUP', 'IO'), after: pressure(projected, 'SERVER_GROUP', 'IO') },
-      { label: 'DB CPU', before: pressure(snapshot.load, 'DATABASE', 'CPU'), after: pressure(projected, 'DATABASE', 'CPU') },
-      { label: 'DB I/O', before: pressure(snapshot.load, 'DATABASE', 'IO'), after: pressure(projected, 'DATABASE', 'IO') },
-      { label: 'ASYNC', before: pressure(snapshot.load, 'QUEUE', 'THROUGHPUT'), after: pressure(projected, 'QUEUE', 'THROUGHPUT') },
-      { label: 'STORAGE', before: pressure(snapshot.load, 'OBJECT_STORAGE', 'STORAGE'), after: pressure(projected, 'OBJECT_STORAGE', 'STORAGE') },
-    ];
-    const top = [...axes].sort((left, right) => right.after.ratio - left.after.ratio)[0];
-    const changes = [...axes]
-      .sort((left, right) => (right.after.ratio - right.before.ratio) - (left.after.ratio - left.before.ratio))
+    const topology = this.serviceTopology(snapshot);
+    const scope = { nodeIds: playerOwnedTopologyNodeIds(topology) };
+    const before = operationalPressures(snapshot.load, scope);
+    const after = operationalPressures(projected, scope);
+    const deltas = operationalPressureChanges(before, after);
+    const top = primaryOperationalPressure(projected, scope);
+    if (!top) return null;
+
+    const changes = [...deltas]
+      .sort((left, right) => right.delta - left.delta)
       .slice(0, 2)
-      .map((axis) => `${axis.label} ${percent(axis.before.ratio)}→${percent(axis.after.ratio)}%`);
+      .map(({ pressure, beforeRatio, afterRatio }) => (
+        `${operationalPressureLabel(topology, pressure)} ${percent(beforeRatio)}→${percent(afterRatio)}%`
+      ));
     const failureIncrease = projected.failureRate - snapshot.load.failureRate;
     if (failureIncrease > 0.001) {
       changes.push(`FAIL ${percent(snapshot.load.failureRate)}→${percent(projected.failureRate)}%`);
     }
+
+    const topLabel = operationalPressureLabel(topology, top);
     const suffix = projected.failureRate >= 0.1
       ? ' · ⚠ 필수 요청 경로 확인 필요'
-      : top.after.ratio > 1
-        ? ` · ⚠ ${top.label} OVERLOAD 예상`
-        : top.after.ratio >= 0.9
-          ? ` · △ ${top.label} Critical 근접`
+      : top.ratio > 1
+        ? ` · ⚠ ${topLabel} OVERLOAD 예상`
+        : top.ratio >= 0.9
+          ? ` · △ ${topLabel} Critical 근접`
           : ' · 현재 Capacity 안쪽';
     return {
       summary: `${changes.join(' · ')}${suffix}`,
-      tone: projected.failureRate >= 0.1 || top.after.ratio > 1 ? 'danger' : top.after.ratio >= 0.9 ? 'warning' : 'info',
-      nodeId: top.after.nodeId ?? top.before.nodeId,
+      tone: projected.failureRate >= 0.1 || top.ratio > 1 ? 'danger' : top.ratio >= 0.9 ? 'warning' : 'info',
+      nodeId: top.nodeId,
     };
   }
 }

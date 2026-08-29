@@ -40,7 +40,9 @@ describe('application layer', () => {
 
     expect(Object.hasOwn(view, 'snapshot')).toBe(false);
     expect(view.operations.currentFeature?.id).toBe('COMMUNITY_MVP');
-    expect(view.service.visibleLoads.map((metric) => metric.label)).toEqual(['APP', 'DB', 'ASYNC', 'STORAGE']);
+    expect(view.service.visibleLoads.map((metric) => metric.label)).toEqual([
+      'Spring Boot', 'PostgreSQL', 'Local Storage',
+    ]);
   });
 
   it('does not expose the mutable domain engine through the command facade', () => {

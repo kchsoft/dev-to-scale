@@ -1,7 +1,6 @@
 import { COMMUNITY_BOOTSTRAP, GameEngine, GameSnapshot } from '../core';
 import type { GameEventView } from './game-view';
 import { GameServiceProjector } from './game-service-projector';
-import { OperationalViewProjector } from './operational-view-projector';
 import { presentationCatalog } from './presentation-catalog';
 
 export class GameEventProjector {
@@ -63,7 +62,7 @@ export class GameEventProjector {
         message: `${this.nodeLabel(incident.nodeId)}에서 장애가 발생했습니다.`,
         severity: incident.severity,
         nodeId: incident.nodeId,
-        diagnosis: OperationalViewProjector.diagnosisText(incident.nodeId, after, this.#engine.developer),
+        diagnosis: this.#serviceProjector.diagnosisText(incident.nodeId, after),
         autoPause,
       });
     }
