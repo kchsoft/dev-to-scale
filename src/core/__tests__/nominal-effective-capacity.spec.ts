@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as core from '..';
 import { InfrastructureState } from '../infrastructure';
 import {
   createNodeLoadSnapshot,
@@ -23,7 +24,22 @@ type DualResourceFactory = (
   effectiveCapacity?: number,
 ) => DualResourceLoad;
 
+type NominalCapacity = {
+  readonly cpu?: number;
+  readonly io?: number;
+  readonly throughput?: number;
+  readonly storage?: number;
+};
+
+type NominalCapacityResolver = (
+  infrastructure: InfrastructureState,
+  nodeId: string,
+) => NominalCapacity;
+
 const createDualResourceLoad = createNodeResourceLoad as unknown as DualResourceFactory;
+const nominalNodeCapacity = (core as unknown as {
+  readonly nominalNodeCapacity?: NominalCapacityResolver;
+}).nominalNodeCapacity;
 
 describe('nominal/effective capacity contract', () => {
   it('keeps player-facing nominal load separate from effective hard-limit usage', () => {
@@ -53,34 +69,22 @@ describe('nominal/effective capacity contract', () => {
   });
 
   it('exposes a technology-neutral nominal capacity alongside the existing effective capacity', () => {
-    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL') as InfrastructureState & {
-      nodeNominalCapacity(nodeId: string): {
-        readonly cpu?: number;
-        readonly io?: number;
-        readonly throughput?: number;
-        readonly storage?: number;
-      };
-    };
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     const appId = V1_NODE_IDS.app('SPRING_BOOT');
 
-    expect(typeof infrastructure.nodeNominalCapacity).toBe('function');
-    expect(infrastructure.nodeNominalCapacity(appId)).toMatchObject({ cpu: 100, io: 100 });
+    expect(typeof nominalNodeCapacity).toBe('function');
+    expect(nominalNodeCapacity!(infrastructure, appId)).toMatchObject({ cpu: 100, io: 100 });
     expect(infrastructure.nodeCapacity(appId)).toMatchObject({ cpu: 118, io: 96 });
   });
 
   it('includes structural scale in nominal capacity before framework modifiers', () => {
-    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL') as InfrastructureState & {
-      nodeNominalCapacity(nodeId: string): {
-        readonly cpu?: number;
-        readonly io?: number;
-      };
-    };
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     const appId = V1_NODE_IDS.app('SPRING_BOOT');
 
     infrastructure.deployTechnology('ALB');
     infrastructure.scaleOutNode(appId);
 
-    expect(infrastructure.nodeNominalCapacity(appId)).toMatchObject({ cpu: 200, io: 200 });
+    expect(nominalNodeCapacity!(infrastructure, appId)).toMatchObject({ cpu: 200, io: 200 });
     expect(infrastructure.nodeCapacity(appId)).toMatchObject({ cpu: 236, io: 192 });
   });
 });
