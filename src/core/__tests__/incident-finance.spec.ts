@@ -71,10 +71,10 @@ describe('finance', () => {
     expect(RevenuePolicy.monthlyAiCost(1_000_000, true)).toBe(1_500_000);
   });
 
-  it('requires about 2.90M fully monetized average DAU for the Balance Pass 1 exit', () => {
-    expect(RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET).toBe(110_000_000);
-    expect(RevenuePolicy.monthlyRevenue(2_800_000, 0.9)).toBe(106_400_000);
-    expect(RevenuePolicy.monthlyRevenue(2_894_737, 0.9)).toBeGreaterThanOrEqual(
+  it('requires about 2.63M fully monetized average DAU for the Balance Pass 1 exit', () => {
+    expect(RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET).toBe(100_000_000);
+    expect(RevenuePolicy.monthlyRevenue(2_600_000, 0.9)).toBe(98_800_000);
+    expect(RevenuePolicy.monthlyRevenue(2_631_579, 0.9)).toBeGreaterThanOrEqual(
       RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET,
     );
   });
