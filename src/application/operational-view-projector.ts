@@ -123,7 +123,7 @@ function recommendationsFor(
   if (nodeKind === 'OBJECT_STORAGE') {
     return ['Storage Capacity 상향', '이미지/파일 기능 부하 확인', 'Storage 기술 선택 검토'];
   }
-  return ['현재 병목 노드 Size-up 검토', '연결된 요청 경로 확인', '관련 기술 숙련도와 구조 검토'];
+  return ['Capacity 조정', '트래픽·워크로드 확인', 'downstream 상태 확인'];
 }
 
 function diagnose(
@@ -198,20 +198,20 @@ export class OperationalViewProjector {
   ): ServiceOperationsView {
     const observability = projectObservability(developer);
     const health = projectHealth(snapshot.load, topology);
+    const primaryPercent = health.bottleneck?.percent ?? 0;
     const visibleLoads = observability.level === 'BASIC'
       ? basicMetrics(snapshot, topology)
       : resourceMetrics(snapshot, topology);
-    const bottleneckPercent = health.bottleneck?.percent ?? 0;
 
     return {
       observability,
       health,
       summary: {
         headline: observability.level === 'BASIC'
-          ? `LOAD ${bottleneckPercent}%`
+          ? `LOAD ${primaryPercent}%`
           : `P95 ${health.p95LatencyMs.toLocaleString()}ms`,
         detail: observability.level === 'APM'
-          ? `TOP BOTTLENECK · ${health.bottleneck?.label ?? 'NONE'} ${bottleneckPercent}% · 요청 경로와 출시 영향까지 추적 가능합니다.`
+          ? `TOP BOTTLENECK · ${health.bottleneck?.label ?? 'NONE'} ${primaryPercent}% · 요청 경로와 출시 영향까지 추적 가능합니다.`
           : observability.level === 'METRICS'
             ? `노드별 자원 Metrics와 P95가 해금되었습니다. ${observability.nextUnlock}`
             : `현재는 노드별 전체 Load만 보입니다. ${observability.nextUnlock}`,
