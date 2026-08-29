@@ -1,5 +1,7 @@
 import { DatabaseId } from './database';
+import { capacityHealthByNode, composeNodeHealth } from './capacity-health';
 import { FeatureDefinition, FrameworkId } from './feature';
+import { nominalNodeCapacity } from './infrastructure-capacity';
 import {
   nodeSizeProfile,
   ServerSize,
@@ -10,12 +12,12 @@ import {
   createNodeResourceLoad,
 } from './node-load';
 import type { NodeLoadSnapshot } from './node-load';
-import { failureRateWithCapacityOverload } from './operational-pressure';
 import {
   NodeHealth,
   RequestTrace,
   RequestTraceSimulator,
 } from './request-trace';
+import type { ResolvedRoute, ServiceTopology } from './service-topology';
 import { BuildableTechnologyId } from './technology';
 import type { InfrastructureNodeId, ResourceCapacity } from './topology';
 import { V1ServiceTopologyFactory, V1_NODE_IDS, v1NodeIdForTechnology } from './v1-topology';
@@ -371,6 +373,12 @@ function traceArrival(trace: RequestTrace, nodeId: InfrastructureNodeId): number
   return trace.nodes.find((node) => node.nodeId === nodeId)?.arrivalRatio ?? 0;
 }
 
+interface FlowProjection {
+  readonly failureRate: number;
+  readonly nodeLoads: readonly NodeLoadSnapshot[];
+  readonly requestTraces: readonly RequestTrace[];
+}
+
 export class LoadCalculator {
   static calculate(
     dau: number,
@@ -378,12 +386,55 @@ export class LoadCalculator {
     infrastructure: InfrastructureState,
     context: LoadCalculationContext = {},
   ): LoadSnapshot {
-    const queue = infrastructure.queueTechnology;
     const topology = V1ServiceTopologyFactory.create(infrastructure, features);
-    const requestTraces = features.map((feature) => RequestTraceSimulator.simulate(
-      topology.resolveForTrace(feature.id),
-      context.nodeHealth,
-    ));
+    const routes = features.map((feature) => topology.resolveForTrace(feature.id));
+    const incidentHealth = context.nodeHealth ?? {};
+    const maxRouteSteps = routes.reduce((maximum, route) => Math.max(maximum, route.steps.length), 0);
+    const passCount = routes.length === 0 ? 1 : maxRouteSteps + 2;
+    let capacityHealth: NodeHealth = {};
+
+    for (let pass = 0; pass < passCount; pass += 1) {
+      const composedHealth = composeNodeHealth(incidentHealth, capacityHealth);
+      const projection = this.projectFlowPass(
+        dau,
+        features,
+        infrastructure,
+        topology,
+        routes,
+        context,
+        composedHealth,
+      );
+      capacityHealth = capacityHealthByNode({ nodeLoads: projection.nodeLoads });
+    }
+
+    const finalProjection = this.projectFlowPass(
+      dau,
+      features,
+      infrastructure,
+      topology,
+      routes,
+      context,
+      composeNodeHealth(incidentHealth, capacityHealth),
+    );
+
+    return Object.freeze({
+      failureRate: finalProjection.failureRate,
+      nodeLoads: Object.freeze([...finalProjection.nodeLoads]),
+      requestTraces: Object.freeze([...finalProjection.requestTraces]),
+    });
+  }
+
+  private static projectFlowPass(
+    dau: number,
+    features: readonly FeatureDefinition[],
+    infrastructure: InfrastructureState,
+    topology: ServiceTopology,
+    routes: readonly ResolvedRoute[],
+    context: LoadCalculationContext,
+    nodeHealth: NodeHealth,
+  ): FlowProjection {
+    const queue = infrastructure.queueTechnology;
+    const requestTraces = routes.map((route) => RequestTraceSimulator.simulate(route, nodeHealth));
     const appNodeId = V1_NODE_IDS.app(infrastructure.app.frameworkId);
     const databaseNodeId = V1_NODE_IDS.database(infrastructure.database.databaseId);
     const queueNodeId = queue ? V1_NODE_IDS.queue(queue) : null;
@@ -400,7 +451,7 @@ export class LoadCalculator {
     let weightedSuccess = 0;
     let totalTrafficWeight = 0;
 
-    const cacheHealth = Math.max(0, Math.min(1, context.nodeHealth?.[V1_NODE_IDS.cache] ?? 1));
+    const cacheHealth = Math.max(0, Math.min(1, nodeHealth[V1_NODE_IDS.cache] ?? 1));
     const redisActive = infrastructure.hasTechnology('REDIS');
     const trafficMultiplier = Math.max(0.1, context.trafficMultiplier ?? 1);
 
@@ -417,9 +468,6 @@ export class LoadCalculator {
         gatewayDemand += Math.max(appCpuBase, appIoBase) * traceArrival(trace, gatewayNodeId);
       }
 
-      // Redis remains a targeted read-heavy optimization. Its own throughput is
-      // the traffic it attempts to serve; cache health only controls how much of
-      // that traffic is successfully offloaded from the database.
       if (redisActive && feature.tags.has('READ_HEAVY')) {
         const databaseArrival = traceArrival(trace, databaseNodeId);
         cacheDemand += Math.max(dbCpuBase * 0.12, dbIoBase * 0.40) * databaseArrival;
@@ -438,8 +486,6 @@ export class LoadCalculator {
         const kafkaModifier = queue === 'KAFKA' && feature.tags.has('EVENT_HEAVY') ? 0.85 : 1;
         asyncDemand += asyncBase * traceArrival(trace, queueNodeId!) * kafkaModifier;
       } else if (requirement === 'OPTIONAL') {
-        // Without a queue, optional async work falls back into the APP process.
-        // Waiting/network work is intentionally much more I/O-heavy than CPU-heavy.
         const fallback = asyncBase * traceArrival(trace, appNodeId);
         appCpuDemand += fallback * 0.25;
         appIoDemand += fallback;
@@ -453,60 +499,104 @@ export class LoadCalculator {
       weightedSuccess += trafficWeight * trace.successRatio;
     });
 
+    const appNominal = nominalNodeCapacity(infrastructure, appNodeId);
+    const appEffective = infrastructure.nodeCapacity(appNodeId);
+    const databaseNominal = nominalNodeCapacity(infrastructure, databaseNodeId);
+    const databaseEffective = infrastructure.nodeCapacity(databaseNodeId);
+    const storageNominal = nominalNodeCapacity(infrastructure, V1_NODE_IDS.storage);
+    const storageEffective = infrastructure.nodeCapacity(V1_NODE_IDS.storage);
+
     const tuningApp = capacityTuningMultiplier(context.appProficiencyLevel ?? 1);
     const tuningDb = capacityTuningMultiplier(context.databaseProficiencyLevel ?? 1);
-    const appCpuCapacity = infrastructure.app.cpuCapacity * tuningApp;
-    const appIoCapacity = infrastructure.app.ioCapacity * tuningApp;
-    const dbCpuCapacity = infrastructure.database.cpuCapacity * tuningDb;
-    const dbIoCapacity = infrastructure.database.ioCapacity * tuningDb;
-
     const queueLevel = queue ? context.technologyProficiencyLevels?.[queue] ?? 1 : 1;
-    const asyncCapacity = infrastructure.asyncCapacity * capacityTuningMultiplier(queueLevel);
-    const storageCapacity = infrastructure.storageCapacity;
-    const requestFailureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
 
     const nodeLoads = topology.graph.nodes.map((node): NodeLoadSnapshot => {
       if (node.id === appNodeId) {
         return createNodeLoadSnapshot(node.id, node.kind, [
-          createNodeResourceLoad('CPU', appCpuDemand, appCpuCapacity),
-          createNodeResourceLoad('IO', appIoDemand, appIoCapacity),
+          createNodeResourceLoad(
+            'CPU',
+            appCpuDemand,
+            appNominal.cpu ?? 0,
+            (appEffective.cpu ?? 0) * tuningApp,
+          ),
+          createNodeResourceLoad(
+            'IO',
+            appIoDemand,
+            appNominal.io ?? 0,
+            (appEffective.io ?? 0) * tuningApp,
+          ),
         ]);
       }
       if (node.id === databaseNodeId) {
         return createNodeLoadSnapshot(node.id, node.kind, [
-          createNodeResourceLoad('CPU', dbCpuDemand, dbCpuCapacity),
-          createNodeResourceLoad('IO', dbIoDemand, dbIoCapacity),
+          createNodeResourceLoad(
+            'CPU',
+            dbCpuDemand,
+            databaseNominal.cpu ?? 0,
+            (databaseEffective.cpu ?? 0) * tuningDb,
+          ),
+          createNodeResourceLoad(
+            'IO',
+            dbIoDemand,
+            databaseNominal.io ?? 0,
+            (databaseEffective.io ?? 0) * tuningDb,
+          ),
         ]);
       }
-      if (node.kind === 'QUEUE') {
+      if (node.kind === 'QUEUE' && queue) {
+        const nominal = nominalNodeCapacity(infrastructure, node.id);
+        const effective = infrastructure.nodeCapacity(node.id);
         return createNodeLoadSnapshot(node.id, node.kind, [
-          createNodeResourceLoad('THROUGHPUT', asyncDemand, asyncCapacity),
+          createNodeResourceLoad(
+            'THROUGHPUT',
+            asyncDemand,
+            nominal.throughput ?? 0,
+            (effective.throughput ?? 0) * capacityTuningMultiplier(queueLevel),
+          ),
         ]);
       }
       if (node.kind === 'OBJECT_STORAGE') {
         return createNodeLoadSnapshot(node.id, node.kind, [
-          createNodeResourceLoad('STORAGE', storageDemand, storageCapacity),
+          createNodeResourceLoad(
+            'STORAGE',
+            storageDemand,
+            storageNominal.storage ?? 0,
+            storageEffective.storage ?? 0,
+          ),
         ]);
       }
       if (node.kind === 'LOAD_BALANCER') {
+        const nominal = nominalNodeCapacity(infrastructure, node.id);
+        const effective = infrastructure.nodeCapacity(node.id);
         const gatewayLevel = context.technologyProficiencyLevels?.ALB ?? 1;
-        const gatewayCapacity = (node.capacity.throughput ?? 0) * capacityTuningMultiplier(gatewayLevel);
         return createNodeLoadSnapshot(node.id, node.kind, [
-          createNodeResourceLoad('THROUGHPUT', gatewayDemand, gatewayCapacity),
+          createNodeResourceLoad(
+            'THROUGHPUT',
+            gatewayDemand,
+            nominal.throughput ?? 0,
+            (effective.throughput ?? 0) * capacityTuningMultiplier(gatewayLevel),
+          ),
         ]);
       }
       if (node.kind === 'CACHE') {
+        const nominal = nominalNodeCapacity(infrastructure, node.id);
+        const effective = infrastructure.nodeCapacity(node.id);
         const cacheLevel = context.technologyProficiencyLevels?.REDIS ?? 1;
-        const cacheCapacity = (node.capacity.throughput ?? 0) * capacityTuningMultiplier(cacheLevel);
         return createNodeLoadSnapshot(node.id, node.kind, [
-          createNodeResourceLoad('THROUGHPUT', cacheDemand, cacheCapacity),
+          createNodeResourceLoad(
+            'THROUGHPUT',
+            cacheDemand,
+            nominal.throughput ?? 0,
+            (effective.throughput ?? 0) * capacityTuningMultiplier(cacheLevel),
+          ),
         ]);
       }
       return createNodeLoadSnapshot(node.id, node.kind, []);
     });
 
+    const failureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
     return Object.freeze({
-      failureRate: failureRateWithCapacityOverload({ nodeLoads }, requestFailureRate),
+      failureRate: Math.max(0, Math.min(1, failureRate)),
       nodeLoads: Object.freeze(nodeLoads),
       requestTraces: Object.freeze(requestTraces),
     });
