@@ -1,4 +1,5 @@
-import type { BalanceStrategy } from './balance-strategy';
+import type { BalanceObservation } from './balance-observation';
+import type { BalanceStrategy, StrategyDecisionContext } from './balance-strategy';
 import type { BalanceStrategyId } from './balance-scenario';
 import { cheapestAffordable, noOp, technologyAction } from './strategy-helpers';
 import { apmAwareStrategy } from './strategies/apm-aware';
@@ -9,10 +10,10 @@ import { reactiveBasicStrategy } from './strategies/reactive-basic';
 import { yoloScaleStrategy } from './strategies/yolo-scale';
 
 function withRequiredDependencyRecovery(strategy: BalanceStrategy): BalanceStrategy {
-  return Object.freeze({
+  const wrapped: BalanceStrategy = {
     id: strategy.id,
     ceiling: strategy.ceiling,
-    decide(observation, context) {
+    decide(observation: BalanceObservation, context: StrategyDecisionContext) {
       const gap = observation.requiredDependencyGaps[0];
       if (!gap) return strategy.decide(observation, context);
 
@@ -27,10 +28,11 @@ function withRequiredDependencyRecovery(strategy: BalanceStrategy): BalanceStrat
       );
       return recovery ?? noOp(`Required ${gap.role} dependency has no available affordable remedy`);
     },
-    decideViral(observation, context) {
+    decideViral(observation: BalanceObservation, context: StrategyDecisionContext) {
       return strategy.decideViral(observation, context);
     },
-  });
+  };
+  return Object.freeze(wrapped);
 }
 
 export const BALANCE_STRATEGIES: Readonly<Record<BalanceStrategyId, BalanceStrategy>> = Object.freeze({
