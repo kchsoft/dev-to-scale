@@ -372,6 +372,20 @@ export class GameEngine {
     );
   }
 
+  /** Preview a node resize through the same load calculation without mutating live infrastructure. */
+  previewLoadWithNodeResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    infrastructure.resizeNode(nodeId, size);
+    return this.calculateCurrentLoad(infrastructure);
+  }
+
+  /** Preview an APP/DB horizontal scale action while preserving live validation and state. */
+  previewLoadWithNodeScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    infrastructure.scaleOutNode(nodeId);
+    return this.calculateCurrentLoad(infrastructure);
+  }
+
   private ensureRunning(): void {
     if (this._status !== 'RUNNING') throw new Error(`Game is ${this._status}`);
   }
