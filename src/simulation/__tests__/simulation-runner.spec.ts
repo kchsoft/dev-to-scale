@@ -25,5 +25,10 @@ describe('balance simulation runner', () => {
 
     expect(withTrace.result).toEqual(withoutTrace);
     expect(withTrace.trace.length).toBeGreaterThan(0);
+    expect(withTrace.trace[0]).toEqual(expect.objectContaining({
+      completedFeatureCount: expect.any(Number),
+      lastSettlementMonth: null,
+      lastSettlementRevenue: null,
+    }));
   });
 });
