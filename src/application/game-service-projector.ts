@@ -20,6 +20,8 @@ import {
 import type { GameFinancialProjection } from './game-overview-projector';
 import { OperationalViewProjector } from './operational-view-projector';
 import {
+  capacityFailurePercent,
+  hardLimitPercent,
   operationalPressureChanges,
   operationalPressureLabel,
   playerOwnedTopologyNodeIds,
@@ -208,19 +210,32 @@ export class GameServiceProjector {
     }
 
     for (const node of playerOwnedTopologyNodes(topology)) {
-      const pressure = primaryOperationalPressureForNode(snapshot.load, node.id);
-      if (!pressure || pressure.ratio < 0.9) continue;
+      const effective = primaryOperationalPressureForNode(snapshot.load, node.id, 'EFFECTIVE');
+      const nominal = primaryOperationalPressureForNode(snapshot.load, node.id, 'NOMINAL');
+      if (!effective || !nominal) continue;
 
-      const overloadPenalty = pressure.ratio > 1
-        ? Math.min(30, Math.round((pressure.ratio - 1) * 100))
-        : 0;
+      const overloaded = effective.effectiveRatio > 1;
+      if (!overloaded && nominal.nominalRatio < 0.9) continue;
+
+      const pressure = overloaded ? effective : nominal;
+      const hardLimit = hardLimitPercent(pressure);
+      const capacityFailure = capacityFailurePercent(effective.effectiveRatio);
+      const label = operationalPressureLabel(topology, pressure);
+      let detail: string;
+
+      if (overloaded) {
+        detail = `HARD ${hardLimit}% · Capacity Failure ${capacityFailure}% · 실제 처리 한계 초과`;
+      } else if (nominal.nominalRatio >= 1) {
+        detail = `Nominal 기준 초과 · HARD ${hardLimit}% · 실제 처리 한계 안쪽`;
+      } else {
+        detail = `Critical 구간 · HARD ${hardLimit}% · Scale 검토 필요`;
+      }
+
       alerts.push({
         id: `load-${node.id}`,
-        tone: pressure.ratio > 1 ? 'danger' : 'warning',
-        title: `${operationalPressureLabel(topology, pressure)} ${percent(pressure.ratio)}%`,
-        detail: pressure.ratio > 1
-          ? `Capacity ${Math.round((pressure.ratio - 1) * 100)}% 초과 · 다음 날 DAU 최대 -${overloadPenalty}% 압력`
-          : 'Critical 구간 · Scale 검토 필요',
+        tone: overloaded ? 'danger' : 'warning',
+        title: `${label} ${percent(pressure.nominalRatio)}%`,
+        detail,
         nodeId: node.id,
       });
     }
@@ -275,12 +290,13 @@ export class GameServiceProjector {
 
     const projected = this.#engine.previewLoadWithFeature(feature);
     const topology = this.serviceTopology(snapshot);
-    const scope = { nodeIds: playerOwnedTopologyNodeIds(topology) };
-    const before = operationalPressures(snapshot.load, scope);
-    const after = operationalPressures(projected, scope);
-    const deltas = operationalPressureChanges(before, after);
-    const top = primaryOperationalPressure(projected, scope);
-    if (!top) return null;
+    const nodeIds = playerOwnedTopologyNodeIds(topology);
+    const before = operationalPressures(snapshot.load, { nodeIds, basis: 'NOMINAL' });
+    const after = operationalPressures(projected, { nodeIds, basis: 'NOMINAL' });
+    const deltas = operationalPressureChanges(before, after, 'NOMINAL');
+    const effectiveTop = primaryOperationalPressure(projected, { nodeIds, basis: 'EFFECTIVE' });
+    const nominalTop = primaryOperationalPressure(projected, { nodeIds, basis: 'NOMINAL' });
+    if (!effectiveTop || !nominalTop) return null;
 
     const changes = [...deltas]
       .sort((left, right) => right.delta - left.delta)
@@ -293,18 +309,21 @@ export class GameServiceProjector {
       changes.push(`FAIL ${percent(snapshot.load.failureRate)}→${percent(projected.failureRate)}%`);
     }
 
-    const topLabel = operationalPressureLabel(topology, top);
+    const effectiveLabel = operationalPressureLabel(topology, effectiveTop);
+    const nominalLabel = operationalPressureLabel(topology, nominalTop);
     const suffix = projected.failureRate >= 0.1
       ? ' · ⚠ 필수 요청 경로 확인 필요'
-      : top.ratio > 1
-        ? ` · ⚠ ${topLabel} OVERLOAD 예상`
-        : top.ratio >= 0.9
-          ? ` · △ ${topLabel} Critical 근접`
+      : effectiveTop.effectiveRatio > 1
+        ? ` · ⚠ ${effectiveLabel} OVERLOAD 예상`
+        : nominalTop.nominalRatio >= 0.9
+          ? ` · △ ${nominalLabel} Critical 근접`
           : ' · 현재 Capacity 안쪽';
+    const danger = projected.failureRate >= 0.1 || effectiveTop.effectiveRatio > 1;
+    const warning = nominalTop.nominalRatio >= 0.9;
     return {
       summary: `${changes.join(' · ')}${suffix}`,
-      tone: projected.failureRate >= 0.1 || top.ratio > 1 ? 'danger' : top.ratio >= 0.9 ? 'warning' : 'info',
-      nodeId: top.nodeId,
+      tone: danger ? 'danger' : warning ? 'warning' : 'info',
+      nodeId: danger ? effectiveTop.nodeId : nominalTop.nodeId,
     };
   }
 }
