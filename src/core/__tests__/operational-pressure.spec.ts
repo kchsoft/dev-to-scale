@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createNodeLoadSnapshot,
   createNodeResourceLoad,
+  failureRateWithCapacityOverload,
   operationalPressures,
   operationalPressuresForNode,
   primaryOperationalPressure,
@@ -35,6 +36,16 @@ const load = {
     ]),
   ],
 };
+
+function loadAtRatio(ratio: number, nodeKind: 'CACHE' | 'EXTERNAL_SERVICE' = 'CACHE') {
+  return {
+    nodeLoads: [
+      createNodeLoadSnapshot('candidate', nodeKind, [
+        createNodeResourceLoad('THROUGHPUT', ratio * 100, 100),
+      ]),
+    ],
+  };
+}
 
 describe('operational pressure', () => {
   it('selects the hottest resource across every player-owned node', () => {
@@ -85,5 +96,22 @@ describe('operational pressure', () => {
 
     expect(operationalPressures(load, scope)).toEqual([]);
     expect(primaryOperationalPressure(load, scope)).toBeNull();
+  });
+
+  it('turns owned capacity overload above 100% into a bounded request failure rate', () => {
+    expect(failureRateWithCapacityOverload(loadAtRatio(0.9))).toBe(0);
+    expect(failureRateWithCapacityOverload(loadAtRatio(1))).toBe(0);
+    expect(failureRateWithCapacityOverload(loadAtRatio(1.1))).toBeCloseTo(0.05);
+    expect(failureRateWithCapacityOverload(loadAtRatio(1.3))).toBeCloseTo(0.15);
+    expect(failureRateWithCapacityOverload(loadAtRatio(1.5))).toBeCloseTo(0.25);
+    expect(failureRateWithCapacityOverload(loadAtRatio(2))).toBeCloseTo(0.35);
+  });
+
+  it('combines existing request failures with capacity overload as independent failure sources', () => {
+    expect(failureRateWithCapacityOverload(loadAtRatio(1.3), 0.2)).toBeCloseTo(0.32);
+  });
+
+  it('does not create capacity failure from external-service overload', () => {
+    expect(failureRateWithCapacityOverload(loadAtRatio(9.99, 'EXTERNAL_SERVICE'))).toBe(0);
   });
 });

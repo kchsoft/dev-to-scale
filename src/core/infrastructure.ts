@@ -10,6 +10,7 @@ import {
   createNodeResourceLoad,
 } from './node-load';
 import type { NodeLoadSnapshot } from './node-load';
+import { failureRateWithCapacityOverload } from './operational-pressure';
 import {
   NodeHealth,
   RequestTrace,
@@ -462,7 +463,7 @@ export class LoadCalculator {
     const queueLevel = queue ? context.technologyProficiencyLevels?.[queue] ?? 1 : 1;
     const asyncCapacity = infrastructure.asyncCapacity * capacityTuningMultiplier(queueLevel);
     const storageCapacity = infrastructure.storageCapacity;
-    const failureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
+    const requestFailureRate = totalTrafficWeight > 0 ? 1 - weightedSuccess / totalTrafficWeight : 0;
 
     const nodeLoads = topology.graph.nodes.map((node): NodeLoadSnapshot => {
       if (node.id === appNodeId) {
@@ -505,7 +506,7 @@ export class LoadCalculator {
     });
 
     return Object.freeze({
-      failureRate: Math.max(0, Math.min(1, failureRate)),
+      failureRate: failureRateWithCapacityOverload({ nodeLoads }, requestFailureRate),
       nodeLoads: Object.freeze(nodeLoads),
       requestTraces: Object.freeze(requestTraces),
     });
