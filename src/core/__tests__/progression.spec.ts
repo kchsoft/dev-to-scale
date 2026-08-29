@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CommunityProgression } from '../progression';
+import { COMMUNITY_REQUIREMENT_THRESHOLDS, CommunityProgression } from '../progression';
 
 describe('community progression', () => {
   it('uses 3/3/4 phase pools with deterministic seeded order', () => {
@@ -10,6 +10,21 @@ describe('community progression', () => {
     expect(a.featureOrder.slice(0, 3).sort()).toEqual(['COMMENT', 'IMAGE_UPLOAD', 'LIKE'].sort());
     expect(a.featureOrder.slice(3, 6).sort()).toEqual(['AI_RECOMMENDATION', 'NOTIFICATION', 'SEARCH'].sort());
     expect(a.featureOrder.slice(6, 10).sort()).toEqual(['ADS', 'FOLLOW_FEED', 'POPULAR_POSTS', 'PREMIUM'].sort());
+  });
+
+  it('uses the Balance Pass 1 late-game DAU curve', () => {
+    expect(COMMUNITY_REQUIREMENT_THRESHOLDS).toEqual([
+      100,
+      400,
+      1_500,
+      8_000,
+      30_000,
+      100_000,
+      300_000,
+      900_000,
+      2_000_000,
+      5_000_000,
+    ]);
   });
 
   it('attaches DAU thresholds to requirement slots rather than specific features', () => {
