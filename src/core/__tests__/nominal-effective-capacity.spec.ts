@@ -39,7 +39,7 @@ describe('nominal/effective capacity contract', () => {
     expect(infrastructure.nodeCapacity(appId)).toMatchObject({ cpu: 118, io: 96 });
   });
 
-  it('includes structural scale in nominal capacity before framework modifiers', () => {
+  it('includes APP structural scale in nominal capacity before framework modifiers', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     const appId = V1_NODE_IDS.app('SPRING_BOOT');
 
@@ -48,5 +48,39 @@ describe('nominal/effective capacity contract', () => {
 
     expect(nominalNodeCapacity(infrastructure, appId)).toMatchObject({ cpu: 200, io: 200 });
     expect(infrastructure.nodeCapacity(appId)).toMatchObject({ cpu: 236, io: 192 });
+  });
+
+  it('keeps DB product characteristics out of nominal capacity while retaining replica structure', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'MONGODB');
+    const dbId = V1_NODE_IDS.database('MONGODB');
+
+    expect(nominalNodeCapacity(infrastructure, dbId)).toMatchObject({ cpu: 80, io: 80 });
+    expect(infrastructure.nodeCapacity(dbId)).toMatchObject({ cpu: 84, io: 84 });
+
+    infrastructure.scaleOutNode(dbId);
+
+    expect(nominalNodeCapacity(infrastructure, dbId)).toMatchObject({ cpu: 124, io: 140 });
+    expect(infrastructure.nodeCapacity(dbId).cpu).toBeCloseTo(84 * 1.55);
+    expect(infrastructure.nodeCapacity(dbId).io).toBeCloseTo(84 * 1.75);
+  });
+
+  it('uses existing fixed-product size capacity as nominal capacity', () => {
+    const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
+    infrastructure.deployTechnology('ALB');
+    infrastructure.deployTechnology('REDIS');
+    infrastructure.deployTechnology('SQS');
+
+    expect(nominalNodeCapacity(infrastructure, V1_NODE_IDS.gateway)).toEqual(
+      infrastructure.nodeCapacity(V1_NODE_IDS.gateway),
+    );
+    expect(nominalNodeCapacity(infrastructure, V1_NODE_IDS.cache)).toEqual(
+      infrastructure.nodeCapacity(V1_NODE_IDS.cache),
+    );
+    expect(nominalNodeCapacity(infrastructure, V1_NODE_IDS.queue('SQS'))).toEqual(
+      infrastructure.nodeCapacity(V1_NODE_IDS.queue('SQS')),
+    );
+    expect(nominalNodeCapacity(infrastructure, V1_NODE_IDS.storage)).toEqual(
+      infrastructure.nodeCapacity(V1_NODE_IDS.storage),
+    );
   });
 });
