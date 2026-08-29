@@ -1,10 +1,10 @@
 import type {
   InfrastructureNodeKind,
   NodeLoadSnapshot,
+  NodeResourceLoad,
   RequestTrace,
   TopologyGraph,
 } from '../core';
-import { maxResourceLoad } from '../core';
 import type {
   LoadTone,
   NodeScalingView,
@@ -44,12 +44,20 @@ function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
 }
 
-function loadTone(loadRatio: number, incident: boolean): LoadTone {
+function loadTone(nominalRatio: number, effectiveRatio: number, incident: boolean): LoadTone {
   if (incident) return 'incident';
-  if (loadRatio > 1) return 'overload';
-  if (loadRatio >= 0.9) return 'critical';
-  if (loadRatio >= 0.7) return 'busy';
+  if (effectiveRatio > 1) return 'overload';
+  if (nominalRatio >= 0.9) return 'critical';
+  if (nominalRatio >= 0.7) return 'busy';
   return 'stable';
+}
+
+function primaryNominalResource(load: NodeLoadSnapshot): NodeResourceLoad | undefined {
+  let primary: NodeResourceLoad | undefined;
+  for (const resource of load.resources) {
+    if (!primary || resource.nominalRatio > primary.nominalRatio) primary = resource;
+  }
+  return primary;
 }
 
 function trafficUnitForDau(dau: number): number {
@@ -78,22 +86,27 @@ export class TopologyViewProjector {
     const nodes = visibleNodes.map((node): TopologyNodeView => {
       const load = loadByNode.get(node.id);
       const incident = incidentByNode.get(node.id);
-      const capacity = Math.round(load
-        ? maxResourceLoad({ nodeLoads: [load] })?.resource.capacity ?? 0
-        : Math.max(
-          node.capacity.cpu ?? 0,
-          node.capacity.io ?? 0,
-          node.capacity.throughput ?? 0,
-          node.capacity.storage ?? 0,
-        ));
+      const primary = load ? primaryNominalResource(load) : undefined;
+      const fallbackCapacity = Math.max(
+        node.capacity.cpu ?? 0,
+        node.capacity.io ?? 0,
+        node.capacity.throughput ?? 0,
+        node.capacity.storage ?? 0,
+      );
+      const nominalCapacity = Math.round(primary?.nominalCapacity ?? fallbackCapacity);
+      const effectiveCapacity = Math.round(primary?.effectiveCapacity ?? fallbackCapacity);
+      const nominalRatio = load?.nominalLoadRatio ?? 0;
+      const effectiveRatio = load?.effectiveLoadRatio ?? 0;
       return Object.freeze({
         id: node.id,
         kind: KIND_VIEW[node.kind],
         name: presentationCatalog.label(node.productId),
         icon: presentationCatalog.topologyIcon(node.kind),
-        loadPercent: percent(load?.loadRatio ?? 0),
-        tone: loadTone(load?.loadRatio ?? 0, Boolean(incident)),
-        detail: capacity > 0 ? `CAP ${capacity}` : 'CONNECTED',
+        loadPercent: percent(nominalRatio),
+        tone: loadTone(nominalRatio, effectiveRatio, Boolean(incident)),
+        detail: nominalCapacity > 0 || effectiveCapacity > 0
+          ? `CAP ${nominalCapacity} · HARD ${effectiveCapacity}`
+          : 'CONNECTED',
         monthlyCost: node.monthlyCost,
         scaling: source.scalingByNode?.get(node.id) ?? null,
         ...(incident ? { incidentId: incident.id, incidentSeverity: incident.severity } : {}),
