@@ -98,23 +98,3 @@ export function primaryOperationalPressureForNode(
 ): OperationalPressure | null {
   return firstMax(operationalPressuresForNode(load, nodeId), basis);
 }
-
-/**
- * Capacity pressure becomes user-visible request loss only after an owned
- * resource exceeds 100%. Every additional 10 percentage points of overload
- * contributes 5 percentage points of failure, capped at 35%.
- *
- * Existing request/incident failures are combined as independent failure
- * sources rather than added, so the result always remains a probability.
- */
-export function failureRateWithCapacityOverload(
-  load: NodeLoadCollection,
-  existingFailureRate = 0,
-): number {
-  const normalizedExisting = Math.max(0, Math.min(1, existingFailureRate));
-  const primaryRatio = primaryOperationalPressure(load)?.ratio ?? 0;
-  const overload = Math.max(0, primaryRatio - 1);
-  const capacityFailureRate = Math.min(0.35, overload * 0.5);
-
-  return 1 - (1 - normalizedExisting) * (1 - capacityFailureRate);
-}
