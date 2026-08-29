@@ -22,5 +22,35 @@ export function nominalNodeCapacity(
     return scaleCapacity(capacity, infrastructure.app.count);
   }
 
-  throw new Error(`Nominal capacity is not implemented for node: ${nodeId}`);
+  const databaseId = V1_NODE_IDS.database(infrastructure.database.databaseId);
+  if (nodeId === databaseId) {
+    const base = nominalNodeSizeProfile(infrastructure.database.databaseId, infrastructure.database.size).capacity;
+    const replicas = infrastructure.database.replicaCount;
+    return {
+      cpu: (base.cpu ?? 0) * (1 + 0.55 * replicas),
+      io: (base.io ?? 0) * (1 + 0.75 * replicas),
+      throughput: (base.throughput ?? 0) * (1 + 0.6 * replicas),
+    };
+  }
+
+  if (nodeId === V1_NODE_IDS.storage) {
+    const productId = infrastructure.hasTechnology('OBJECT_STORAGE') ? 'OBJECT_STORAGE' : 'LOCAL_STORAGE';
+    return { ...nominalNodeSizeProfile(productId, infrastructure.nodeSize(nodeId)).capacity };
+  }
+
+  if (nodeId === V1_NODE_IDS.gateway && infrastructure.hasTechnology('ALB')) {
+    return { ...nominalNodeSizeProfile('ALB', infrastructure.nodeSize(nodeId)).capacity };
+  }
+
+  if (nodeId === V1_NODE_IDS.cache && infrastructure.hasTechnology('REDIS')) {
+    return { ...nominalNodeSizeProfile('REDIS', infrastructure.nodeSize(nodeId)).capacity };
+  }
+
+  const queue = infrastructure.queueTechnology;
+  if (queue && nodeId === V1_NODE_IDS.queue(queue)) {
+    return { ...nominalNodeSizeProfile(queue, infrastructure.nodeSize(nodeId)).capacity };
+  }
+
+  infrastructure.nodeSize(nodeId);
+  throw new Error(`Unknown or non-owned infrastructure node: ${nodeId}`);
 }
