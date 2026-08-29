@@ -57,7 +57,7 @@ export class GrowthEvent {
 const POSITIVE_PROBABILITY: Record<1 | 2 | 3, number> = {
   1: 0.75,
   2: 0.65,
-  3: 0.55,
+  3: 0.58,
 };
 
 export interface DailyGrowthInput {
