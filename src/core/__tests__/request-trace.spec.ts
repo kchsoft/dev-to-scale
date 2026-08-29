@@ -74,6 +74,32 @@ describe('RequestTraceSimulator', () => {
     expect(missingOptional.nodes.at(-1)?.status).toBe('MISSING');
   });
 
+  it('keeps a degraded existing optional step visible without gating primary success', () => {
+    const trace = RequestTraceSimulator.simulate({
+      workloadId: 'notification',
+      moduleId: 'community',
+      steps: [
+        { stepId: 'app', role: 'ENTRY_APP', requirement: 'REQUIRED', nodeId: 'app' },
+        { stepId: 'queue', role: 'EVENT_BUS', requirement: 'OPTIONAL', nodeId: 'queue' },
+        { stepId: 'db', role: 'PRIMARY_DATABASE', requirement: 'REQUIRED', nodeId: 'db' },
+      ],
+      edges: [
+        { blueprintEdgeId: 'app-queue', topologyEdgeId: 'app-queue', fromNodeId: 'app', toNodeId: 'queue', mode: 'ASYNC' },
+        { blueprintEdgeId: 'queue-db', topologyEdgeId: 'queue-db', fromNodeId: 'queue', toNodeId: 'db', mode: 'ASYNC' },
+      ],
+    }, { queue: 0 });
+
+    expect(trace.nodes[1]).toMatchObject({
+      requirement: 'OPTIONAL',
+      arrivalRatio: 1,
+      passThroughRatio: 1,
+      status: 'FAILED',
+    });
+    expect(trace.nodes[2].arrivalRatio).toBe(1);
+    expect(trace.successRatio).toBe(1);
+    expect(trace.failureNodeId).toBeNull();
+  });
+
   it('reports traffic on the actual topology edge', () => {
     const trace = RequestTraceSimulator.simulate(queueRoute('queue-a'), { 'app-a': 0.6 });
 
