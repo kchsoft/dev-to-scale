@@ -15,6 +15,17 @@ class StablePositiveRandom implements RandomSource {
   }
 }
 
+class CountingRandom implements RandomSource {
+  calls = 0;
+
+  constructor(private readonly value = 0.99) {}
+
+  next(): number {
+    this.calls += 1;
+    return this.value;
+  }
+}
+
 function engineWithLoad(load: LoadSnapshot): GameEngine {
   const engine = new GameEngine({
     frameworkId: 'SPRING_BOOT',
@@ -114,5 +125,23 @@ describe('game engine operational growth pressure', () => {
     const overloadedExternal = engineWithLoad(operationalLoad({ external: 9.99 }));
 
     expect(advanceGrowth(overloadedExternal)).toBe(advanceGrowth(baseline));
+  });
+
+  it('uses incidentRandom for incident rolls when configured', () => {
+    const growth = new CountingRandom();
+    const incidents = new CountingRandom();
+    const engine = new GameEngine({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 7,
+      random: growth,
+      incidentRandom: incidents,
+    });
+
+    while (!engine.launched) engine.advanceDay();
+    const before = incidents.calls;
+    engine.advanceDay();
+
+    expect(incidents.calls).toBeGreaterThan(before);
   });
 });
