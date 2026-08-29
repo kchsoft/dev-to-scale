@@ -116,7 +116,7 @@ export function maxNodeLoad(
   let max: NodeLoadSnapshot | undefined;
   for (const node of load.nodeLoads) {
     if (filter?.nodeKind !== undefined && node.nodeKind !== filter.nodeKind) continue;
-    if (max === undefined || node.loadRatio > max.loadRatio) max = node;
+    if (max === undefined || node.effectiveLoadRatio > max.effectiveLoadRatio) max = node;
   }
   return max;
 }
@@ -133,7 +133,7 @@ export function maxResourceLoad(
     if (filter?.nodeKind !== undefined && node.nodeKind !== filter.nodeKind) continue;
     for (const resource of node.resources) {
       if (filter?.resourceKind !== undefined && resource.resourceKind !== filter.resourceKind) continue;
-      if (max === undefined || resource.ratio > max.resource.ratio) max = { node, resource };
+      if (max === undefined || resource.effectiveRatio > max.resource.effectiveRatio) max = { node, resource };
     }
   }
   return max;
