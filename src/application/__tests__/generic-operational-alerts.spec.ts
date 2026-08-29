@@ -58,7 +58,7 @@ function engineWithOperationalTechnologies(): GameEngine {
 
 describe('generic operational alerts and feature impact', () => {
   it('matches pressure changes by node id and resource kind while preserving after order', () => {
-    const selected = new Set([V1_NODE_IDS.gateway, V1_NODE_IDS.cache]);
+    const selected = new Set<string>([V1_NODE_IDS.gateway, V1_NODE_IDS.cache]);
     const before = operationalPressures(ownedLoad({ alb: 0.82, redis: 0.76 }))
       .filter(({ nodeId }) => selected.has(nodeId));
     const after = operationalPressures(ownedLoad({ alb: 1.01, redis: 1.09 }))
