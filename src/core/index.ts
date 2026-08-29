@@ -9,6 +9,7 @@ export * from './incident';
 export * from './incident-manager';
 export * from './incident-topology';
 export * from './infrastructure';
+export * from './infrastructure-capacity';
 export * from './learning';
 export {
   NODE_RESOURCE_KINDS,
