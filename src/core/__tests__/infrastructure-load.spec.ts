@@ -132,6 +132,42 @@ describe('infrastructure and load', () => {
     expect(cache?.resources[0].demand).toBeGreaterThan(0);
   });
 
+  it('applies transactional database fit to residual DB demand', () => {
+    const feature = new FeatureDefinition({
+      id: 'CHECKOUT', name: 'Checkout', baseWork: 1, complexity: 'NORMAL',
+      load: { app: 1, db: 2, async: 0, storage: 0 },
+      resourceLoad: { db: { cpu: 1.2, io: 2.0 } },
+      tags: ['TRANSACTIONAL'],
+      requestRoute: [{ node: 'APP' }, { node: 'DB' }],
+    });
+
+    const pg = LoadCalculator.calculate(100_000, [feature], InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL'));
+    const mysql = LoadCalculator.calculate(100_000, [feature], InfrastructureState.initial('SPRING_BOOT', 'MYSQL'));
+    const mongo = LoadCalculator.calculate(100_000, [feature], InfrastructureState.initial('SPRING_BOOT', 'MONGODB'));
+
+    expect(nodeResource(pg, 'DATABASE', 'CPU')!.demand).toBeLessThan(nodeResource(mysql, 'DATABASE', 'CPU')!.demand);
+    expect(nodeResource(mysql, 'DATABASE', 'CPU')!.demand).toBeLessThan(nodeResource(mongo, 'DATABASE', 'CPU')!.demand);
+    expect(nodeResource(pg, 'DATABASE', 'IO')!.demand).toBeLessThan(nodeResource(mysql, 'DATABASE', 'IO')!.demand);
+    expect(nodeResource(mysql, 'DATABASE', 'IO')!.demand).toBeLessThan(nodeResource(mongo, 'DATABASE', 'IO')!.demand);
+  });
+
+  it('lets read-content workloads favor MySQL or MongoDB over PostgreSQL demand', () => {
+    const feature = new FeatureDefinition({
+      id: 'CONTENT_FEED', name: 'Content feed', baseWork: 1, complexity: 'NORMAL',
+      load: { app: 1, db: 2, async: 0, storage: 0 },
+      resourceLoad: { db: { cpu: 1.0, io: 2.5 } },
+      tags: ['READ_HEAVY', 'CONTENT'],
+      requestRoute: [{ node: 'APP' }, { node: 'DB' }],
+    });
+
+    const pg = LoadCalculator.calculate(100_000, [feature], InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL'));
+    const mysql = LoadCalculator.calculate(100_000, [feature], InfrastructureState.initial('SPRING_BOOT', 'MYSQL'));
+    const mongo = LoadCalculator.calculate(100_000, [feature], InfrastructureState.initial('SPRING_BOOT', 'MONGODB'));
+
+    expect(nodeResource(mysql, 'DATABASE', 'IO')!.demand).toBeLessThan(nodeResource(pg, 'DATABASE', 'IO')!.demand);
+    expect(nodeResource(mongo, 'DATABASE', 'IO')!.demand).toBeLessThan(nodeResource(pg, 'DATABASE', 'IO')!.demand);
+  });
+
   it('a queue removes optional async fallback pressure from APP IO', () => {
     const feature = new FeatureDefinition({
       id: 'PREMIUM_ASYNC',

@@ -1,4 +1,4 @@
-import { DatabaseId } from './database';
+import { DatabaseDefinition, DatabaseId } from './database';
 import { capacityHealthByNode, composeNodeHealth } from './capacity-health';
 import { FeatureDefinition, FrameworkId } from './feature';
 import { nominalNodeCapacity } from './infrastructure-capacity';
@@ -437,6 +437,7 @@ export class LoadCalculator {
     const requestTraces = routes.map((route) => RequestTraceSimulator.simulate(route, nodeHealth));
     const appNodeId = V1_NODE_IDS.app(infrastructure.app.frameworkId);
     const databaseNodeId = V1_NODE_IDS.database(infrastructure.database.databaseId);
+    const database = DatabaseDefinition.byId(infrastructure.database.databaseId);
     const queueNodeId = queue ? V1_NODE_IDS.queue(queue) : null;
     const gatewayNodeId = infrastructure.hasTechnology('ALB') ? V1_NODE_IDS.gateway : null;
 
@@ -474,6 +475,10 @@ export class LoadCalculator {
         dbCpuBase *= 1 - 0.12 * cacheHealth;
         dbIoBase *= 1 - 0.40 * cacheHealth;
       }
+
+      const databaseFit = database.resourceDemandModifierFor(feature);
+      dbCpuBase *= databaseFit.cpu;
+      dbIoBase *= databaseFit.io;
 
       appCpuDemand += appCpuBase * traceArrival(trace, appNodeId);
       appIoDemand += appIoBase * traceArrival(trace, appNodeId);
