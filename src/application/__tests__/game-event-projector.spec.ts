@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GameEngine } from '../../core';
+import { GameEngine, Incident, V1_NODE_IDS } from '../../core';
 import { GameEventProjector } from '../game-event-projector';
 import { GameServiceProjector } from '../game-service-projector';
 
@@ -61,6 +61,29 @@ describe('GameEventProjector', () => {
       const current = serviceProjector.project(requirementSnapshot!, { monthlyRevenue: 0, monthlyCost: 0, monthlyProfit: 0 });
       expect(current.topology.nodes.some(({ id }) => id === impact.nodeId)).toBe(true);
     }
+  });
+
+  it('routes incident diagnosis through the topology-aware service projector', () => {
+    const engine = new GameEngine({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 14 });
+    for (let day = 0; day < 30 && !engine.launched; day += 1) engine.advanceDay();
+    engine.developer.get({ category: 'fundamental', id: 'OS_RUNTIME' }).setLevel(2);
+
+    const serviceProjector = new GameServiceProjector(engine);
+    const eventProjector = new GameEventProjector(engine, serviceProjector);
+    const databaseNodeId = V1_NODE_IDS.database('POSTGRESQL');
+    const before = engine.snapshot;
+
+    engine.incidents.add(new Incident('incident-test', databaseNodeId, 'MAJOR', 2));
+    const after = engine.snapshot;
+    const incidentEvent = eventProjector.project(before, after).find((event) => event.kind === 'incident');
+
+    expect(incidentEvent).toMatchObject({
+      id: 'incident-test',
+      kind: 'incident',
+      nodeId: databaseNodeId,
+      diagnosis: expect.stringMatching(/^SIGNAL · PostgreSQL (CPU|I\/O) \d+%/),
+    });
+    expect(incidentEvent?.diagnosis).toBe(serviceProjector.diagnosisText(databaseNodeId, after));
   });
 
   it('rejects stale snapshots instead of mixing them with current engine state', () => {
