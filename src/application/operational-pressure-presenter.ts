@@ -5,7 +5,7 @@ import type {
   OperationalPressure,
   ServiceTopology,
 } from '../core';
-import type { BottleneckView, TopologyNodeView } from './game-view';
+import type { BottleneckView, CapacityStatusView, LoadTone, TopologyNodeView } from './game-view';
 import { presentationCatalog } from './presentation-catalog';
 
 const VIEW_KIND: Readonly<Record<InfrastructureNodeKind, TopologyNodeView['kind']>> = {
@@ -36,12 +36,12 @@ export function operationalPressureChanges(
 ): readonly OperationalPressureChange[] {
   const beforeByKey = new Map(before.map((pressure) => [pressureKey(pressure), pressure] as const));
   const changes = after.map((pressure) => {
-    const beforeRatio = beforeByKey.get(pressureKey(pressure))?.ratio ?? 0;
+    const beforeRatio = beforeByKey.get(pressureKey(pressure))?.effectiveRatio ?? 0;
     return Object.freeze({
       pressure,
       beforeRatio,
-      afterRatio: pressure.ratio,
-      delta: pressure.ratio - beforeRatio,
+      afterRatio: pressure.effectiveRatio,
+      delta: pressure.effectiveRatio - beforeRatio,
     });
   });
   return Object.freeze(changes);
@@ -68,13 +68,42 @@ export function operationalPressureLabel(topology: ServiceTopology, pressure: Op
   return `${operationalNodeLabel(topology, pressure.nodeId)} ${resourceLabel(pressure.resourceKind)}`;
 }
 
+export function capacityStatus(nominalRatio: number, effectiveRatio: number): CapacityStatusView {
+  if (effectiveRatio > 1) return 'OVERLOAD';
+  if (nominalRatio >= 1) return 'WARNING';
+  return 'NORMAL';
+}
+
+export function operationalLoadTone(nominalRatio: number, effectiveRatio: number): LoadTone {
+  if (effectiveRatio > 1) return 'overload';
+  if (nominalRatio >= 0.9) return 'critical';
+  if (nominalRatio >= 0.7) return 'busy';
+  return 'stable';
+}
+
+export function hardLimitPercent(pressure: Pick<OperationalPressure, 'nominalCapacity' | 'effectiveCapacity'>): number {
+  if (pressure.nominalCapacity <= 0) return 0;
+  return Math.max(0, Math.round(pressure.effectiveCapacity / pressure.nominalCapacity * 100));
+}
+
+export function capacityFailurePercent(effectiveRatio: number): number {
+  if (effectiveRatio <= 1) return 0;
+  if (!Number.isFinite(effectiveRatio)) return 100;
+  return Math.max(0, Math.round((1 - 1 / effectiveRatio) * 100));
+}
+
 export function toBottleneckView(topology: ServiceTopology, pressure: OperationalPressure): BottleneckView {
   return Object.freeze({
     nodeId: pressure.nodeId,
     nodeKind: VIEW_KIND[pressure.nodeKind],
     resourceKind: pressure.resourceKind,
-    ratio: pressure.ratio,
-    percent: Math.max(0, Math.round(pressure.ratio * 100)),
+    nominalRatio: pressure.nominalRatio,
+    effectiveRatio: pressure.effectiveRatio,
+    percent: Math.max(0, Math.round(pressure.nominalRatio * 100)),
+    effectivePercent: Math.max(0, Math.round(pressure.effectiveRatio * 100)),
+    hardLimitPercent: hardLimitPercent(pressure),
+    capacityFailurePercent: capacityFailurePercent(pressure.effectiveRatio),
+    status: capacityStatus(pressure.nominalRatio, pressure.effectiveRatio),
     label: operationalPressureLabel(topology, pressure),
   });
 }
