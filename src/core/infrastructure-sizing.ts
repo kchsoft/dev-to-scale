@@ -64,7 +64,7 @@ function storageProfiles(
 }
 
 const FIXED_PRODUCT_PROFILES = Object.freeze({
-  ALB: throughputProfiles([180, 360, 700, 1_300], [TECHNOLOGIES.ALB.monthlyCost, 180_000, 320_000, 550_000]),
+  ALB: throughputProfiles([180, 360, 700, 1_800], [TECHNOLOGIES.ALB.monthlyCost, 180_000, 320_000, 550_000]),
   REDIS: throughputProfiles([160, 320, 600, 1_050], [TECHNOLOGIES.REDIS.monthlyCost, 180_000, 320_000, 560_000]),
   SQS: throughputProfiles([300, 550, 950, 1_500], [TECHNOLOGIES.SQS.monthlyCost, 140_000, 240_000, 400_000]),
   RABBITMQ: throughputProfiles([500, 850, 1_400, 2_200], [TECHNOLOGIES.RABBITMQ.monthlyCost, 260_000, 450_000, 750_000]),
