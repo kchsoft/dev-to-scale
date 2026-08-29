@@ -2,81 +2,82 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a deterministic, measurement-only simulation harness that runs the real `GameEngine` across 5 frameworks × 3 databases × 30 seeds × 6 operating strategies and produces reproducible balance reports without tuning core game constants.
+**Goal:** Build a deterministic, measurement-only balance harness that runs the real `GameEngine` across 5 frameworks × 3 databases × 30 seeds × 6 strategies and produces reproducible run-level and aggregate reports.
 
-**Architecture:** Keep `GameEngine` as the sole game-rule authority. Add only two narrow core capabilities required by the harness—optional incident RNG isolation and read-only capacity previews—then build a separate `src/simulation` package that converts real game state into observation-limited immutable inputs, asks deterministic strategies for one operating decision per day, executes only public engine commands, collects metrics, and aggregates reports. A `tsx` CLI runs the full or filtered matrix and writes CSV/JSON artifacts outside normal CI.
+**Architecture:** `GameEngine` remains the sole game-rule authority. Core receives only two narrow capabilities required by the harness: optional incident RNG isolation and read-only capacity previews. Everything else lives under `src/simulation`: immutable observation adapters, deterministic strategies, shared learning/runway policy, a public-command executor, metrics, runner, reporting, and a `tsx` CLI.
 
-**Tech Stack:** TypeScript 5.9+, Vitest 3.2+, Node.js filesystem APIs, `tsx` for the TypeScript CLI, existing Next.js 16.3.2 project tooling.
+**Tech Stack:** TypeScript 5.9+, Vitest 3.2+, Node.js filesystem APIs, `tsx`, existing Next.js 16.3.2 tooling.
 
 **Spec:** `docs/superpowers/specs/2026-08-29-deterministic-balance-simulation-harness-design.md`
 
 ## Global Constraints
 
-- Measurement-only: do not change game balance constants, economy constants, capacity constants, growth formulas, incident probabilities, or feature requirements.
-- Full matrix is exactly 5 frameworks × 3 databases × 30 seeds × 6 strategies = 2,700 games.
-- Each simulation stops at `WON`, `BANKRUPT`, or after exactly 1,080 successful `advanceDay()` calls; running games then become `TIMEOUT`.
-- Strategies are deterministic and must never own or consume a random source.
-- Feature order remains the real seeded `CommunityProgression`; strategies do not select features.
-- Learning follows one shared baseline policy; strategies do not choose learning order.
-- At most one normal operating investment action may execute per simulated day; incident response and viral response are separate control slots.
-- Non-oracle strategies must not receive `GameEngine`, `DeveloperProfile`, `InfrastructureState`, raw `GameSnapshot.load`, or any object that exposes information above their observation ceiling.
-- `ORACLE` means a full-information local heuristic benchmark, not a proven optimum and not a multi-day search.
-- Same-seed balance runs must isolate organic-growth RNG consumption from topology-dependent incident RNG consumption.
-- Full 2,700-game execution is not added to normal CI.
-- Generated `artifacts/balance/` outputs are not committed by default.
+- Do not change game balance constants, economy constants, capacity constants, growth formulas, incident probabilities, or progression thresholds.
+- Full default matrix is exactly 2,700 games: 5 frameworks × 3 databases × 30 seeds × 6 strategies.
+- A run terminates at `WON`, `BANKRUPT`, or after exactly 1,080 successful `advanceDay()` calls; a still-running game then reports `TIMEOUT` without mutating engine status.
+- Strategies are deterministic and never own or consume randomness.
+- Feature order remains real `CommunityProgression`; strategies do not select features.
+- Learning uses one shared nine-step baseline; strategies do not choose learning order.
+- At most one normal operating investment action executes per simulated day. Incident response and viral response are separate control slots.
+- Non-oracle strategies never receive `GameEngine`, `DeveloperProfile`, `InfrastructureState`, raw `GameSnapshot.load`, or other privileged live objects.
+- `ORACLE` is a full-information local heuristic, not a proven optimum and not a multi-day search.
+- Same-seed balance runs isolate organic-growth RNG consumption from topology-dependent incident RNG consumption.
+- The full 2,700-run batch is not added to normal CI.
+- `artifacts/balance/` is generated analysis output and remains uncommitted.
 
 ---
 
-## File Map
+## File Structure
 
-### Core changes
+### Modify core
 
-- Modify `src/core/game-engine.ts` — accept optional `incidentRandom`, preserve shared-stream compatibility, and add read-only resize/scale-out load previews.
-- Test `src/core/__tests__/game-engine.spec.ts` — compatibility and preview non-mutation.
-- Test `src/core/__tests__/game-engine-operational-growth.spec.ts` — independent incident RNG cannot perturb the growth stream.
+- `src/core/game-engine.ts` — optional `incidentRandom`, capacity preview APIs.
+- `src/core/__tests__/game-engine.spec.ts` — preview non-mutation and config compatibility.
+- `src/core/__tests__/game-engine-operational-growth.spec.ts` — RNG isolation.
 
-### Simulation package
+### Create simulation package
 
-- Create `src/simulation/balance-scenario.ts` — framework/database/seed/strategy matrix and seed-derived engine factory.
-- Create `src/simulation/balance-action.ts` — explicit strategy action union and stable action IDs.
-- Create `src/simulation/balance-observation.ts` — BASIC/METRICS/APM/ORACLE immutable observations and structural information ceilings.
-- Create `src/simulation/balance-strategy.ts` — strategy interface, IDs, affordability/runway helpers, deterministic tie-breaking.
-- Create `src/simulation/baseline-learning-controller.ts` — shared nine-step learning policy and protected learning reserve.
-- Create `src/simulation/simulation-executor.ts` — public-command-only execution, incident/viral/investment slots, cost accounting hooks.
-- Create `src/simulation/strategy-helpers.ts` — node/action candidate helpers shared by deterministic strategies.
-- Create `src/simulation/strategies/oracle.ts`.
-- Create `src/simulation/strategies/apm-aware.ts`.
-- Create `src/simulation/strategies/metrics-aware.ts`.
-- Create `src/simulation/strategies/reactive-basic.ts`.
-- Create `src/simulation/strategies/yolo-scale.ts`.
-- Create `src/simulation/strategies/cheapskate.ts`.
-- Create `src/simulation/strategy-registry.ts` — stable strategy ordering and lookup.
-- Create `src/simulation/simulation-metrics.ts` — run-level accumulator and result schema.
-- Create `src/simulation/simulation-runner.ts` — deterministic daily loop and trace collection.
-- Create `src/simulation/balance-report.ts` — percentile summaries, grouping, paired comparisons, CSV/JSON serialization.
-- Create `src/simulation/index.ts` — CLI-facing exports only.
+- `src/simulation/balance-scenario.ts` — matrix, filters, seed-derived engine factory.
+- `src/simulation/balance-action.ts` — explicit action union and stable action ID.
+- `src/simulation/balance-observation.ts` — BASIC/METRICS/APM/ORACLE immutable views.
+- `src/simulation/balance-strategy.ts` — strategy contracts, affordability policy, runway multipliers.
+- `src/simulation/baseline-learning-controller.ts` — shared learning policy and protected reserve.
+- `src/simulation/simulation-executor.ts` — public-command-only action execution and daily action slots.
+- `src/simulation/strategy-helpers.ts` — candidate construction and stable ordering helpers.
+- `src/simulation/strategies/oracle.ts`
+- `src/simulation/strategies/apm-aware.ts`
+- `src/simulation/strategies/metrics-aware.ts`
+- `src/simulation/strategies/reactive-basic.ts`
+- `src/simulation/strategies/yolo-scale.ts`
+- `src/simulation/strategies/cheapskate.ts`
+- `src/simulation/strategy-registry.ts` — fixed strategy registry/order.
+- `src/simulation/simulation-metrics.ts` — accumulator and `BalanceRunResult`.
+- `src/simulation/simulation-runner.ts` — deterministic daily loop and optional trace.
+- `src/simulation/balance-report.ts` — statistics, groups, paired comparisons, CSV/JSON.
+- `src/simulation/balance-cli.ts` — pure CLI argument parsing/filter validation.
+- `src/simulation/index.ts` — CLI-facing exports.
+- `scripts/run-balance.ts` — process I/O, execution, safe artifact writes.
 
-### Simulation tests
+### Create simulation tests
 
-- Create `src/simulation/__tests__/balance-scenario.spec.ts`.
-- Create `src/simulation/__tests__/balance-observation.spec.ts`.
-- Create `src/simulation/__tests__/baseline-learning-controller.spec.ts`.
-- Create `src/simulation/__tests__/simulation-executor.spec.ts`.
-- Create `src/simulation/__tests__/strategies.spec.ts`.
-- Create `src/simulation/__tests__/simulation-metrics.spec.ts`.
-- Create `src/simulation/__tests__/simulation-runner.spec.ts`.
-- Create `src/simulation/__tests__/balance-report.spec.ts`.
+- `src/simulation/__tests__/balance-scenario.spec.ts`
+- `src/simulation/__tests__/balance-observation.spec.ts`
+- `src/simulation/__tests__/baseline-learning-controller.spec.ts`
+- `src/simulation/__tests__/simulation-executor.spec.ts`
+- `src/simulation/__tests__/strategies.spec.ts`
+- `src/simulation/__tests__/simulation-metrics.spec.ts`
+- `src/simulation/__tests__/simulation-runner.spec.ts`
+- `src/simulation/__tests__/balance-report.spec.ts`
+- `src/simulation/__tests__/balance-cli.spec.ts`
 
-### CLI/tooling
+### Tooling
 
-- Create `scripts/run-balance.ts` — argument parsing, filtered/full execution, safe artifact write, concise console summary.
-- Modify `package.json` — add `tsx` dev dependency and `balance` script.
-- Modify `.gitignore` — ignore `artifacts/balance/`.
-- Test `src/simulation/__tests__/balance-cli.spec.ts` — pure CLI parser/filter behavior without spawning the 2,700-run batch.
+- Modify `package.json` — install `tsx`, add `balance` script.
+- Modify `.gitignore` — add `artifacts/balance/`.
 
 ---
 
-### Task 1: Isolate Incident RNG Without Breaking Existing Callers
+### Task 1: Add Compatibility-Preserving Incident RNG Isolation
 
 **Files:**
 - Modify: `src/core/game-engine.ts`
@@ -84,12 +85,12 @@
 - Modify: `src/core/__tests__/game-engine-operational-growth.spec.ts`
 
 **Interfaces:**
-- Consumes: existing `RandomSource`, `SeededRandomSource`, `GameEngineConfig.random`.
-- Produces: `GameEngineConfig.incidentRandom?: RandomSource`; private `incidentRandom: RandomSource`; growth continues using the existing `random` source.
+- Consumes: `RandomSource`, existing `GameEngineConfig.random`.
+- Produces: `GameEngineConfig.incidentRandom?: RandomSource` and a private incident RNG source.
 
-- [ ] **Step 1: Write a failing compatibility test for shared-stream fallback**
+- [ ] **Step 1: Write the failing independent-stream test**
 
-Add a small scripted random source in `src/core/__tests__/game-engine.spec.ts` and verify that when only `random` is supplied, both growth and incident generation consume that same object just as before.
+Add this helper and test to `src/core/__tests__/game-engine-operational-growth.spec.ts`:
 
 ```ts
 class CountingRandom implements RandomSource {
@@ -101,40 +102,9 @@ class CountingRandom implements RandomSource {
   }
 }
 
-it('keeps legacy shared RNG semantics when incidentRandom is omitted', () => {
-  const random = new CountingRandom();
-  const engine = new GameEngine({
-    frameworkId: 'SPRING_BOOT',
-    databaseId: 'POSTGRESQL',
-    seed: 1,
-    random,
-  });
-
-  while (!engine.launched) engine.advanceDay();
-  const before = random.calls;
-  engine.advanceDay();
-  expect(random.calls).toBeGreaterThan(before);
-});
-```
-
-- [ ] **Step 2: Run the focused test and verify the new config contract does not yet exist**
-
-Run:
-
-```bash
-npm test -- src/core/__tests__/game-engine.spec.ts
-```
-
-Expected: the new independent-RNG test added in Step 3 will fail before implementation; all existing tests remain green.
-
-- [ ] **Step 3: Write the failing independent-stream test**
-
-In `src/core/__tests__/game-engine-operational-growth.spec.ts`, create distinct counting sources and assert incident generation consumes `incidentRandom` while the main source count matches the growth-only path.
-
-```ts
-it('uses an independent incident RNG when configured', () => {
-  const growth = new CountingRandom(0.99);
-  const incidents = new CountingRandom(0.99);
+it('uses incidentRandom for incident rolls when configured', () => {
+  const growth = new CountingRandom();
+  const incidents = new CountingRandom();
   const engine = new GameEngine({
     frameworkId: 'SPRING_BOOT',
     databaseId: 'POSTGRESQL',
@@ -144,17 +114,24 @@ it('uses an independent incident RNG when configured', () => {
   });
 
   while (!engine.launched) engine.advanceDay();
-  const incidentCallsBefore = incidents.calls;
+  const before = incidents.calls;
   engine.advanceDay();
 
-  expect(incidents.calls).toBeGreaterThan(incidentCallsBefore);
-  expect(growth).not.toBe(incidents);
+  expect(incidents.calls).toBeGreaterThan(before);
 });
 ```
 
-- [ ] **Step 4: Implement the minimal compatibility-preserving split**
+- [ ] **Step 2: Run the focused test**
 
-Change the config and constructor in `src/core/game-engine.ts`:
+```bash
+npm test -- src/core/__tests__/game-engine-operational-growth.spec.ts
+```
+
+Expected: FAIL because `incidentRandom` is not part of `GameEngineConfig` yet.
+
+- [ ] **Step 3: Implement the split with legacy fallback**
+
+In `src/core/game-engine.ts`:
 
 ```ts
 export interface GameEngineConfig {
@@ -172,11 +149,11 @@ private readonly incidentRandom: RandomSource;
 constructor(readonly config: GameEngineConfig) {
   this.random = config.random ?? new SeededRandomSource(config.seed ^ 0x9e3779b9);
   this.incidentRandom = config.incidentRandom ?? this.random;
-  // existing initialization unchanged
+  // retain all existing initialization below
 }
 ```
 
-Then change only the incident generator call:
+Change only incident generation to use `this.incidentRandom`:
 
 ```ts
 const incident = this.incidentGenerator.tryGenerate(
@@ -187,16 +164,18 @@ const incident = this.incidentGenerator.tryGenerate(
 );
 ```
 
-- [ ] **Step 5: Run focused and full core tests**
+- [ ] **Step 4: Add a legacy-fallback regression test**
 
-Run:
+In `src/core/__tests__/game-engine.spec.ts`, construct an engine with only `random` and assert advancing a launched day consumes that object; do not require any caller to supply `incidentRandom`.
+
+- [ ] **Step 5: Run focused tests and typecheck**
 
 ```bash
 npm test -- src/core/__tests__/game-engine.spec.ts src/core/__tests__/game-engine-operational-growth.spec.ts
 npm run typecheck
 ```
 
-Expected: PASS; existing callers without `incidentRandom` retain shared-stream behavior.
+Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -207,21 +186,20 @@ git commit -m "refactor: isolate incident random source"
 
 ---
 
-### Task 2: Add Read-Only Capacity Preview Commands for ORACLE
+### Task 2: Add Read-Only Capacity Load Previews
 
 **Files:**
 - Modify: `src/core/game-engine.ts`
 - Modify: `src/core/__tests__/game-engine.spec.ts`
 
 **Interfaces:**
-- Consumes: `InfrastructureState.clone()`, `resizeNode()`, `scaleOutNode()`, existing `calculateCurrentLoad()`.
 - Produces:
   - `previewLoadWithNodeResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadSnapshot`
   - `previewLoadWithNodeScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot`
 
-- [ ] **Step 1: Write failing preview non-mutation tests**
+- [ ] **Step 1: Write failing resize and scale-out non-mutation tests**
 
-Add tests that capture live size/count/replicas, call a preview, and verify the live infrastructure remains unchanged while the returned load differs when the preview action is meaningful.
+Add to `src/core/__tests__/game-engine.spec.ts`:
 
 ```ts
 it('previews APP resize without mutating live infrastructure', () => {
@@ -236,17 +214,17 @@ it('previews APP resize without mutating live infrastructure', () => {
 });
 ```
 
-Add corresponding DB replica/APP scale-out coverage after deploying ALB in the test fixture.
+Also test DB scale-out keeps `replicaCount` unchanged and APP scale-out preview still throws when ALB is absent.
 
-- [ ] **Step 2: Run the focused test to verify missing-method failure**
+- [ ] **Step 2: Run the failing tests**
 
 ```bash
 npm test -- src/core/__tests__/game-engine.spec.ts
 ```
 
-Expected: FAIL because the two preview methods do not exist.
+Expected: FAIL because the preview methods do not exist.
 
-- [ ] **Step 3: Implement resize preview using cloned infrastructure**
+- [ ] **Step 3: Implement clone-based previews**
 
 ```ts
 previewLoadWithNodeResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadSnapshot {
@@ -254,11 +232,7 @@ previewLoadWithNodeResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadS
   infrastructure.resizeNode(nodeId, size);
   return this.calculateCurrentLoad(infrastructure);
 }
-```
 
-- [ ] **Step 4: Implement scale-out preview using cloned infrastructure**
-
-```ts
 previewLoadWithNodeScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot {
   const infrastructure = this.infrastructure.clone();
   infrastructure.scaleOutNode(nodeId);
@@ -266,9 +240,9 @@ previewLoadWithNodeScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot {
 }
 ```
 
-Do not catch invalid scale-out errors; the preview must preserve real infrastructure validation such as ALB requirement and replica/server limits.
+Do not catch validation errors from the cloned infrastructure.
 
-- [ ] **Step 5: Run tests and typecheck**
+- [ ] **Step 4: Run regression tests and typecheck**
 
 ```bash
 npm test -- src/core/__tests__/game-engine.spec.ts src/core/__tests__/generic-scaling-commands.spec.ts
@@ -277,7 +251,7 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/core/game-engine.ts src/core/__tests__/game-engine.spec.ts
@@ -286,7 +260,7 @@ git commit -m "feat: add infrastructure load previews"
 
 ---
 
-### Task 3: Define Deterministic Scenarios, Actions, and Engine Factory
+### Task 3: Define Scenario Matrix, Stable RNG Streams, and Actions
 
 **Files:**
 - Create: `src/simulation/balance-scenario.ts`
@@ -294,66 +268,71 @@ git commit -m "feat: add infrastructure load previews"
 - Create: `src/simulation/__tests__/balance-scenario.spec.ts`
 
 **Interfaces:**
-- Produces:
-  - `BalanceStrategyId = 'ORACLE' | 'APM_AWARE' | 'METRICS_AWARE' | 'REACTIVE_BASIC' | 'YOLO_SCALE' | 'CHEAPSKATE'`
-  - `BalanceScenario { frameworkId; databaseId; seed; strategyId }`
-  - `FULL_BALANCE_SEEDS = [1..30]`
-  - `buildBalanceScenarios(filters?): BalanceScenario[]`
-  - `createBalanceEngine(scenario): GameEngine`
-  - `SimulationAction` discriminated union.
-
-- [ ] **Step 1: Write the failing 2,700-cardinality and stable-order tests**
 
 ```ts
-it('builds the complete 2700-game matrix', () => {
-  const scenarios = buildBalanceScenarios();
-  expect(scenarios).toHaveLength(2700);
-  expect(scenarios[0]).toEqual({
+export type BalanceStrategyId =
+  | 'ORACLE'
+  | 'APM_AWARE'
+  | 'METRICS_AWARE'
+  | 'REACTIVE_BASIC'
+  | 'YOLO_SCALE'
+  | 'CHEAPSKATE';
+
+export interface BalanceScenario {
+  frameworkId: FrameworkId;
+  databaseId: DatabaseId;
+  seed: number;
+  strategyId: BalanceStrategyId;
+}
+```
+
+- [ ] **Step 1: Write failing matrix tests**
+
+```ts
+it('builds exactly 2700 default scenarios', () => {
+  expect(buildBalanceScenarios()).toHaveLength(2700);
+});
+
+it('keeps stable framework -> database -> seed -> strategy ordering', () => {
+  expect(buildBalanceScenarios()[0]).toEqual({
     frameworkId: 'SPRING_BOOT',
     databaseId: 'POSTGRESQL',
     seed: 1,
     strategyId: 'ORACLE',
   });
 });
-
-it('filters without changing deterministic ordering', () => {
-  const scenarios = buildBalanceScenarios({ seed: 17, frameworkId: 'GIN' });
-  expect(scenarios).toHaveLength(18); // 3 DB × 6 strategies
-  expect(new Set(scenarios.map((s) => s.seed))).toEqual(new Set([17]));
-});
 ```
 
-- [ ] **Step 2: Run the test and verify module-not-found failure**
+Add a filter test: `{ seed: 17, frameworkId: 'GIN' }` produces 18 scenarios.
+
+- [ ] **Step 2: Run the failing test**
 
 ```bash
 npm test -- src/simulation/__tests__/balance-scenario.spec.ts
 ```
 
-Expected: FAIL because the simulation modules do not exist.
+Expected: FAIL because the modules do not exist.
 
-- [ ] **Step 3: Implement stable constants and filters**
-
-Use literal stable arrays:
+- [ ] **Step 3: Implement stable literal IDs and seed list**
 
 ```ts
 export const BALANCE_FRAMEWORK_IDS = [
   'SPRING_BOOT', 'NESTJS', 'GIN', 'FASTAPI', 'ASPNET_CORE',
 ] as const;
-
 export const BALANCE_DATABASE_IDS = ['POSTGRESQL', 'MYSQL', 'MONGODB'] as const;
 export const FULL_BALANCE_SEEDS = Array.from({ length: 30 }, (_, index) => index + 1);
-export const BALANCE_STRATEGY_IDS = [
+export const BALANCE_STRATEGY_IDS: readonly BalanceStrategyId[] = [
   'ORACLE', 'APM_AWARE', 'METRICS_AWARE', 'REACTIVE_BASIC', 'YOLO_SCALE', 'CHEAPSKATE',
-] as const;
+];
 ```
 
-Generate scenarios with nested loops in exactly framework → database → seed → strategy order.
+Use nested loops in that exact order.
 
-- [ ] **Step 4: Implement two stable seed-derived RNG channels**
+- [ ] **Step 4: Implement isolated deterministic engine construction**
 
 ```ts
-const GROWTH_STREAM_XOR = 0x51f15e5d;
-const INCIDENT_STREAM_XOR = 0x2c9277b5;
+export const GROWTH_STREAM_XOR = 0x51f15e5d;
+export const INCIDENT_STREAM_XOR = 0x2c9277b5;
 
 export function createBalanceEngine(scenario: BalanceScenario): GameEngine {
   return new GameEngine({
@@ -366,9 +345,9 @@ export function createBalanceEngine(scenario: BalanceScenario): GameEngine {
 }
 ```
 
-Lock the constants in tests by comparing the first several `next()` outputs for a known seed; do not later change them casually.
+Add a test that locks the first three `next()` values of both streams for seed `17` using `SeededRandomSource`; once committed, those XOR constants become harness compatibility constants.
 
-- [ ] **Step 5: Define the explicit action union and stable IDs**
+- [ ] **Step 5: Define the action union and stable IDs**
 
 ```ts
 export type SimulationAction =
@@ -407,29 +386,21 @@ git commit -m "feat: define deterministic balance scenarios"
 
 ---
 
-### Task 4: Build Structural Observation Ceilings
+### Task 4: Enforce BASIC, METRICS, APM, and ORACLE Observation Boundaries
 
 **Files:**
 - Create: `src/simulation/balance-observation.ts`
 - Create: `src/simulation/__tests__/balance-observation.spec.ts`
-- Read/Reuse: `src/application/operational-view-projector.ts`
-- Read/Reuse: `src/application/operational-pressure-presenter.ts`
+- Read/reuse: `src/application/operational-view-projector.ts`
+- Regression test: `src/application/__tests__/generic-operational-view.spec.ts`
 
 **Interfaces:**
-- Consumes: `GameEngine`, `OperationalViewProjector`, `V1ServiceTopologyFactory`, public infrastructure getters.
-- Produces immutable observation types that do not carry privileged objects:
-  - `BasicBalanceObservation`
-  - `MetricsBalanceObservation`
-  - `ApmBalanceObservation`
-  - `OracleBalanceObservation`
-  - `observeForStrategy(engine, ceiling)`
+- Produces: `BasicBalanceObservation`, `MetricsBalanceObservation`, `ApmBalanceObservation`, `OracleBalanceObservation`, `BalanceObservation`, `observeForStrategy()`.
 
-- [ ] **Step 1: Write failing shape tests for BASIC/METRICS/APM**
-
-Test with plain-object property assertions, not TypeScript-only assumptions:
+- [ ] **Step 1: Write failing structural-boundary tests**
 
 ```ts
-it('does not expose resource signatures to BASIC', () => {
+it('BASIC exposes neither resource loads nor diagnosis', () => {
   const observation = observeForStrategy(engine, 'BASIC');
   expect(observation.level).toBe('BASIC');
   expect('resourceLoads' in observation).toBe(false);
@@ -439,19 +410,19 @@ it('does not expose resource signatures to BASIC', () => {
 });
 ```
 
-Add METRICS resource-load presence and absence of APM diagnosis; add APM diagnosis only when the real developer state has unlocked APM.
+Add equivalent tests that METRICS exposes resource-level pressure but no diagnosis and APM exposes diagnosis only after the real skill unlock.
 
-- [ ] **Step 2: Run the failing test**
+- [ ] **Step 2: Run the failing tests**
 
 ```bash
 npm test -- src/simulation/__tests__/balance-observation.spec.ts
 ```
 
-Expected: FAIL because the adapter does not exist.
+Expected: FAIL because the observation package does not exist.
 
-- [ ] **Step 3: Define immutable common fields**
+- [ ] **Step 3: Define copied immutable common data**
 
-Use primitives/read-only arrays only:
+Use primitives and read-only copied arrays only:
 
 ```ts
 interface CommonBalanceObservation {
@@ -460,36 +431,33 @@ interface CommonBalanceObservation {
   readonly cash: number;
   readonly monthlyInfrastructureCost: number;
   readonly failureRate: number;
+  readonly currentTechnologyBuildId: BuildableTechnologyId | null;
   readonly growthEvent: null | {
     readonly type: 'VIRAL' | 'NEGATIVE_BUZZ';
     readonly response: TrafficSpikeResponseState;
     readonly loadMultiplier: number;
     readonly burstCost: number;
   };
-  readonly currentTechnologyBuildId: BuildableTechnologyId | null;
   readonly nodes: readonly {
     readonly nodeId: InfrastructureNodeId;
     readonly kind: InfrastructureNodeKind;
     readonly size: ServerSize;
     readonly aggregatePercent: number;
-    readonly status: 'NORMAL' | 'WARNING' | 'OVERLOAD';
   }[];
 }
 ```
 
-Do not return the live topology graph or live infrastructure object.
+Never return the live topology graph or infrastructure object.
 
-- [ ] **Step 4: Reuse `OperationalViewProjector` for the real unlock state**
+- [ ] **Step 4: Reuse the real observability unlock through `OperationalViewProjector`**
 
-Create topology from the current public state and call the real projector. Clamp the resulting view to the strategy ceiling rather than recomputing unlock thresholds in simulation code.
+Build the current V1 topology from public state, call `OperationalViewProjector.project()`, then clamp the returned information to the strategy ceiling. Do not copy the unlock thresholds into simulation code.
 
-- [ ] **Step 5: Add METRICS and APM-only fields**
+- [ ] **Step 5: Add METRICS/APM-only copied fields**
 
-METRICS includes copied resource pressure records with node/resource/percent/effectivePercent/hardLimitPercent. APM adds copied bottleneck/diagnosis strings or structured diagnosis values derived from existing application presentation. Do not expose raw request traces to APM unless the current player-facing projector already exposes the required causal signal.
+METRICS gets copied node/resource load metrics. APM gets copied bottleneck/diagnosis information available from the existing operational projector/presenter path. Do not add hidden raw request traces merely because APM is privileged relative to BASIC.
 
-- [ ] **Step 6: Add a dedicated ORACLE adapter**
-
-The oracle observation may include copied exact effective pressures, workload tags for active features, deployed technologies, horizontal scale state, current sizes/counts/replicas, and enough identifiers for local preview evaluation. It may hold a narrow `OraclePreviewPort` of pure functions, but must not expose the live engine object:
+- [ ] **Step 6: Add a narrow ORACLE preview port instead of the engine**
 
 ```ts
 export interface OraclePreviewPort {
@@ -500,20 +468,20 @@ export interface OraclePreviewPort {
 }
 ```
 
-The port delegates to real clone/preview APIs.
+The adapter may close over the live engine internally, but the strategy receives only this port plus copied exact pressures/workload tags/topology identifiers.
 
-- [ ] **Step 7: Test strategy ceilings remain enforced after APM unlock**
+- [ ] **Step 7: Lock strategy ceilings after higher unlocks**
 
-Force the developer proficiency in the test fixture through normal test setup helpers, then verify `REACTIVE_BASIC` still receives BASIC and `METRICS_AWARE` never receives diagnosis.
+Use the normal test fixture to reach/force the existing developer skill state expected by application tests, then assert a BASIC ceiling stays BASIC and a METRICS ceiling never gets APM diagnosis even when the player has APM.
 
-- [ ] **Step 8: Run tests and typecheck**
+- [ ] **Step 8: Run focused and application regression tests**
 
 ```bash
-npm test -- src/simulation/__tests__/balance-observation.spec.ts src/application/__tests__/operational-view-projector.spec.ts
+npm test -- src/simulation/__tests__/balance-observation.spec.ts src/application/__tests__/generic-operational-view.spec.ts
 npm run typecheck
 ```
 
-If the existing application test path has a different exact filename, use the repository's current `operational-view-projector` test filename discovered before editing; do not create a duplicate application test suite.
+Expected: PASS.
 
 - [ ] **Step 9: Commit**
 
@@ -524,7 +492,7 @@ git commit -m "feat: add balance observation ceilings"
 
 ---
 
-### Task 5: Implement Shared Learning, Affordability, and Public Command Executor
+### Task 5: Add Shared Learning, Runway Affordability, and Executor
 
 **Files:**
 - Create: `src/simulation/baseline-learning-controller.ts`
@@ -534,21 +502,12 @@ git commit -m "feat: add balance observation ceilings"
 - Create: `src/simulation/__tests__/simulation-executor.spec.ts`
 
 **Interfaces:**
-- Produces:
-  - `BASELINE_LEARNING_STEPS`
-  - `BaselineLearningController.nextReserve(engine): number`
-  - `BaselineLearningController.maybeStart(engine): LearningStartResult`
-  - `RUNWAY_MULTIPLIER` keyed by strategy ID.
-  - `isAffordableCandidate(...)` using projected monthly cost.
-  - `SimulationExecutor.executeDayControls(...)`.
+- Produces `BASELINE_LEARNING_STEPS`, `BaselineLearningController`, `RUNWAY_MULTIPLIER`, `isAffordableCandidate()`, `BalanceStrategy`, `SimulationExecutor`.
 
-- [ ] **Step 1: Write the failing nine-step learning-order test**
-
-Lock this exact order:
+- [ ] **Step 1: Write the exact nine-step learning-order test**
 
 ```ts
-const ids = BASELINE_LEARNING_STEPS.map(({ skill, targetLevel }) => `${skill.id}:${targetLevel}`);
-expect(ids).toEqual([
+expect(BASELINE_LEARNING_STEPS.map(({ skill, targetLevel }) => `${skill.id}:${targetLevel}`)).toEqual([
   'OS_RUNTIME:2',
   'NETWORK:2',
   'SOFTWARE_DESIGN:2',
@@ -561,19 +520,15 @@ expect(ids).toEqual([
 ]);
 ```
 
-- [ ] **Step 2: Write failing reserve and eligibility tests**
+- [ ] **Step 2: Write reserve/eligibility tests**
 
-Verify the reserve equals the real `LearningRules.requirement()` cost for the next unfinished step, is zero after all steps, and `maybeStart()` never mutates level directly.
+Verify reserve equals `LearningRules.requirement()` cost for the next unfinished step, is `0` after all nine steps, waits for real experience/prerequisites, and starts learning only through `engine.startLearning()`.
 
-- [ ] **Step 3: Implement the controller using real learning rules**
+- [ ] **Step 3: Implement the baseline controller**
 
-`maybeStart()` returns without action while a task is already active, while experience/prerequisites are missing, or while real cash is below learning cost. When eligible it calls only:
+`maybeStart(engine)` returns without action if learning is already active, requirements are unmet, or cash cannot pay the real learning cost. It never calls `setLevel()`.
 
-```ts
-engine.startLearning(step.skill);
-```
-
-- [ ] **Step 4: Define runway multipliers exactly as spec**
+- [ ] **Step 4: Lock the exact runway multipliers**
 
 ```ts
 export const RUNWAY_MULTIPLIER: Readonly<Record<BalanceStrategyId, number>> = {
@@ -586,7 +541,7 @@ export const RUNWAY_MULTIPLIER: Readonly<Record<BalanceStrategyId, number>> = {
 };
 ```
 
-Implement:
+- [ ] **Step 5: Implement the shared affordability formula**
 
 ```ts
 export function isAffordableCandidate(input: {
@@ -603,42 +558,42 @@ export function isAffordableCandidate(input: {
 }
 ```
 
-- [ ] **Step 5: Write failing executor action-budget tests**
-
-Test these invariants:
+- [ ] **Step 6: Define the strategy contract**
 
 ```ts
-expect(executor.normalInvestmentActionsToday).toBeLessThanOrEqual(1);
-```
+export type ObservationCeiling = 'BASIC' | 'METRICS' | 'APM' | 'ORACLE';
 
-Also verify an incident response and a viral response may occur on the same day without consuming the investment slot, and invalid scale-out/duplicate build errors are surfaced with context instead of skipped.
+export interface StrategyDecisionContext {
+  readonly protectedLearningReserve: number;
+}
 
-- [ ] **Step 6: Implement public-command-only execution**
-
-Map actions exactly:
-
-```ts
-switch (action.type) {
-  case 'RESIZE_NODE':
-    engine.resizeInfrastructureNode(action.nodeId, action.size);
-    break;
-  case 'SCALE_OUT_NODE':
-    engine.scaleOutInfrastructureNode(action.nodeId);
-    break;
-  case 'START_TECHNOLOGY_BUILD':
-    engine.startTechnologyBuild(action.technologyId);
-    break;
-  case 'RESPOND_TRAFFIC_SPIKE':
-    engine.respondToTrafficSpike(action.response);
-    break;
-  case 'NO_OP':
-    break;
+export interface BalanceStrategy {
+  readonly id: BalanceStrategyId;
+  readonly ceiling: ObservationCeiling;
+  decide(observation: BalanceObservation, context: StrategyDecisionContext): SimulationAction;
+  decideViral(observation: BalanceObservation, context: StrategyDecisionContext): TrafficSpikeResponse;
 }
 ```
 
-Incident response scans snapshot incidents for the first unresolved incident with `remainingResponseDays === null`; call `startIncidentResponse()` only when no response is already in progress.
+- [ ] **Step 7: Write failing executor slot tests**
 
-- [ ] **Step 7: Run tests and typecheck**
+Verify one day may start one incident response, make one viral response, and execute one investment action, but a second normal investment action throws `Normal investment action already used for this day`.
+
+- [ ] **Step 8: Implement public-command-only execution**
+
+```ts
+switch (action.type) {
+  case 'RESIZE_NODE': engine.resizeInfrastructureNode(action.nodeId, action.size); break;
+  case 'SCALE_OUT_NODE': engine.scaleOutInfrastructureNode(action.nodeId); break;
+  case 'START_TECHNOLOGY_BUILD': engine.startTechnologyBuild(action.technologyId); break;
+  case 'RESPOND_TRAFFIC_SPIKE': engine.respondToTrafficSpike(action.response); break;
+  case 'NO_OP': break;
+}
+```
+
+Do not swallow command errors. Incident response uses the first snapshot incident with `remainingResponseDays === null` only when no response is already active.
+
+- [ ] **Step 9: Run tests and typecheck**
 
 ```bash
 npm test -- src/simulation/__tests__/baseline-learning-controller.spec.ts src/simulation/__tests__/simulation-executor.spec.ts
@@ -647,7 +602,7 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/simulation/baseline-learning-controller.ts src/simulation/balance-strategy.ts src/simulation/simulation-executor.ts src/simulation/__tests__/baseline-learning-controller.spec.ts src/simulation/__tests__/simulation-executor.spec.ts
@@ -656,7 +611,7 @@ git commit -m "feat: add balance simulation control policies"
 
 ---
 
-### Task 6: Implement the Six Deterministic Operating Strategies
+### Task 6: Implement All Six Deterministic Strategies
 
 **Files:**
 - Create: `src/simulation/strategy-helpers.ts`
@@ -670,65 +625,58 @@ git commit -m "feat: add balance simulation control policies"
 - Create: `src/simulation/__tests__/strategies.spec.ts`
 
 **Interfaces:**
-- Consumes: observation types, affordability helper, protected reserve, `SimulationAction`.
-- Produces:
+- Consumes observation unions, affordability helper, action union.
+- Produces one deterministic strategy object per ID and `BALANCE_STRATEGIES`.
+
+- [ ] **Step 1: Build immutable observation fixture builders in the test file**
+
+Create builders for BASIC, METRICS, APM, and ORACLE observations with stable node IDs, pressure values, affordability values, and no live engine references.
+
+- [ ] **Step 2: Write six representative failing tests**
 
 ```ts
-export interface BalanceStrategy<TObservation extends BalanceObservation = BalanceObservation> {
-  readonly id: BalanceStrategyId;
-  readonly ceiling: 'BASIC' | 'METRICS' | 'APM' | 'ORACLE';
-  decide(observation: TObservation, context: StrategyDecisionContext): SimulationAction;
-  decideViral(observation: TObservation, context: StrategyDecisionContext): TrafficSpikeResponse;
-}
+it('ORACLE chooses Redis for affordable read-heavy DB IO when ranking favors it');
+it('APM fixes upstream ALB before speculative downstream scaling');
+it('METRICS applies the ordered DB IO remedy without diagnosis');
+it('REACTIVE_BASIC resizes the hottest aggregate node at 100 percent');
+it('YOLO_SCALE expands at the 70 percent threshold');
+it('CHEAPSKATE waits at or below the hard limit');
 ```
 
-- [ ] **Step 1: Build focused fixture builders before strategy tests**
+Add exact tie-break tests and all-candidates-invalid => `NO_OP` tests.
 
-In `strategies.spec.ts`, define plain immutable observations with explicit node/resource pressure and candidate affordability. Do not mutate a live engine just to construct every strategy unit test.
+- [ ] **Step 3: Implement shared candidate helpers**
 
-- [ ] **Step 2: Write the six representative failing behavior tests**
+Helpers determine next size, node identity, scale-out availability, technology immediate cost, candidate projected monthly cost, and stable action ordering by calling real definitions/state exposed through observation/preview ports. Do not duplicate capacity or monthly-cost constants.
 
-Lock at least these cases from the spec:
+- [ ] **Step 4: Implement `REACTIVE_BASIC`**
 
-```ts
-it('ORACLE chooses affordable Redis before DB resize for read-heavy DB I/O when local ranking favors it');
-it('APM fixes an upstream ALB bottleneck before speculative APP/DB capacity');
-it('METRICS chooses the ordered DB I/O remedy without APM diagnosis');
-it('REACTIVE_BASIC resizes the hottest aggregate node at 100%');
-it('YOLO_SCALE expands at the 70% threshold');
-it('CHEAPSKATE waits while effective load is at or below 1.0');
-```
-
-Add deterministic tie-break coverage and verify each strategy returns `NO_OP` when its build slot/cash/preconditions make all candidates invalid.
-
-- [ ] **Step 3: Implement common candidate helpers**
-
-Provide helpers for next size, APP/DB node identification, scale-out availability, technology immediate cost, candidate projected monthly cost, and ordered candidate filtering. All cost/capacity values must come from real `InfrastructureState`/technology definitions, never duplicated constants.
-
-- [ ] **Step 4: Implement `REACTIVE_BASIC` and `YOLO_SCALE` first**
-
-`REACTIVE_BASIC`:
+Rules:
 
 ```text
 highest aggregate load < 100% -> NO_OP
 otherwise resize one step
-APP at XLARGE -> ALB if absent, then scale-out
+APP at XLARGE -> ALB if absent, then APP scale-out
 DB at XLARGE -> read replica
 ```
 
-`YOLO_SCALE`:
+Use stable node ID as final tie-break.
+
+- [ ] **Step 5: Implement `YOLO_SCALE`**
+
+Rules:
 
 ```text
 highest aggregate load < 70% -> NO_OP
-otherwise raw resize/scale path before specialized technology
-BURST when affordable under runway multiplier 0
+otherwise raw resize/scale before specialized technology
+prefer ALB + APP scale-out at medium pressure when affordable
+prefer DB replica at medium pressure when affordable
+viral -> BURST whenever runway=0 affordability allows it
 ```
 
-Keep stable node ordering for exact ties.
+- [ ] **Step 6: Implement `METRICS_AWARE`**
 
-- [ ] **Step 5: Implement `METRICS_AWARE`**
-
-Use visible resource pressure only and ordered rules:
+Ordered visible-resource remedies:
 
 ```text
 DB IO -> Redis, replica, DB resize
@@ -738,35 +686,35 @@ APP IO -> queue, scale-out, APP resize
 Storage -> Object Storage, resize
 ```
 
-Take the first valid affordable action; do not call oracle preview functions.
+Pick the first valid affordable action. Never call oracle previews.
 
-- [ ] **Step 6: Implement `APM_AWARE`**
+- [ ] **Step 7: Implement `APM_AWARE`**
 
-Use only APM-visible top bottleneck/diagnosis. Create the diagnosis-supported remedy list, filter valid/affordable candidates, rank by lowest projected one-month infrastructure cost, and never inspect hidden downstream pressure.
+Use only APM-visible bottleneck/diagnosis. Construct diagnosis-supported remedies, filter valid/affordable candidates, then choose lowest projected one-month infrastructure cost. Do not inspect hidden downstream pressure.
 
-- [ ] **Step 7: Implement `CHEAPSKATE`**
+- [ ] **Step 8: Implement `CHEAPSKATE`**
 
-Return `NO_OP` unless the visible effective hard-limit condition is actually exceeded. Choose the cheapest plausible valid corrective action under the `2.0` runway multiplier. Viral behavior is `RIDE` while healthy and `THROTTLE` when visible risk is over the hard limit; do not choose `BURST` in V1.
+Return `NO_OP` until visible effective pressure exceeds `1.0`. Then choose the cheapest plausible valid correction under runway multiplier `2.0`. Viral policy: `RIDE` while healthy, `THROTTLE` when visible hard-limit risk exists, never `BURST` in V1.
 
-- [ ] **Step 8: Implement `ORACLE` local candidate ranking**
+- [ ] **Step 9: Implement `ORACLE` local preview ranking**
 
-For exact bottleneck-specific candidates calculate:
+For bottleneck-specific candidates:
 
 ```ts
 const relief = Math.max(0, currentMax - previewMax);
 const oneMonthCost = immediateCost + Math.max(0, projectedMonthlyCost - currentMonthlyCost);
 ```
 
-Ranking:
+Ranking is exactly:
 
-1. candidates with `previewMax <= 0.85`: cheapest `oneMonthCost`;
-2. otherwise highest `relief / Math.max(1, oneMonthCost)`;
-3. reject `< 0.02` relief unless enabling ALB;
-4. exact ties: candidate order then `simulationActionId()`.
+1. if any candidate yields `previewMax <= 0.85`, choose lowest `oneMonthCost`;
+2. otherwise choose highest `relief / Math.max(1, oneMonthCost)`;
+3. reject relief `< 0.02` unless the action is required ALB enablement;
+4. exact ties use candidate order then `simulationActionId()`.
 
-Technology preview may model fully deployed load but choosing it still invokes the real delayed `startTechnologyBuild()` command.
+Technology preview represents fully deployed load effect, but the chosen action still calls the real delayed technology build.
 
-- [ ] **Step 9: Implement stable registry**
+- [ ] **Step 10: Implement fixed strategy registry**
 
 ```ts
 export const BALANCE_STRATEGIES: Readonly<Record<BalanceStrategyId, BalanceStrategy>> = {
@@ -779,16 +727,16 @@ export const BALANCE_STRATEGIES: Readonly<Record<BalanceStrategyId, BalanceStrat
 };
 ```
 
-- [ ] **Step 10: Run strategy tests and typecheck**
+- [ ] **Step 11: Run strategy tests and typecheck**
 
 ```bash
 npm test -- src/simulation/__tests__/strategies.spec.ts
 npm run typecheck
 ```
 
-Expected: PASS with no randomized strategy decisions.
+Expected: PASS and no strategy imports/uses a random source.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add src/simulation/strategy-helpers.ts src/simulation/strategies src/simulation/strategy-registry.ts src/simulation/__tests__/strategies.spec.ts
@@ -797,7 +745,7 @@ git commit -m "feat: add deterministic balance strategies"
 
 ---
 
-### Task 7: Add Run Metrics and the Deterministic Daily Runner
+### Task 7: Implement Run Metrics and the Daily Simulation Loop
 
 **Files:**
 - Create: `src/simulation/simulation-metrics.ts`
@@ -806,11 +754,6 @@ git commit -m "feat: add deterministic balance strategies"
 - Create: `src/simulation/__tests__/simulation-runner.spec.ts`
 
 **Interfaces:**
-- Produces `BalanceRunResult`, `SimulationTraceEntry`, `SimulationMetricsCollector`, and `runBalanceScenario(scenario, options?)`.
-
-- [ ] **Step 1: Define the run result schema in a failing compile/test fixture**
-
-The result must contain all spec metrics:
 
 ```ts
 export interface BalanceRunResult {
@@ -844,50 +787,45 @@ export interface BalanceRunResult {
 }
 ```
 
-- [ ] **Step 2: Write threshold-specific failing metric tests**
+- [ ] **Step 1: Write exact metric threshold tests**
 
-Cover:
+Lock:
 
-```ts
-failureRate > 0              -> failureDays +1
-failureRate >= 0.10          -> severeFailureDays +1
-sum(failureRate)             -> cumulativeFailureBurden
-max effective pressure > 1.0 -> overloadDays +1
-pre-action target ratio < .70 and no VIRAL -> prematureCapacityActions +1
-expanded node ratio < .50    -> one node-day of low utilization
+```text
+failureRate > 0 -> failureDays
+failureRate >= 0.10 -> severeFailureDays
+sum(daily failureRate) -> cumulativeFailureBurden
+any player-owned effective ratio > 1.0 -> overloadDays
+pre-action target effective ratio < 0.70 and no active VIRAL -> prematureCapacityActions
+expanded-node effective ratio < 0.50 -> lowUtilizationExpandedNodeDays node-day
 ```
 
-Also test infrastructure exposure:
+Infrastructure exposure test:
 
 ```ts
-collector.recordDay({ monthlyInfrastructureCost: 300_000 });
+collector.recordInfrastructureExposure(300_000);
 expect(collector.infrastructureCostExposure).toBe(10_000);
 ```
 
-- [ ] **Step 3: Implement action-cost accounting from deltas and real definitions**
+- [ ] **Step 2: Implement metrics using real observed values**
 
-Record learning/build/burst immediate spending when those commands execute. `settledInfrastructureSpend` is accumulated only from new monthly settlement snapshots; `infrastructureCostExposure` is `engine.infrastructure.monthlyCost / 30` each simulated day.
+Track incident IDs in a `Set<string>` so `incidentCount` counts generated incidents once. `settledInfrastructureSpend` adds each new `lastSettlement.infrastructureCost` once. `minimumCash` is observed after every command and after `advanceDay()`.
 
-Track incident IDs ever observed in a `Set` so `incidentCount` counts generated incidents once, not incident-days.
-
-- [ ] **Step 4: Write failing runner determinism and timeout tests**
+- [ ] **Step 3: Write failing determinism and 1,080-day-cap runner tests**
 
 ```ts
 it('repeats the same scenario identically', () => {
-  const first = runBalanceScenario(scenario);
-  const second = runBalanceScenario(scenario);
-  expect(second).toEqual(first);
+  expect(runBalanceScenario(scenario)).toEqual(runBalanceScenario(scenario));
 });
 
-it('never advances more than 1080 days', () => {
-  const result = runBalanceScenario(timeoutScenario);
-  expect(result.daysPlayed).toBeLessThanOrEqual(1080);
+it('never performs more than 1080 advances', () => {
+  expect(runBalanceScenario(timeoutFixture).daysPlayed).toBeLessThanOrEqual(1080);
 });
 ```
 
-For timeout testing, allow the runner factory to accept an injected engine/strategy fixture in tests rather than modifying game constants.
+Use injectable test factory dependencies for the timeout fixture instead of changing game constants.
 
-- [ ] **Step 5: Implement the daily loop in one explicit order**
+- [ ] **Step 4: Implement the exact daily order**
 
 ```ts
 while (engine.status === 'RUNNING' && daysPlayed < 1080) {
@@ -896,10 +834,10 @@ while (engine.status === 'RUNNING' && daysPlayed < 1080) {
   learningController.maybeStart(engine);
 
   const observation = observeForStrategy(engine, strategy.ceiling);
-  executor.maybeRespondToViral(engine, strategy, observation);
+  executor.maybeRespondToViral(engine, strategy, observation, decisionContext);
 
-  const refreshedObservation = observeForStrategy(engine, strategy.ceiling);
-  const action = strategy.decide(refreshedObservation, decisionContext);
+  const refreshed = observeForStrategy(engine, strategy.ceiling);
+  const action = strategy.decide(refreshed, decisionContext);
   executor.executeNormalInvestment(engine, action);
 
   metrics.observeBeforeAdvance(engine, action);
@@ -909,9 +847,9 @@ while (engine.status === 'RUNNING' && daysPlayed < 1080) {
 }
 ```
 
-If still running at 1,080 advances, return `TIMEOUT` without mutating `GameEngine.status`.
+When the loop reaches 1,080 with engine status still `RUNNING`, report `TIMEOUT` only in the run result.
 
-- [ ] **Step 6: Wrap thrown errors with full scenario context**
+- [ ] **Step 5: Add scenario-rich failure context**
 
 ```ts
 throw new Error(
@@ -920,11 +858,11 @@ throw new Error(
 );
 ```
 
-- [ ] **Step 7: Add optional deterministic trace entries**
+- [ ] **Step 6: Add optional trace collection**
 
-Record day, observability level, selected action ID, reason, cash, DAU, hottest visible signal, and viral/incident controls. Do not enable trace collection by default for the full matrix.
+Each trace entry copies: day, visible observability level, action ID, action reason, cash, DAU, hottest visible signal, incident control, viral control. Trace allocation is disabled by default.
 
-- [ ] **Step 8: Run focused tests and typecheck**
+- [ ] **Step 7: Run focused tests and typecheck**
 
 ```bash
 npm test -- src/simulation/__tests__/simulation-metrics.spec.ts src/simulation/__tests__/simulation-runner.spec.ts
@@ -933,7 +871,7 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/simulation/simulation-metrics.ts src/simulation/simulation-runner.ts src/simulation/__tests__/simulation-metrics.spec.ts src/simulation/__tests__/simulation-runner.spec.ts
@@ -942,21 +880,16 @@ git commit -m "feat: add deterministic balance simulation runner"
 
 ---
 
-### Task 8: Aggregate Reports and Same-Seed Paired Comparisons
+### Task 8: Implement Aggregation, Percentiles, Paired Comparisons, and CSV
 
 **Files:**
 - Create: `src/simulation/balance-report.ts`
 - Create: `src/simulation/__tests__/balance-report.spec.ts`
 
 **Interfaces:**
-- Produces:
-  - `summarizeBalanceRuns(runs): BalanceSummary`
-  - `serializeRunsCsv(runs): string`
-  - `buildPairedComparisons(runs): PairedComparisonSummary[]`
+- Produces `summarizeBalanceRuns()`, `buildPairedComparisons()`, `serializeRunsCsv()`.
 
-- [ ] **Step 1: Write failing percentile tests with an exact sample**
-
-Use a sorted sample where quartiles are unambiguous and define the percentile algorithm explicitly as nearest-rank interpolation-free selection:
+- [ ] **Step 1: Write percentile tests with a fixed nearest-rank definition**
 
 ```ts
 function percentile(values: readonly number[], p: number): number {
@@ -967,11 +900,11 @@ function percentile(values: readonly number[], p: number): number {
 }
 ```
 
-Test mean, median, P25, and P75 from the same sample.
+Test mean, median, P25, P75 on `[1, 2, 3, 4, 5, 6, 7, 8]`.
 
-- [ ] **Step 2: Write failing grouping tests**
+- [ ] **Step 2: Write grouping tests**
 
-Given a tiny synthetic result set, require groups for:
+A synthetic result set must produce summaries for:
 
 ```text
 all
@@ -982,14 +915,14 @@ framework × database
 strategy × framework × database
 ```
 
-Terminal outcome summaries contain counts and rates for `WON`, `BANKRUPT`, and `TIMEOUT`.
+Each group includes `WON`, `BANKRUPT`, `TIMEOUT` counts and rates.
 
-- [ ] **Step 3: Write failing same-seed pairing tests**
+- [ ] **Step 3: Write paired-comparison tests**
 
-Ensure comparisons only pair runs with identical framework/database/seed. Primary pairs:
+Primary pairs are exactly:
 
 ```ts
-const PRIMARY_PAIRS = [
+export const PRIMARY_STRATEGY_PAIRS = [
   ['APM_AWARE', 'YOLO_SCALE'],
   ['APM_AWARE', 'METRICS_AWARE'],
   ['METRICS_AWARE', 'REACTIVE_BASIC'],
@@ -998,9 +931,9 @@ const PRIMARY_PAIRS = [
 ] as const;
 ```
 
-Calculate direction/delta for outcome, comparable win days, infrastructure exposure, failure burden, premature actions, and low-utilization node-days.
+Pair only identical framework/database/seed groups. Compare terminal outcome, comparable win days, infrastructure exposure, failure burden, premature actions, and low-utilization node-days.
 
-- [ ] **Step 4: Implement RFC-4180-safe-enough CSV escaping without a dependency**
+- [ ] **Step 4: Implement stable CSV escaping and column order**
 
 ```ts
 function csvCell(value: string | number): string {
@@ -1009,11 +942,11 @@ function csvCell(value: string | number): string {
 }
 ```
 
-Use one stable column order matching `BalanceRunResult`. A full unfiltered serialization has 2,701 lines when every row is one physical line.
+Use one explicit `BalanceRunResult` column array. No reporting dependency.
 
-- [ ] **Step 5: Implement JSON-friendly summary objects**
+- [ ] **Step 5: Return JSON-serializable plain objects**
 
-Avoid class instances and Maps in returned report data; convert grouped summaries into plain arrays/objects so `JSON.stringify(summary, null, 2)` is stable.
+Convert grouping structures to arrays/records before returning. Do not expose `Map`, `Set`, or class instances in `summary.json` data.
 
 - [ ] **Step 6: Run report tests and typecheck**
 
@@ -1033,90 +966,103 @@ git commit -m "feat: add balance simulation reports"
 
 ---
 
-### Task 9: Add CLI, Artifact Safety, and Tooling
+### Task 9: Add CLI, Safe Artifact Writes, and `npm run balance`
 
 **Files:**
-- Create: `scripts/run-balance.ts`
+- Create: `src/simulation/balance-cli.ts`
 - Create: `src/simulation/index.ts`
+- Create: `scripts/run-balance.ts`
 - Create: `src/simulation/__tests__/balance-cli.spec.ts`
 - Modify: `package.json`
 - Modify: `.gitignore`
 
 **Interfaces:**
-- CLI flags:
-  - `--seed <1..30>`
-  - `--framework <supported-id>`
-  - `--db <supported-id>`
-  - `--strategy <supported-id>`
-  - `--trace`
-- Default output:
-  - `artifacts/balance/runs.csv`
-  - `artifacts/balance/summary.json`
 
-- [ ] **Step 1: Extract a pure argument parser and write failing tests**
+```ts
+export interface BalanceCliOptions {
+  seed?: number;
+  frameworkId?: FrameworkId;
+  databaseId?: DatabaseId;
+  strategyId?: BalanceStrategyId;
+  trace: boolean;
+}
+```
 
-Keep parsing importable from the script or move the pure parser into `src/simulation/balance-cli.ts` if importing `scripts/` from tests becomes awkward. Required behavior:
+- [ ] **Step 1: Write pure parser tests**
 
 ```ts
 expect(parseBalanceArgs(['--seed', '17'])).toEqual({ seed: 17, trace: false });
 expect(() => parseBalanceArgs(['--seed', '31'])).toThrow(/seed/i);
 expect(() => parseBalanceArgs(['--framework', 'SPRING'])).toThrow(/SPRING/);
+expect(() => parseBalanceArgs(['--db', 'POSTGRES'])).toThrow(/POSTGRES/);
+expect(() => parseBalanceArgs(['--strategy', 'APM'])).toThrow(/APM/);
 ```
 
-If `--trace` is requested without filters that resolve to exactly one scenario, reject it with a clear error instead of emitting thousands of trace lines.
+`--trace` is valid only when filters resolve to exactly one scenario; otherwise parsing/validation throws a clear error.
 
-- [ ] **Step 2: Install `tsx` and add the script**
+- [ ] **Step 2: Run the failing parser test**
 
-Run:
+```bash
+npm test -- src/simulation/__tests__/balance-cli.spec.ts
+```
+
+Expected: FAIL because the parser does not exist.
+
+- [ ] **Step 3: Implement pure argument parsing and scenario validation**
+
+Recognized flags are only:
+
+```text
+--seed <1..30>
+--framework <SPRING_BOOT|NESTJS|GIN|FASTAPI|ASPNET_CORE>
+--db <POSTGRESQL|MYSQL|MONGODB>
+--strategy <ORACLE|APM_AWARE|METRICS_AWARE|REACTIVE_BASIC|YOLO_SCALE|CHEAPSKATE>
+--trace
+```
+
+Unknown flags and missing values throw.
+
+- [ ] **Step 4: Install `tsx` and add script**
 
 ```bash
 npm install -D tsx
 ```
 
-Then set:
+Add to `package.json` scripts:
 
 ```json
 "balance": "tsx scripts/run-balance.ts"
 ```
 
-Do not add CSV/statistics dependencies.
+- [ ] **Step 5: Ignore balance artifacts**
 
-- [ ] **Step 3: Ignore generated balance artifacts**
-
-Append exactly:
+Append to `.gitignore`:
 
 ```gitignore
 artifacts/balance/
 ```
 
-- [ ] **Step 4: Implement filtered/full execution**
+- [ ] **Step 6: Implement CLI execution and safe writes**
+
+`src/simulation/index.ts` exports only the scenario builder, runner, report serializer, parser types/functions needed by the CLI.
+
+In `scripts/run-balance.ts`, build requested scenarios, run them sequentially in stable order, summarize, then write temporary siblings before rename:
 
 ```ts
-const scenarios = buildBalanceScenarios(filters);
-const runs = scenarios.map((scenario) => runBalanceScenario(scenario, { trace }));
-const summary = summarizeBalanceRuns(runs.map(({ result }) => result));
+await mkdir('artifacts/balance', { recursive: true });
+await writeFile('artifacts/balance/runs.csv.tmp', serializeRunsCsv(results), 'utf8');
+await writeFile('artifacts/balance/summary.json.tmp', JSON.stringify(summary, null, 2) + '\n', 'utf8');
+await rename('artifacts/balance/runs.csv.tmp', 'artifacts/balance/runs.csv');
+await rename('artifacts/balance/summary.json.tmp', 'artifacts/balance/summary.json');
 ```
 
-For non-trace runs return only `BalanceRunResult`; if the runner API uses a `{ result, trace }` wrapper, make the no-trace path avoid allocating trace arrays.
+On any error, print the error and set `process.exitCode = 1`; final report paths must not be overwritten by partially completed output.
 
-- [ ] **Step 5: Implement safe artifact writes**
+- [ ] **Step 7: Add concise console and trace output**
 
-Create `artifacts/balance`, write `.tmp` siblings first, then rename only after both serializations succeed:
+Normal mode prints requested run count, terminal rates, median winner days, and the primary APM-vs-YOLO paired deltas. Single-scenario `--trace` prints copied deterministic trace entries; it does not change simulation decisions.
 
-```ts
-await writeFile(`${runsPath}.tmp`, serializeRunsCsv(results), 'utf8');
-await writeFile(`${summaryPath}.tmp`, JSON.stringify(summary, null, 2) + '\n', 'utf8');
-await rename(`${runsPath}.tmp`, runsPath);
-await rename(`${summaryPath}.tmp`, summaryPath);
-```
-
-On failure, set a non-zero exit code and print scenario/error context; do not silently emit partial final files.
-
-- [ ] **Step 6: Add concise console summary and trace output**
-
-Print requested run count, terminal rates, median win days for winners, and primary APM-vs-YOLO paired deltas. `--trace` prints one line per day with deterministic action IDs and reasons.
-
-- [ ] **Step 7: Run CLI parser tests, typecheck, and a one-scenario smoke run**
+- [ ] **Step 8: Run tests, typecheck, and one-scenario smoke run**
 
 ```bash
 npm test -- src/simulation/__tests__/balance-cli.spec.ts
@@ -1124,35 +1070,32 @@ npm run typecheck
 npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy APM_AWARE --trace
 ```
 
-Expected: one scenario completes without invalid actions; trace is emitted; final CSV/JSON files are valid and contain one run.
+Expected: exactly one run, valid trace, one CSV row plus header, valid JSON summary.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add package.json .gitignore scripts/run-balance.ts src/simulation/index.ts src/simulation/__tests__/balance-cli.spec.ts src/simulation/balance-cli.ts
+git add package.json .gitignore scripts/run-balance.ts src/simulation/balance-cli.ts src/simulation/index.ts src/simulation/__tests__/balance-cli.spec.ts
 git commit -m "feat: add balance simulation CLI"
 ```
 
-If the pure parser remains inside `scripts/run-balance.ts`, omit `src/simulation/balance-cli.ts` from the add list rather than creating an unnecessary file.
-
 ---
 
-### Task 10: End-to-End Verification and Full Matrix Evidence
+### Task 10: Verify the Entire Harness and Produce Full-Matrix Evidence
 
 **Files:**
-- Modify only if verification exposes a concrete bug in files from Tasks 1–9.
-- Do not commit `artifacts/balance/`.
+- No planned source changes. If any verification gate fails, stop and return to the task that owns the failing behavior; fix it there with a failing regression test, rerun that task's gate, commit there, then restart Task 10 from Step 1.
 
 **Interfaces:**
-- Validates the complete spec against the assembled implementation.
+- Validates the complete implementation against the approved spec.
 
-- [ ] **Step 1: Run the entire unit/integration suite**
+- [ ] **Step 1: Run all tests**
 
 ```bash
 npm test
 ```
 
-Expected: all existing and new Vitest suites PASS.
+Expected: all existing and new suites PASS.
 
 - [ ] **Step 2: Run typecheck and production build**
 
@@ -1163,23 +1106,18 @@ npm run build
 
 Expected: both PASS.
 
-- [ ] **Step 3: Run the full 2,700-game matrix**
+- [ ] **Step 3: Run the full matrix**
 
 ```bash
 npm run balance
 ```
 
-Expected:
+Expected: exactly 2,700 completed run results, no aborted/invalid run, final CSV/JSON created only after successful completion.
 
-- exactly 2,700 result rows,
-- no aborted/invalid runs,
-- `runs.csv` and `summary.json` written only after successful completion,
-- all expected grouping dimensions present.
-
-- [ ] **Step 4: Verify row count mechanically**
+- [ ] **Step 4: Verify CSV row count mechanically**
 
 ```bash
-node -e "const fs=require('fs'); const n=fs.readFileSync('artifacts/balance/runs.csv','utf8').trimEnd().split('\n').length-1; if(n!==2700){throw new Error('expected 2700 rows, got '+n)} console.log(n)"
+node -e "const fs=require('fs');const n=fs.readFileSync('artifacts/balance/runs.csv','utf8').trimEnd().split('\n').length-1;if(n!==2700)throw new Error('expected 2700 rows, got '+n);console.log(n)"
 ```
 
 Expected output:
@@ -1188,22 +1126,18 @@ Expected output:
 2700
 ```
 
-- [ ] **Step 5: Verify reproducibility on a representative run**
-
-Run twice:
+- [ ] **Step 5: Verify deterministic rerun of one scenario**
 
 ```bash
 npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy APM_AWARE
-cp artifacts/balance/runs.csv /tmp/balance-run-a.csv
+cp artifacts/balance/runs.csv /tmp/dev-to-scale-balance-run-a.csv
 npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy APM_AWARE
-diff -u /tmp/balance-run-a.csv artifacts/balance/runs.csv
+diff -u /tmp/dev-to-scale-balance-run-a.csv artifacts/balance/runs.csv
 ```
 
-Expected: `diff` produces no output.
+Expected: `diff` prints nothing.
 
-- [ ] **Step 6: Inspect representative traces**
-
-Run:
+- [ ] **Step 6: Inspect four representative traces**
 
 ```bash
 npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy ORACLE --trace
@@ -1212,64 +1146,47 @@ npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy 
 npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy CHEAPSKATE --trace
 ```
 
-Verify manually that:
+Confirm from trace output:
 
-- ORACLE reasons reference full-information bottlenecks/local previews;
-- APM never reports hidden oracle-only data;
-- YOLO expands at its aggressive threshold and preserves only the protected learning reserve;
-- CHEAPSKATE does not spend before actual failure except required common controls.
+- ORACLE decisions cite full-information bottleneck/local-preview reasoning.
+- APM never logs oracle-only hidden pressure.
+- YOLO scales at its aggressive threshold and preserves only the protected learning reserve.
+- CHEAPSKATE waits for hard-limit failure except shared incident/viral/learning controls.
 
 - [ ] **Step 7: Inspect directional balance evidence without tuning**
 
-Read `summary.json` and record observations for the PR description only. Specifically check the spec red flags:
+Read `artifacts/balance/summary.json` and record findings for the PR description only. Check these six red flags exactly:
 
 ```text
-YOLO faster + cheaper + safer than APM across most stacks?
-BASIC nearly identical to APM?
-raw resize consistently beats workload-fit technologies?
-one framework/database dominates nearly every strategy/seed?
-widespread bankruptcy after ordinary mistakes?
-nearly every strategy wins with growing cash?
+1. YOLO faster + cheaper + safer than APM across most stack combinations.
+2. BASIC and APM outcomes nearly indistinguishable.
+3. Raw resize/scale-out consistently beats workload-fit technologies.
+4. One framework or DB dominates nearly every strategy and seed.
+5. Ordinary mistakes cause widespread bankruptcy.
+6. Nearly every strategy wins comfortably with growing cash.
 ```
 
-Do **not** edit balance constants in response. Any red flag becomes a separate follow-up design.
+Do not edit balance values in this feature. Any red flag becomes a separate design/tuning task.
 
-- [ ] **Step 8: Check git cleanliness for generated artifacts**
+- [ ] **Step 8: Verify generated files stay out of git**
 
 ```bash
 git status --short
 ```
 
-Expected: no `artifacts/balance/` files appear because they are ignored.
+Expected: no `artifacts/balance/` entry.
 
-- [ ] **Step 9: If verification required fixes, rerun all gates and commit the fix**
-
-After any concrete fix:
-
-```bash
-npm test && npm run typecheck && npm run build
-```
-
-Then rerun the affected balance smoke/full command and commit only the verified fix:
-
-```bash
-git add <changed-source-and-test-files>
-git commit -m "fix: correct balance simulation verification issue"
-```
-
-- [ ] **Step 10: Final diff review against the spec**
-
-Run:
+- [ ] **Step 9: Review the final code diff against scope**
 
 ```bash
 git diff feature/playable-mvp...HEAD --stat
 git diff feature/playable-mvp...HEAD -- src/core src/simulation scripts package.json .gitignore
 ```
 
-Verify:
+Confirm:
 
-- no core balance constant changes,
-- no player-facing UI changes,
-- no strategy randomness,
-- no full matrix in CI,
+- no core balance constant changes;
+- no player-facing UI changes;
+- no strategy randomness;
+- no full-matrix CI workflow;
 - only approved core interface additions plus simulation/tooling changes.
