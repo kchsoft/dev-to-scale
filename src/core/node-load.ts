@@ -6,7 +6,13 @@ export type NodeResourceKind = typeof NODE_RESOURCE_KINDS[number];
 export interface NodeResourceLoad {
   readonly resourceKind: NodeResourceKind;
   readonly demand: number;
+  readonly nominalCapacity: number;
+  readonly effectiveCapacity: number;
+  readonly nominalRatio: number;
+  readonly effectiveRatio: number;
+  /** @deprecated Migration alias. Use effectiveCapacity explicitly. */
   readonly capacity: number;
+  /** @deprecated Migration alias. Use nominalRatio/effectiveRatio explicitly. */
   readonly ratio: number;
 }
 
@@ -14,6 +20,9 @@ export interface NodeLoadSnapshot {
   readonly nodeId: InfrastructureNodeId;
   readonly nodeKind: InfrastructureNodeKind;
   readonly resources: readonly NodeResourceLoad[];
+  readonly nominalLoadRatio: number;
+  readonly effectiveLoadRatio: number;
+  /** @deprecated Migration alias. Use nominalLoadRatio/effectiveLoadRatio explicitly. */
   readonly loadRatio: number;
 }
 
@@ -28,16 +37,29 @@ export interface NodeLoadCollection {
   readonly nodeLoads: readonly NodeLoadSnapshot[];
 }
 
+function capacityRatio(demand: number, capacity: number): number {
+  if (demand <= 0) return 0;
+  if (capacity <= 0) return Number.POSITIVE_INFINITY;
+  return demand / capacity;
+}
+
 export function createNodeResourceLoad(
   resourceKind: NodeResourceKind,
   demand: number,
-  capacity: number,
+  nominalCapacity: number,
+  effectiveCapacity = nominalCapacity,
 ): NodeResourceLoad {
+  const nominalRatio = capacityRatio(demand, nominalCapacity);
+  const effectiveRatio = capacityRatio(demand, effectiveCapacity);
   return Object.freeze({
     resourceKind,
     demand,
-    capacity,
-    ratio: capacity > 0 ? demand / capacity : 0,
+    nominalCapacity,
+    effectiveCapacity,
+    nominalRatio,
+    effectiveRatio,
+    capacity: effectiveCapacity,
+    ratio: effectiveRatio,
   });
 }
 
@@ -60,11 +82,15 @@ export function createNodeLoadSnapshot(
   const normalized = Object.freeze([...resources].sort((left, right) => (
     order.get(left.resourceKind)! - order.get(right.resourceKind)!
   )));
+  const nominalLoadRatio = Math.max(0, ...normalized.map(({ nominalRatio }) => nominalRatio));
+  const effectiveLoadRatio = Math.max(0, ...normalized.map(({ effectiveRatio }) => effectiveRatio));
   return Object.freeze({
     nodeId,
     nodeKind,
     resources: normalized,
-    loadRatio: Math.max(0, ...normalized.map(({ ratio }) => ratio)),
+    nominalLoadRatio,
+    effectiveLoadRatio,
+    loadRatio: effectiveLoadRatio,
   });
 }
 
