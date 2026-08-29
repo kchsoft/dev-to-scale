@@ -98,7 +98,7 @@ export class IncidentTopology {
   }
 
   private static nodeLoadRatio(nodeId: string, load: LoadSnapshot): number {
-    return load.nodeLoads.find((nodeLoad) => nodeLoad.nodeId === nodeId)?.loadRatio ?? 0;
+    return load.nodeLoads.find((nodeLoad) => nodeLoad.nodeId === nodeId)?.effectiveLoadRatio ?? 0;
   }
 
   private static fundamentalAverage(developer: DeveloperProfile, ids: FundamentalSkillId[]): number {
