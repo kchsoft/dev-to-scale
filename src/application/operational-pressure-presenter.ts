@@ -3,8 +3,10 @@ import type {
   InfrastructureNodeKind,
   NodeResourceKind,
   OperationalPressure,
+  OperationalPressureBasis,
   ServiceTopology,
 } from '../core';
+import { operationalPressureRatio } from '../core';
 import type { BottleneckView, CapacityStatusView, LoadTone, TopologyNodeView } from './game-view';
 import { presentationCatalog } from './presentation-catalog';
 
@@ -33,15 +35,18 @@ function pressureKey(pressure: Pick<OperationalPressure, 'nodeId' | 'resourceKin
 export function operationalPressureChanges(
   before: readonly OperationalPressure[],
   after: readonly OperationalPressure[],
+  basis: OperationalPressureBasis,
 ): readonly OperationalPressureChange[] {
   const beforeByKey = new Map(before.map((pressure) => [pressureKey(pressure), pressure] as const));
   const changes = after.map((pressure) => {
-    const beforeRatio = beforeByKey.get(pressureKey(pressure))?.effectiveRatio ?? 0;
+    const previous = beforeByKey.get(pressureKey(pressure));
+    const beforeRatio = previous ? operationalPressureRatio(previous, basis) : 0;
+    const afterRatio = operationalPressureRatio(pressure, basis);
     return Object.freeze({
       pressure,
       beforeRatio,
-      afterRatio: pressure.effectiveRatio,
-      delta: pressure.effectiveRatio - beforeRatio,
+      afterRatio,
+      delta: afterRatio - beforeRatio,
     });
   });
   return Object.freeze(changes);
