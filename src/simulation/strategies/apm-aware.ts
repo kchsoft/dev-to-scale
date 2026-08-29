@@ -7,7 +7,7 @@ export const apmAwareStrategy: BalanceStrategy = {
   ceiling: 'APM',
   decide(observation, context) {
     if (observation.level !== 'APM' && observation.level !== 'ORACLE') {
-      return decideFromMetrics(observation, context, this.id);
+      return decideFromMetrics(observation, context, 'APM_AWARE');
     }
     const bottleneck = observation.diagnosis.topBottleneck;
     if (!bottleneck || bottleneck.effectivePercent < 85) return noOp('APM diagnosis shows no urgent bottleneck');
@@ -16,7 +16,7 @@ export const apmAwareStrategy: BalanceStrategy = {
     return cheapestAffordable(
       observation,
       context,
-      this.id,
+      'APM_AWARE',
       resourceRemedyCandidates(
         observation,
         node,
