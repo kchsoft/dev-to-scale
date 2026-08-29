@@ -20,6 +20,7 @@ import {
 import type { GameFinancialProjection } from './game-overview-projector';
 import { OperationalViewProjector } from './operational-view-projector';
 import {
+  operationalPressureChanges,
   operationalPressureLabel,
   playerOwnedTopologyNodeIds,
   playerOwnedTopologyNodes,
@@ -31,10 +32,6 @@ const SERVER_SIZES: readonly ServerSize[] = [ServerSize.SMALL, ServerSize.MEDIUM
 
 function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
-}
-
-function pressureKey(nodeId: string, resourceKind: string): string {
-  return `${nodeId}::${resourceKind}`;
 }
 
 export interface FeatureImpactPreview {
@@ -281,19 +278,7 @@ export class GameServiceProjector {
     const scope = { nodeIds: playerOwnedTopologyNodeIds(topology) };
     const before = operationalPressures(snapshot.load, scope);
     const after = operationalPressures(projected, scope);
-    const beforeByKey = new Map(
-      before.map((pressure) => [pressureKey(pressure.nodeId, pressure.resourceKind), pressure] as const),
-    );
-    const deltas = after.map((pressure) => {
-      const previous = beforeByKey.get(pressureKey(pressure.nodeId, pressure.resourceKind));
-      const beforeRatio = previous?.ratio ?? 0;
-      return {
-        pressure,
-        beforeRatio,
-        afterRatio: pressure.ratio,
-        delta: pressure.ratio - beforeRatio,
-      };
-    });
+    const deltas = operationalPressureChanges(before, after);
     const top = primaryOperationalPressure(projected, scope);
     if (!top) return null;
 
