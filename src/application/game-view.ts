@@ -5,6 +5,7 @@ export type DatabaseOptionId = 'POSTGRESQL' | 'MYSQL' | 'MONGODB';
 export type TechnologyIdView = 'REDIS' | 'SQS' | 'RABBITMQ' | 'KAFKA' | 'ALB' | 'OBJECT_STORAGE';
 export type TrafficResponseChoice = 'RIDE' | 'THROTTLE' | 'BURST';
 export type LoadTone = 'stable' | 'busy' | 'critical' | 'overload' | 'incident';
+export type CapacityStatusView = 'NORMAL' | 'WARNING' | 'OVERLOAD';
 export type GameEventKind = 'requirement' | 'incident' | 'traffic' | 'launch' | 'settlement' | 'bankrupt' | 'won';
 export type GameStatusView = 'RUNNING' | 'BANKRUPT' | 'WON';
 export type ObservabilityLevelView = 'BASIC' | 'METRICS' | 'APM';
@@ -166,8 +167,13 @@ export interface BottleneckView {
   readonly nodeId: string;
   readonly nodeKind: TopologyNodeView['kind'];
   readonly resourceKind: 'CPU' | 'IO' | 'THROUGHPUT' | 'STORAGE';
-  readonly ratio: number;
+  readonly nominalRatio: number;
+  readonly effectiveRatio: number;
   readonly percent: number;
+  readonly effectivePercent: number;
+  readonly hardLimitPercent: number;
+  readonly capacityFailurePercent: number;
+  readonly status: CapacityStatusView;
   readonly label: string;
 }
 
@@ -216,6 +222,10 @@ export interface LoadMetricView {
   readonly nodeId: string | null;
   readonly label: string;
   readonly percent: number;
+  readonly effectivePercent: number;
+  readonly hardLimitPercent: number;
+  readonly capacityFailurePercent: number;
+  readonly status: CapacityStatusView;
   readonly tone: LoadTone;
 }
 
