@@ -148,7 +148,7 @@ describe('operational view projector', () => {
 
     const text = OperationalViewProjector.diagnosisText(dbId, snapshot, engine.developer, topology);
 
-    expect(text).toBe('SIGNAL · PostgreSQL I/O 96% · APM에서 Traffic / Tech Debt / Request Failure 상관관계 분석이 해금됩니다.');
+    expect(text).toBe('SIGNAL · PostgreSQL I/O 96% · HARD 100% · APM에서 Traffic / Tech Debt / Request Failure 상관관계 분석이 해금됩니다.');
   });
 
   it('correlates tech debt and semantic recommendations only at APM observability', () => {

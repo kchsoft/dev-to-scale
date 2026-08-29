@@ -56,7 +56,7 @@ describe('TopologyViewProjector', () => {
       ['app', 'server-group', 92, 'critical'],
       ['db', 'database', 30, 'stable'],
     ]);
-    expect(view.nodes.map((node) => node.detail)).toEqual(['CAP 125', 'CAP 80']);
+    expect(view.nodes.map((node) => node.detail)).toEqual(['CAP 125 · HARD 125', 'CAP 80 · HARD 80']);
     expect(view.edges).toEqual([
       { id: 'edge-app-db', fromNodeId: 'app', toNodeId: 'db', mode: 'sync' },
     ]);
@@ -117,7 +117,7 @@ describe('TopologyViewProjector', () => {
     });
   });
 
-  it('uses the capacity of the highest-pressure resource rather than the largest resource', () => {
+  it('uses the capacity of the highest nominal-pressure resource rather than the largest resource', () => {
     const view = TopologyViewProjector.project({
       graph,
       nodeLoads: [createNodeLoadSnapshot('app', 'SERVER_GROUP', [
@@ -129,6 +129,40 @@ describe('TopologyViewProjector', () => {
       dau: 0,
     });
 
-    expect(view.nodes.find((node) => node.id === 'app')?.detail).toBe('CAP 50');
+    expect(view.nodes.find((node) => node.id === 'app')?.detail).toBe('CAP 50 · HARD 50');
+  });
+
+  it('displays nominal load and capacity while red overload follows the effective hard limit', () => {
+    const spring = TopologyViewProjector.project({
+      graph,
+      nodeLoads: [createNodeLoadSnapshot('app', 'SERVER_GROUP', [
+        createNodeResourceLoad('CPU', 105, 100, 118),
+      ])],
+      traces: [],
+      incidents: [],
+      dau: 0,
+    }).nodes.find(({ id }) => id === 'app');
+
+    expect(spring).toMatchObject({
+      loadPercent: 105,
+      tone: 'critical',
+      detail: 'CAP 100 · HARD 118',
+    });
+
+    const constrained = TopologyViewProjector.project({
+      graph,
+      nodeLoads: [createNodeLoadSnapshot('app', 'SERVER_GROUP', [
+        createNodeResourceLoad('CPU', 95, 100, 92),
+      ])],
+      traces: [],
+      incidents: [],
+      dau: 0,
+    }).nodes.find(({ id }) => id === 'app');
+
+    expect(constrained).toMatchObject({
+      loadPercent: 95,
+      tone: 'overload',
+      detail: 'CAP 100 · HARD 92',
+    });
   });
 });

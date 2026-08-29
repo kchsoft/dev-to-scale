@@ -7,9 +7,13 @@ import {
   primaryOperationalPressureForNode,
   ServiceTopology,
 } from '../core';
-import type { InfrastructureNodeKind, NodeLoadSnapshot, NodeResourceKind } from '../core';
+import type { InfrastructureNodeKind, NodeLoadSnapshot, NodeResourceKind, OperationalPressure } from '../core';
 import { LoadMetricView, ObservabilityView, ServiceHealthView, ServiceOperationsView } from './game-view';
 import {
+  capacityFailurePercent,
+  capacityStatus,
+  hardLimitPercent,
+  operationalLoadTone,
   operationalNodeLabel,
   operationalPressureLabel,
   playerOwnedTopologyNodeIds,
@@ -22,9 +26,37 @@ function percent(value: number): number {
   return Math.max(0, Math.round(value * 100));
 }
 
-function metric(id: string, nodeId: string | null, label: string, ratio: number): LoadMetricView {
-  const tone = ratio > 1 ? 'overload' : ratio >= 0.9 ? 'critical' : ratio >= 0.7 ? 'busy' : 'stable';
-  return { id, nodeId, label, percent: percent(ratio), tone };
+function metricFromPressure(
+  id: string,
+  nodeId: string | null,
+  label: string,
+  pressure: OperationalPressure,
+): LoadMetricView {
+  return {
+    id,
+    nodeId,
+    label,
+    percent: percent(pressure.nominalRatio),
+    effectivePercent: percent(pressure.effectiveRatio),
+    hardLimitPercent: hardLimitPercent(pressure),
+    capacityFailurePercent: capacityFailurePercent(pressure.effectiveRatio),
+    status: capacityStatus(pressure.nominalRatio, pressure.effectiveRatio),
+    tone: operationalLoadTone(pressure.nominalRatio, pressure.effectiveRatio),
+  };
+}
+
+function emptyMetric(id: string, nodeId: string, label: string): LoadMetricView {
+  return {
+    id,
+    nodeId,
+    label,
+    percent: 0,
+    effectivePercent: 0,
+    hardLimitPercent: 0,
+    capacityFailurePercent: 0,
+    status: 'NORMAL',
+    tone: 'stable',
+  };
 }
 
 function requiredNodeLoad(load: GameSnapshot['load'], nodeId: string): NodeLoadSnapshot {
@@ -49,8 +81,11 @@ function projectHealth(
   load: GameSnapshot['load'],
   topology: ServiceTopology,
 ): ServiceHealthView {
-  const pressure = primaryOperationalPressure(load, { nodeIds: playerOwnedTopologyNodeIds(topology) });
-  const bottleneckRatio = pressure?.ratio ?? 0;
+  const pressure = primaryOperationalPressure(load, {
+    nodeIds: playerOwnedTopologyNodeIds(topology),
+    basis: 'EFFECTIVE',
+  });
+  const bottleneckRatio = pressure?.effectiveRatio ?? 0;
   const p95LatencyMs = latencyFromPressure(bottleneckRatio, load.failureRate);
   const status = load.failureRate >= 0.1 || bottleneckRatio > 1.1 || p95LatencyMs >= 1_500
     ? 'CRITICAL'
@@ -92,6 +127,8 @@ function projectObservability(developer: DeveloperProfile): ObservabilityView {
 interface Diagnosis {
   primarySignal: string;
   primaryRatio: number;
+  primaryDisplayPercent: number;
+  primaryHardLimitPercent: number;
   likelyCause: string;
   signals: readonly string[];
   suggestions: readonly string[];
@@ -135,25 +172,27 @@ function diagnose(
   if (!topologyNode || topologyNode.kind === 'EXTERNAL_SERVICE') {
     throw new Error(`Missing player-owned topology node: ${nodeId}`);
   }
-  const primary = primaryOperationalPressureForNode(snapshot.load, nodeId);
+  const primary = primaryOperationalPressureForNode(snapshot.load, nodeId, 'EFFECTIVE');
   if (!primary) throw new Error(`Missing operational pressure for topology node: ${nodeId}`);
 
   const load = snapshot.load;
   const primaryLabel = operationalPressureLabel(topology, primary);
   const trafficMultiplier = Math.max(1, snapshot.growthEvent?.trafficMultiplier ?? 1);
   const suggestions = recommendationsFor(primary.nodeKind, primary.resourceKind);
-  const signals: string[] = [`${primaryLabel} ${percent(primary.ratio)}%`];
+  const primaryDisplayPercent = percent(primary.nominalRatio);
+  const primaryHardLimitPercent = hardLimitPercent(primary);
+  const signals: string[] = [`${primaryLabel} ${primaryDisplayPercent}% · HARD ${primaryHardLimitPercent}%`];
   if (trafficMultiplier > 1) signals.push(`Traffic ×${trafficMultiplier.toFixed(1)}`);
   if (snapshot.techDebt.value >= 40) signals.push(`Tech Debt ${snapshot.techDebt.value}/100`);
   if (load.failureRate >= 0.01) signals.push(`Request Failure ${percent(load.failureRate)}%`);
 
-  let likelyCause = primary.ratio > 1
-    ? `${primaryLabel} Capacity 초과가 가장 강한 신호입니다.`
-    : primary.ratio >= 0.85
-      ? `${primaryLabel}가 Critical 구간에 근접해 있습니다.`
+  let likelyCause = primary.effectiveRatio > 1
+    ? `${primaryLabel} Hard Limit 초과가 가장 강한 신호입니다.`
+    : primary.effectiveRatio >= 0.85
+      ? `${primaryLabel}가 실제 처리 한계에 근접해 있습니다.`
       : `${primaryLabel}만으로는 과부하 원인이 확정되지 않습니다.`;
 
-  if (trafficMultiplier > 1 && primary.ratio >= 0.85) {
+  if (trafficMultiplier > 1 && primary.effectiveRatio >= 0.85) {
     likelyCause = `Traffic Spike가 ${primaryLabel} 병목을 드러낸 가능성이 높습니다.`;
   } else if (snapshot.techDebt.value >= 60 && primary.nodeKind === 'SERVER_GROUP') {
     likelyCause = `높은 Tech Debt와 ${primaryLabel} 압력이 함께 장애 위험을 높였습니다.`;
@@ -163,7 +202,9 @@ function diagnose(
 
   return {
     primarySignal: primaryLabel,
-    primaryRatio: primary.ratio,
+    primaryRatio: primary.effectiveRatio,
+    primaryDisplayPercent,
+    primaryHardLimitPercent,
     likelyCause,
     signals,
     suggestions,
@@ -172,20 +213,35 @@ function diagnose(
 
 function basicMetrics(snapshot: GameSnapshot, topology: ServiceTopology): readonly LoadMetricView[] {
   return playerOwnedTopologyNodes(topology).map((node) => {
-    const load = requiredNodeLoad(snapshot.load, node.id);
-    return metric(`${node.id}:load`, node.id, operationalNodeLabel(topology, node.id), load.loadRatio);
+    requiredNodeLoad(snapshot.load, node.id);
+    const nominal = primaryOperationalPressureForNode(snapshot.load, node.id, 'NOMINAL');
+    const effective = primaryOperationalPressureForNode(snapshot.load, node.id, 'EFFECTIVE');
+    const label = operationalNodeLabel(topology, node.id);
+    if (!nominal || !effective) return emptyMetric(`${node.id}:load`, node.id, label);
+
+    return {
+      id: `${node.id}:load`,
+      nodeId: node.id,
+      label,
+      percent: percent(nominal.nominalRatio),
+      effectivePercent: percent(effective.effectiveRatio),
+      hardLimitPercent: hardLimitPercent(nominal),
+      capacityFailurePercent: capacityFailurePercent(effective.effectiveRatio),
+      status: capacityStatus(nominal.nominalRatio, effective.effectiveRatio),
+      tone: operationalLoadTone(nominal.nominalRatio, effective.effectiveRatio),
+    };
   });
 }
 
 function resourceMetrics(snapshot: GameSnapshot, topology: ServiceTopology): readonly LoadMetricView[] {
   return playerOwnedTopologyNodes(topology).flatMap((node) => {
-    const load = requiredNodeLoad(snapshot.load, node.id);
+    requiredNodeLoad(snapshot.load, node.id);
     const nodeLabel = operationalNodeLabel(topology, node.id);
-    return operationalPressuresForNode(snapshot.load, node.id).map((pressure) => metric(
+    return operationalPressuresForNode(snapshot.load, node.id).map((pressure) => metricFromPressure(
       `${node.id}:${pressure.resourceKind}`,
       node.id,
       `${nodeLabel} ${resourceLabel(pressure.resourceKind)}`,
-      pressure.ratio,
+      pressure,
     ));
   });
 }
@@ -198,10 +254,10 @@ export class OperationalViewProjector {
   ): ServiceOperationsView {
     const observability = projectObservability(developer);
     const health = projectHealth(snapshot.load, topology);
-    const primaryPercent = health.bottleneck?.percent ?? 0;
     const visibleLoads = observability.level === 'BASIC'
       ? basicMetrics(snapshot, topology)
       : resourceMetrics(snapshot, topology);
+    const primaryPercent = Math.max(0, ...visibleLoads.map(({ percent: loadPercent }) => loadPercent));
 
     return {
       observability,
@@ -211,7 +267,7 @@ export class OperationalViewProjector {
           ? `LOAD ${primaryPercent}%`
           : `P95 ${health.p95LatencyMs.toLocaleString()}ms`,
         detail: observability.level === 'APM'
-          ? `TOP BOTTLENECK · ${health.bottleneck?.label ?? 'NONE'} ${primaryPercent}% · 요청 경로와 출시 영향까지 추적 가능합니다.`
+          ? `TOP BOTTLENECK · ${health.bottleneck?.label ?? 'NONE'} ${health.bottleneck?.percent ?? 0}% · 요청 경로와 출시 영향까지 추적 가능합니다.`
           : observability.level === 'METRICS'
             ? `노드별 자원 Metrics와 P95가 해금되었습니다. ${observability.nextUnlock}`
             : `현재는 노드별 전체 Load만 보입니다. ${observability.nextUnlock}`,
@@ -234,7 +290,7 @@ export class OperationalViewProjector {
 
     const diagnosis = diagnose(nodeId, snapshot, topology);
     if (observability.level === 'METRICS') {
-      return `SIGNAL · ${diagnosis.primarySignal} ${percent(diagnosis.primaryRatio)}% · APM에서 Traffic / Tech Debt / Request Failure 상관관계 분석이 해금됩니다.`;
+      return `SIGNAL · ${diagnosis.primarySignal} ${diagnosis.primaryDisplayPercent}% · HARD ${diagnosis.primaryHardLimitPercent}% · APM에서 Traffic / Tech Debt / Request Failure 상관관계 분석이 해금됩니다.`;
     }
     return `${diagnosis.likelyCause} · SIGNALS ${diagnosis.signals.join(' / ')} · OPTIONS ${diagnosis.suggestions.slice(0, 3).join(' / ')}`;
   }

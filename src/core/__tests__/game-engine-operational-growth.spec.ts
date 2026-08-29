@@ -67,6 +67,21 @@ function operationalLoad(options: {
   };
 }
 
+function loadWithDualPressure(nominalRatio: number, effectiveRatio: number): LoadSnapshot {
+  const nominalCapacity = 1;
+  const demand = nominalRatio;
+  const effectiveCapacity = demand / effectiveRatio;
+  return {
+    failureRate: 0,
+    nodeLoads: Object.freeze([
+      createNodeLoadSnapshot('v1:app:SPRING_BOOT', 'SERVER_GROUP', [
+        createNodeResourceLoad('CPU', demand, nominalCapacity, effectiveCapacity),
+      ]),
+    ]),
+    requestTraces: Object.freeze([]),
+  };
+}
+
 function advanceGrowth(engine: GameEngine): number {
   (engine as unknown as { advanceGrowth: () => void }).advanceGrowth();
   return engine.dau;
@@ -85,6 +100,13 @@ describe('game engine operational growth pressure', () => {
     const overloaded = engineWithLoad(operationalLoad({ redis: 1.25 }));
 
     expect(advanceGrowth(baseline) - advanceGrowth(overloaded)).toBe(250);
+  });
+
+  it('uses effective technical pressure rather than nominal display load for growth', () => {
+    const belowNominal = engineWithLoad(loadWithDualPressure(0.8, 0.8));
+    const aboveNominalWithHeadroom = engineWithLoad(loadWithDualPressure(1.2, 0.8));
+
+    expect(advanceGrowth(aboveNominalWithHeadroom)).toBe(advanceGrowth(belowNominal));
   });
 
   it('ignores external-service pressure for the growth capacity penalty', () => {

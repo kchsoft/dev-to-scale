@@ -77,6 +77,32 @@ function immutableProfile(capacity: ResourceCapacity, monthlyCost: number): Node
   return Object.freeze({ capacity: Object.freeze({ ...capacity }), monthlyCost });
 }
 
+export function nominalNodeSizeProfile(productId: string, size: ServerSize): NodeSizeProfile {
+  if (FRAMEWORK_IDS.includes(productId as FrameworkId)) {
+    const framework = FrameworkDefinition.byId(productId as FrameworkId);
+    const base = APP_BASE[size];
+    return immutableProfile({
+      cpu: base.capacity,
+      io: base.capacity,
+      throughput: base.capacity,
+    }, base.cost * framework.costModifier);
+  }
+
+  if (DATABASE_IDS.includes(productId as DatabaseId)) {
+    const database = DatabaseDefinition.byId(productId as DatabaseId);
+    const base = DB_BASE[size];
+    return immutableProfile({
+      cpu: base.capacity,
+      io: base.capacity,
+      throughput: base.capacity,
+    }, base.cost * database.costModifier);
+  }
+
+  const fixed = FIXED_PRODUCT_PROFILES[productId as keyof typeof FIXED_PRODUCT_PROFILES];
+  if (fixed) return fixed[size];
+  throw new Error(`Unknown infrastructure product: ${productId}`);
+}
+
 export function nodeSizeProfile(productId: string, size: ServerSize): NodeSizeProfile {
   if (FRAMEWORK_IDS.includes(productId as FrameworkId)) {
     const framework = FrameworkDefinition.byId(productId as FrameworkId);

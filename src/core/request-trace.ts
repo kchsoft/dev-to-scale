@@ -82,7 +82,10 @@ export class RequestTraceSimulator {
       }
 
       const health = clampHealth(nodeHealth[step.nodeId] ?? 1);
-      currentRatio = arrivalRatio * health;
+      const observedPassThrough = arrivalRatio * health;
+      currentRatio = step.requirement === 'OPTIONAL'
+        ? arrivalRatio
+        : observedPassThrough;
       const status: RequestTraceNodeStatus = health <= 0
         ? 'FAILED'
         : health < 1
@@ -99,7 +102,7 @@ export class RequestTraceSimulator {
       }));
       previousNodeId = step.nodeId;
 
-      if (arrivalRatio > 0 && currentRatio <= 0) {
+      if (step.requirement === 'REQUIRED' && arrivalRatio > 0 && currentRatio <= 0) {
         failureNodeId = step.nodeId;
         break;
       }
