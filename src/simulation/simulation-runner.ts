@@ -63,9 +63,25 @@ function observeDailyOperationalMetrics(engine: GameEngine, metrics: SimulationM
   });
 }
 
+function hasMissingRequiredDependency(engine: GameEngine): boolean {
+  return engine.snapshot.load.requestTraces.some((trace) => (
+    trace.nodes.some((node) => node.requirement === 'REQUIRED' && node.status === 'MISSING')
+  ));
+}
+
+function recordProgression(engine: GameEngine, metrics: SimulationMetricsCollector): void {
+  const snapshot = engine.snapshot;
+  metrics.recordProgressionDay({
+    dau: snapshot.dau,
+    completedFeatureCount: snapshot.completedFeatures.length,
+    missingRequiredDependency: hasMissingRequiredDependency(engine),
+  });
+}
+
 function recordSettlement(engine: GameEngine, metrics: SimulationMetricsCollector): void {
   const settlement = engine.snapshot.lastSettlement;
   if (!settlement) return;
+  metrics.recordMonthlyRevenue(settlement.revenue);
   metrics.recordSettlement(settlement.month, settlement.infrastructureCost);
 }
 
@@ -189,6 +205,7 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
       daysPlayed += 1;
       metrics.recordCash(engine.snapshot.cash);
       metrics.recordIncidentIds(engine.snapshot.incidents.map(({ id }) => id));
+      recordProgression(engine, metrics);
       recordSettlement(engine, metrics);
       recordExpandedNodeUtilization(engine, metrics, expandedNodeIds);
     } catch (error) {
