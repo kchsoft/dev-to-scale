@@ -107,10 +107,10 @@ describe('balance report', () => {
       terminalOutcome: 'TIE',
       winDaysDelta: -50,
       infrastructureCostExposureDelta: -60,
-      failureBurdenDelta: -0.2,
       prematureCapacityActionsDelta: -4,
       lowUtilizationExpandedNodeDaysDelta: 0,
     });
+    expect(pair?.failureBurdenDelta).toBeCloseTo(-0.2);
     expect(pairs.some(({ seed }) => seed === 2)).toBe(false);
   });
 
