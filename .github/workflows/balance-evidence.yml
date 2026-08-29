@@ -21,6 +21,7 @@ jobs:
       - run: npm install
       - name: Run 180-scenario shard
         run: |
+          mkdir -p artifacts/balance
           npm run balance -- --framework "${{ matrix.framework }}" --db "${{ matrix.database }}" > artifacts/balance/console.log
           node -e "const fs=require('fs');const rows=fs.readFileSync('artifacts/balance/runs.csv','utf8').trimEnd().split('\n').length-1;if(rows!==180)throw new Error('expected 180 rows, got '+rows);const s=JSON.parse(fs.readFileSync('artifacts/balance/summary.json','utf8'));if(s.runCount!==180)throw new Error('expected runCount=180, got '+s.runCount);"
       - uses: actions/upload-artifact@v4
