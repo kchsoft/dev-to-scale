@@ -41,6 +41,18 @@ describe('growth', () => {
     expect(result.totalModifier).toBe(0.03);
   });
 
+  it('uses 58% positive organic probability in phase 3', () => {
+    const result = GrowthPolicy.calculate({
+      phase: 3,
+      completedFeatureGrowthBonus: 0,
+      event: null,
+      incidents: [],
+      random: new SequenceRandom([0, 0.56]),
+    });
+
+    expect(result.baseModifier).toBe(0.01);
+  });
+
   it('applies 7-day viral and negative buzz modifiers', () => {
     const viral = new GrowthEvent('VIRAL');
     const negative = new GrowthEvent('NEGATIVE_BUZZ');
