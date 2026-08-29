@@ -1,0 +1,42 @@
+name: Balance Pass 1 Timeline Diagnostics
+
+on:
+  pull_request:
+    branches: [feature/playable-mvp]
+
+jobs:
+  timeline:
+    if: github.head_ref == 'feature/deterministic-balance-simulation-harness'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - framework: NESTJS
+            database: MYSQL
+            seed: 23
+            strategy: APM_AWARE
+          - framework: SPRING_BOOT
+            database: POSTGRESQL
+            seed: 5
+            strategy: APM_AWARE
+          - framework: SPRING_BOOT
+            database: POSTGRESQL
+            seed: 29
+            strategy: APM_AWARE
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Capture traced scenario
+        run: |
+          mkdir -p artifacts/balance
+          npm run balance -- --framework "${{ matrix.framework }}" --db "${{ matrix.database }}" --seed "${{ matrix.seed }}" --strategy "${{ matrix.strategy }}" --trace > artifacts/balance/trace.log
+          node -e "const fs=require('fs');const rows=fs.readFileSync('artifacts/balance/runs.csv','utf8').trimEnd().split('\n').length-1;if(rows!==1)throw new Error('expected 1 row, got '+rows);"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-pass-1-timeline-${{ matrix.framework }}-${{ matrix.database }}-${{ matrix.seed }}-${{ matrix.strategy }}
+          path: artifacts/balance/
+          if-no-files-found: error
