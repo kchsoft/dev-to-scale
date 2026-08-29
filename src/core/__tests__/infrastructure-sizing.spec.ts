@@ -36,6 +36,13 @@ describe('generic infrastructure node sizing', () => {
     }
   });
 
+  it('gives ALB XLARGE enough bounded headroom for the Balance Pass 1 final scale', () => {
+    const profile = nodeSizeProfile('ALB', ServerSize.XLARGE);
+
+    expect(profile.capacity.throughput).toBe(1_800);
+    expect(profile.monthlyCost).toBe(550_000);
+  });
+
   it('gives every player-owned initial/deployed node an independent SMALL tier that can resize', () => {
     const infrastructure = InfrastructureState.initial('SPRING_BOOT', 'POSTGRESQL');
     infrastructure.deployTechnology('ALB');
