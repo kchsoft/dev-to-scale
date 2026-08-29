@@ -18,3 +18,41 @@ jobs:
       - run: npm test
       - run: npm run typecheck
       - run: npm run build
+      - name: Balance CLI smoke
+        run: |
+          npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy APM_AWARE --trace > /tmp/balance-smoke.log
+          node -e "const fs=require('fs');const rows=fs.readFileSync('artifacts/balance/runs.csv','utf8').trimEnd().split('\n').length-1;if(rows!==1)throw new Error('expected 1 smoke row, got '+rows);const s=JSON.parse(fs.readFileSync('artifacts/balance/summary.json','utf8'));if(s.runCount!==1)throw new Error('expected smoke runCount=1, got '+s.runCount);"
+          grep -q '^\[trace\] ' /tmp/balance-smoke.log
+      - name: Full 2700-run balance matrix
+        run: |
+          npm run balance > artifacts/balance/full-console.log
+          cp artifacts/balance/runs.csv artifacts/balance/full-runs.csv
+          cp artifacts/balance/summary.json artifacts/balance/full-summary.json
+          node -e "const fs=require('fs');const rows=fs.readFileSync('artifacts/balance/full-runs.csv','utf8').trimEnd().split('\n').length-1;if(rows!==2700)throw new Error('expected 2700 rows, got '+rows);const s=JSON.parse(fs.readFileSync('artifacts/balance/full-summary.json','utf8'));if(s.runCount!==2700)throw new Error('expected runCount=2700, got '+s.runCount);console.log('verified full matrix rows='+rows);"
+      - name: Deterministic rerun evidence
+        run: |
+          npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy APM_AWARE > artifacts/balance/deterministic-a.log
+          cp artifacts/balance/runs.csv artifacts/balance/deterministic-a.csv
+          npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy APM_AWARE > artifacts/balance/deterministic-b.log
+          diff -u artifacts/balance/deterministic-a.csv artifacts/balance/runs.csv
+          cp artifacts/balance/runs.csv artifacts/balance/deterministic-b.csv
+      - name: Representative strategy traces
+        run: |
+          for strategy in ORACLE APM_AWARE YOLO_SCALE CHEAPSKATE; do
+            npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy "$strategy" --trace > "artifacts/balance/trace-${strategy}.log"
+          done
+      - name: Verify generated artifacts stay ignored
+        run: |
+          if git status --short | grep -q '^?? artifacts/balance/'; then
+            echo 'balance artifacts are not ignored'
+            git status --short
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: balance-verification-evidence
+          path: |
+            artifacts/balance/
+            /tmp/balance-smoke.log
+          if-no-files-found: error
