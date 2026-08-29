@@ -17,6 +17,10 @@ function run(overrides: Partial<BalanceRunResult> = {}): BalanceRunResult {
     terminalStatus: 'WON',
     daysPlayed: 300,
     finalDau: 10_000_000,
+    peakDau: 12_000_000,
+    completedFeatureCount: 10,
+    missingRequiredDependencyDays: 4,
+    peakMonthlyRevenue: 950_000_000,
     endingCash: 10_000_000,
     minimumCash: 500_000,
     failureDays: 4,
@@ -128,8 +132,8 @@ describe('balance report', () => {
     const lines = csv.trimEnd().split('\n');
 
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toBe('frameworkId,databaseId,seed,strategyId,terminalStatus,daysPlayed,finalDau,endingCash,minimumCash,failureDays,severeFailureDays,cumulativeFailureBurden,overloadDays,incidentCount,technologyBuildSpend,learningSpend,burstSpend,settledInfrastructureSpend,infrastructureCostExposure,resizeCount,appScaleOutCount,dbReplicaActionCount,prematureCapacityActions,lowUtilizationExpandedNodeDays,viralRideCount,viralThrottleCount,viralBurstCount');
-    expect(lines[1].startsWith('SPRING_BOOT,POSTGRESQL,1,APM_AWARE,WON,300')).toBe(true);
+    expect(lines[0]).toBe('frameworkId,databaseId,seed,strategyId,terminalStatus,daysPlayed,finalDau,peakDau,completedFeatureCount,missingRequiredDependencyDays,peakMonthlyRevenue,endingCash,minimumCash,failureDays,severeFailureDays,cumulativeFailureBurden,overloadDays,incidentCount,technologyBuildSpend,learningSpend,burstSpend,settledInfrastructureSpend,infrastructureCostExposure,resizeCount,appScaleOutCount,dbReplicaActionCount,prematureCapacityActions,lowUtilizationExpandedNodeDays,viralRideCount,viralThrottleCount,viralBurstCount');
+    expect(lines[1].startsWith('SPRING_BOOT,POSTGRESQL,1,APM_AWARE,WON,300,10000000,12000000,10,4,950000000')).toBe(true);
   });
 
   it('returns JSON-serializable plain report objects', () => {
