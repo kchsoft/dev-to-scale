@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ServerSize } from '../../core/infrastructure';
 import { createNodeLoadSnapshot, createNodeResourceLoad } from '../../core/node-load';
+import type { SimulationAction } from '../balance-action';
 import type {
   ApmBalanceObservation,
   BalanceNodeObservation,
@@ -8,6 +9,7 @@ import type {
   BasicBalanceObservation,
   MetricsBalanceObservation,
   OracleBalanceObservation,
+  OracleExactPressure,
 } from '../balance-observation';
 import { BALANCE_STRATEGIES } from '../strategy-registry';
 
@@ -93,21 +95,22 @@ describe('deterministic balance strategies', () => {
       nodeId: 'db', kind: 'DATABASE', productId: 'POSTGRESQL', aggregatePercent: 120, effectivePercent: 120,
       scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
     });
+    const exactPressure: OracleExactPressure = {
+      nodeId: 'db', nodeKind: 'DATABASE', resourceKind: 'IO', demand: 1.2,
+      nominalCapacity: 1, effectiveCapacity: 1, nominalRatio: 1.2, effectiveRatio: 1.2,
+    };
     const observation: OracleBalanceObservation = Object.freeze({
       ...common('ORACLE', [db]),
       level: 'ORACLE' as const,
       resourceLoads: Object.freeze([]),
       diagnosis: Object.freeze({ topBottleneck: null, text: null }),
-      exactPressures: Object.freeze([{
-        nodeId: 'db', nodeKind: 'DATABASE', resourceKind: 'IO', demand: 1.2,
-        nominalCapacity: 1, effectiveCapacity: 1, nominalRatio: 1.2, effectiveRatio: 1.2,
-      }]),
+      exactPressures: Object.freeze([exactPressure]),
       workloadTags: Object.freeze(['READ_HEAVY' as const]),
       previewPort: Object.freeze({
         previewTechnology: () => load('db', 'DATABASE', 'IO', 0.8),
         previewResize: () => load('db', 'DATABASE', 'IO', 0.95),
         previewScaleOut: () => load('db', 'DATABASE', 'IO', 0.9),
-        projectedMonthlyCost: (action) => action.type === 'START_TECHNOLOGY_BUILD' ? 200_000 : 250_000,
+        projectedMonthlyCost: (action: SimulationAction) => action.type === 'START_TECHNOLOGY_BUILD' ? 200_000 : 250_000,
       }),
     });
 
