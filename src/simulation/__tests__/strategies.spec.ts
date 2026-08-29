@@ -26,7 +26,7 @@ const TECHNOLOGIES: readonly BalanceTechnologyOption[] = Object.freeze([
 const EVENT_BUS_GAP: RequiredDependencyGapObservation = Object.freeze({
   role: 'EVENT_BUS',
   workloadIds: Object.freeze(['AI_RECOMMENDATION']),
-  candidateTechnologyIds: Object.freeze(['SQS', 'RABBITMQ', 'KAFKA']),
+  candidateTechnologyIds: Object.freeze(['SQS', 'RABBITMQ', 'KAFKA'] as const),
 });
 
 function node(overrides: Partial<BalanceNodeObservation> & Pick<BalanceNodeObservation, 'nodeId' | 'kind' | 'productId'>): BalanceNodeObservation {
