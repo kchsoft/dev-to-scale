@@ -17,6 +17,7 @@ import {
   operationalPressuresForNode,
   primaryOperationalPressureForNode,
 } from '../core/operational-pressure';
+import type { ResourceRole } from '../core/service-topology';
 import { TECHNOLOGIES, type BuildableTechnologyId } from '../core/technology';
 import type { InfrastructureNodeId, InfrastructureNodeKind } from '../core/topology';
 import { V1ServiceTopologyFactory } from '../core/v1-topology';
@@ -54,6 +55,12 @@ export interface BalanceTechnologyOption {
   readonly available: boolean;
 }
 
+export interface RequiredDependencyGapObservation {
+  readonly role: ResourceRole;
+  readonly workloadIds: readonly string[];
+  readonly candidateTechnologyIds: readonly BuildableTechnologyId[];
+}
+
 export interface BalanceResourceLoadObservation {
   readonly nodeId: InfrastructureNodeId;
   readonly nodeKind: InfrastructureNodeKind;
@@ -78,6 +85,7 @@ export interface CommonBalanceObservation {
   readonly cash: number;
   readonly monthlyInfrastructureCost: number;
   readonly failureRate: number;
+  readonly requiredDependencyGaps: readonly RequiredDependencyGapObservation[];
   readonly serviceHealth: 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
   readonly growthEvent: null | {
     readonly type: 'VIRAL' | 'NEGATIVE_BUZZ';
@@ -146,6 +154,10 @@ const PLAYER_LEVEL_ORDER: Readonly<Record<PlayerObservationLevel, number>> = {
   APM: 2,
 };
 
+const REQUIRED_DEPENDENCY_TECHNOLOGIES: Readonly<Partial<Record<ResourceRole, readonly BuildableTechnologyId[]>>> = Object.freeze({
+  EVENT_BUS: Object.freeze(['SQS', 'RABBITMQ', 'KAFKA'] as const),
+});
+
 function activeFeatures(engine: GameEngine): readonly FeatureDefinition[] {
   const snapshot = engine.snapshot;
   if (!snapshot.launched) return [];
@@ -164,6 +176,29 @@ function copiedBottleneck(bottleneck: BottleneckView | null): BottleneckView | n
 
 function percent(ratio: number): number {
   return Math.max(0, Math.round(ratio * 100));
+}
+
+function requiredDependencyGaps(load: LoadSnapshot): readonly RequiredDependencyGapObservation[] {
+  const workloadIdsByRole = new Map<ResourceRole, Set<string>>();
+  for (const trace of load.requestTraces) {
+    for (const node of trace.nodes) {
+      if (node.requirement !== 'REQUIRED' || node.status !== 'MISSING') continue;
+      let workloadIds = workloadIdsByRole.get(node.role);
+      if (!workloadIds) {
+        workloadIds = new Set<string>();
+        workloadIdsByRole.set(node.role, workloadIds);
+      }
+      workloadIds.add(trace.workloadId);
+    }
+  }
+
+  return Object.freeze([...workloadIdsByRole.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([role, workloadIds]) => Object.freeze({
+      role,
+      workloadIds: Object.freeze([...workloadIds].sort()),
+      candidateTechnologyIds: Object.freeze([...(REQUIRED_DEPENDENCY_TECHNOLOGIES[role] ?? [])]),
+    })));
 }
 
 function resourceObservations(engine: GameEngine): readonly BalanceResourceLoadObservation[] {
@@ -244,6 +279,7 @@ function commonObservation(
     cash: snapshot.cash,
     monthlyInfrastructureCost: engine.infrastructure.monthlyCost,
     failureRate: snapshot.load.failureRate,
+    requiredDependencyGaps: requiredDependencyGaps(snapshot.load),
     serviceHealth: service.health.status,
     growthEvent: snapshot.growthEvent ? Object.freeze({
       type: snapshot.growthEvent.type,
