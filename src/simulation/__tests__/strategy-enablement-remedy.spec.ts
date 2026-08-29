@@ -24,7 +24,7 @@ const observation: MetricsBalanceObservation = Object.freeze({
     { id: 'KAFKA', buildCost: 1_500_000, monthlyCost: 350_000, deployed: false, available: false },
     { id: 'ALB', buildCost: 150_000, monthlyCost: 100_000, deployed: false, available: true },
     { id: 'OBJECT_STORAGE', buildCost: 200_000, monthlyCost: 80_000, deployed: false, available: true },
-  ]),
+  ] as const),
   nodes: Object.freeze([
     Object.freeze({
       nodeId: 'v1:app:SPRING_BOOT',
