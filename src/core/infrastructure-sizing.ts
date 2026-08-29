@@ -88,7 +88,19 @@ export function nominalNodeSizeProfile(productId: string, size: ServerSize): Nod
     }, base.cost * framework.costModifier);
   }
 
-  throw new Error(`Nominal size profile is not implemented for product: ${productId}`);
+  if (DATABASE_IDS.includes(productId as DatabaseId)) {
+    const database = DatabaseDefinition.byId(productId as DatabaseId);
+    const base = DB_BASE[size];
+    return immutableProfile({
+      cpu: base.capacity,
+      io: base.capacity,
+      throughput: base.capacity,
+    }, base.cost * database.costModifier);
+  }
+
+  const fixed = FIXED_PRODUCT_PROFILES[productId as keyof typeof FIXED_PRODUCT_PROFILES];
+  if (fixed) return fixed[size];
+  throw new Error(`Unknown infrastructure product: ${productId}`);
 }
 
 export function nodeSizeProfile(productId: string, size: ServerSize): NodeSizeProfile {
