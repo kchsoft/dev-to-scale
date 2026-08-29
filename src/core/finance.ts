@@ -15,7 +15,7 @@ export interface MonthlySettlementResult {
 export class RevenuePolicy {
   static readonly BASE_REVENUE_PER_AVG_DAU = 20;
   static readonly AI_COST_PER_AVG_DAU = 1.5;
-  static readonly EXIT_MONTHLY_REVENUE_TARGET = 900_000_000;
+  static readonly EXIT_MONTHLY_REVENUE_TARGET = 200_000_000;
 
   static monthlyRevenue(averageDau: number, additiveModifier = 0): number {
     return Math.round(averageDau * this.BASE_REVENUE_PER_AVG_DAU * (1 + additiveModifier));
