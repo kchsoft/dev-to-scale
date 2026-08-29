@@ -1,3 +1,4 @@
+export * from './capacity-health';
 export * from './community';
 export * from './database';
 export * from './experience';
