@@ -25,7 +25,7 @@ export const metricsAwareStrategy: BalanceStrategy = {
   id: 'METRICS_AWARE',
   ceiling: 'METRICS',
   decide(observation, context) {
-    return decideFromMetrics(observation, context, this.id);
+    return decideFromMetrics(observation, context, 'METRICS_AWARE');
   },
   decideViral(observation) {
     return (hottestResource(observation)?.effectivePercent ?? hottestAggregateNode(observation)?.aggregatePercent ?? 0) > 100
