@@ -61,6 +61,32 @@ describe('operational pressure', () => {
     });
   });
 
+  it('defaults technical pressure to effective ratio but can explicitly select nominal display pressure', () => {
+    const dualBasisLoad = {
+      nodeLoads: [
+        createNodeLoadSnapshot('spring-app', 'SERVER_GROUP', [
+          createNodeResourceLoad('CPU', 105, 100, 118),
+        ]),
+        createNodeLoadSnapshot('database', 'DATABASE', [
+          createNodeResourceLoad('IO', 95, 100, 93),
+        ]),
+      ],
+    };
+
+    expect(primaryOperationalPressure(dualBasisLoad)).toMatchObject({
+      nodeId: 'database',
+      resourceKind: 'IO',
+      nominalRatio: 0.95,
+      effectiveRatio: 95 / 93,
+    });
+    expect(primaryOperationalPressure(dualBasisLoad, { basis: 'NOMINAL' })).toMatchObject({
+      nodeId: 'spring-app',
+      resourceKind: 'CPU',
+      nominalRatio: 1.05,
+      effectiveRatio: 105 / 118,
+    });
+  });
+
   it('keeps the first resource when ratios tie exactly', () => {
     const tied = {
       nodeLoads: [
