@@ -16,7 +16,7 @@ const observation: MetricsBalanceObservation = Object.freeze({
   serviceHealth: 'DEGRADED',
   growthEvent: null,
   currentTechnologyBuildId: null,
-  deployedTechnologies: Object.freeze(['SQS']),
+  deployedTechnologies: Object.freeze(['SQS'] as const),
   technologyOptions: Object.freeze([
     { id: 'REDIS', buildCost: 300_000, monthlyCost: 100_000, deployed: false, available: true },
     { id: 'SQS', buildCost: 200_000, monthlyCost: 80_000, deployed: true, available: false },
