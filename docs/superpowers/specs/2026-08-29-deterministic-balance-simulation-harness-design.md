@@ -31,7 +31,8 @@ This feature is **measurement-only**. It must not tune game constants, recommend
 6. Run-level metrics, aggregate reports, and paired same-seed comparisons.
 7. A CLI entry point for full and filtered balance runs.
 8. Minimal RNG isolation needed for fair paired comparisons.
-9. Tests for deterministic execution, information boundaries, strategy rules, metrics, and report aggregation.
+9. Narrow read-only load previews needed by the full-information oracle.
+10. Tests for deterministic execution, information boundaries, strategy rules, metrics, and report aggregation.
 
 ### Out of scope
 
@@ -89,7 +90,9 @@ BANKRUPT
 1,080 simulated days elapsed
 ```
 
-If the engine is still `RUNNING` after 1,080 calls to `advanceDay()`, the simulation terminal status is `TIMEOUT`.
+If the engine is still `RUNNING` after 1,080 calls to `advanceDay()`, the simulation terminal status is `TIMEOUT`. `daysPlayed` is the number of successful `advanceDay()` calls performed by the simulation, not the engine's one-based day label.
+
+For a fixed framework/database/seed group, `CommunityProgression` keeps the same seeded feature permutation. Release timing may diverge because each strategy can produce different growth, incidents, and development pressure; that divergence is an intended outcome.
 
 ## 5. Architecture
 
@@ -146,11 +149,11 @@ scripts/
   run-balance.ts
 ```
 
-The simulation package may read public game state and invoke public commands, but must never mutate private engine state, DAU, capacity, incidents, technology completion, or cash directly.
+The simulation package may read public game state and invoke public commands, but must never mutate private engine state, DAU, capacity, incidents, technology completion, proficiency, or cash directly.
 
 ## 6. Command boundary
 
-Strategy-controlled operating actions are represented as a small explicit union, for example:
+Strategy-controlled operating actions are represented as a small explicit union:
 
 ```text
 NO_OP
@@ -162,7 +165,7 @@ RESPOND_TRAFFIC_SPIKE(RIDE | THROTTLE | BURST)
 
 Incident response and baseline learning are controllers outside the operating strategy interface.
 
-The executor maps actions only to real commands such as:
+The executor maps actions only to real commands:
 
 - `resizeInfrastructureNode()`
 - `scaleOutInfrastructureNode()`
@@ -190,7 +193,7 @@ Each simulated day permits:
 3. Perform at most **one normal operating investment action**.
 4. Advance the real game by one day.
 
-Incident response and viral response do not consume the normal investment slot.
+Incident response and viral response do not consume the normal investment slot. A technology build already in progress prevents starting another technology build through the real `TechnologyBuildSlot` rule; the harness must not bypass that restriction.
 
 ## 7. Observation model
 
@@ -216,6 +219,8 @@ Examples:
 
 `ORACLE` is the only exception: it may inspect full internal operational state from day one. It still may act only through real public commands.
 
+Observation adapters produce immutable strategy-facing data. Non-oracle strategies must not receive the live `GameEngine`, `DeveloperProfile`, `InfrastructureState`, raw `GameSnapshot.load`, or other objects that can reveal information above their ceiling.
+
 ## 8. RNG fairness and determinism
 
 ### Requirement
@@ -230,7 +235,7 @@ The current engine accepts one `RandomSource` used by both growth and incident g
 
 Preserve existing game behavior by default, but allow the simulation factory to inject an independent incident RNG channel.
 
-Recommended compatibility shape:
+Compatibility shape:
 
 ```text
 GameEngineConfig.random          // existing growth/main source
@@ -239,20 +244,20 @@ GameEngineConfig.incidentRandom  // optional new source
 
 Behavior:
 
-- Existing callers that supply only `random` keep the current shared-stream semantics.
-- Normal default construction may retain current behavior.
-- The balance harness supplies two seed-derived `SeededRandomSource` instances: one for growth and one for incidents.
+- Existing callers that provide only `random` keep current shared-stream behavior: incidents fall back to the same source.
+- Existing callers that provide no random sources keep current default behavior.
+- The balance harness explicitly supplies two seed-derived `SeededRandomSource` instances: one for growth and one for incidents.
 - `CommunityProgression` remains seeded from the scenario seed as it is today.
 
-Use stable, documented seed mixing constants so the same scenario always creates the same streams.
+The harness owns stable documented seed mixing constants, for example one fixed XOR constant per stream. The exact constants are implementation details once committed, but must remain stable after tests lock them.
 
-This separation guarantees that topology-dependent incident RNG consumption cannot change the organic growth/event stream. Incident outcomes may still legitimately diverge because different strategies create different topology, load, proficiency, and incident candidate states.
+This separation guarantees that topology-dependent incident RNG consumption cannot change the organic growth/event stream in balance runs. Incident outcomes may still legitimately diverge because strategies create different topology, load, proficiency, active incidents, and therefore incident candidate states.
 
-Strategies themselves must be deterministic and must never own a random source.
+Strategies themselves are deterministic and never own a random source.
 
 ## 9. Shared baseline learning
 
-Learning is deliberately **not** a strategy decision in this harness. Every strategy runs the same `BaselineLearningController` so operating-strategy results are not polluted by different education policies.
+Learning is deliberately **not** a strategy decision. Every strategy runs the same `BaselineLearningController` so operating-strategy results are not polluted by different education policies.
 
 Priority order:
 
@@ -268,25 +273,107 @@ Priority order:
 9. OS_RUNTIME        Lv.3 -> Lv.4
 ```
 
+This sequence unlocks the current technology prerequisite ladder needed for Redis/ALB/SQS, then RabbitMQ, then Kafka while also unlocking Metrics and APM.
+
 The controller starts a learning task only when the real experience-day and prerequisite requirements are satisfied. It calls `startLearning()` and pays the real learning cost.
 
-Framework, language, database-technology, and higher optional skill training are not automatically pursued in V1 beyond what the list above requires. This prevents a second optimization problem from entering the experiment.
+Framework, language, database-technology, and higher optional skill training are not automatically pursued in V1 beyond the list above. This prevents a second optimization problem from entering the experiment.
+
+The **policy** is identical across strategies; exact learning start dates may still diverge if a strategy's prior recurring costs or failures leave it unable to pay. That divergence is a causal consequence of its operating decisions, not a different learning policy.
 
 ### Protected learning reserve
 
-The next baseline learning task's real cost is protected from strategy-controlled immediate spending.
+The next unfinished baseline learning step's real cost is protected from strategy-controlled immediate spending.
 
 ```text
-spendableImmediateCash = cash - nextBaselineLearningCost
+protectedLearningReserve = nextBaselineLearningCost
 ```
 
-Technology builds and `BURST` are allowed only if their immediate cost leaves the protected reserve intact. Learning itself spends that reserve normally when eligible.
+If all baseline learning steps are complete, the protected reserve is `0`.
 
-Monthly infrastructure exposure is **not** protected by a common reserve rule. How aggressively a strategy accepts recurring cost is part of the strategy being measured.
+## 10. Strategy affordability and runway
 
-## 10. Strategy definitions
+To eliminate vague cash behavior, every discretionary strategy action uses the same affordability formula with a strategy-specific infrastructure-runway multiplier.
 
-### 10.1 `ORACLE`
+For a candidate action:
+
+```text
+cashAfterImmediateCost
+  = currentCash - candidateImmediateCost
+
+requiredCashFloor
+  = protectedLearningReserve
+  + runwayMultiplier × projectedMonthlyInfrastructureCost
+
+affordable
+  = cashAfterImmediateCost >= requiredCashFloor
+```
+
+`projectedMonthlyInfrastructureCost` means the infrastructure cost after the candidate takes effect. For a technology build, use the cost after deployment, including queue replacement semantics. For `BURST`, infrastructure cost is unchanged. This reserve intentionally does not include AI cost or projected revenue; those remain game outcomes rather than hidden simulation estimates.
+
+Runway multipliers:
+
+| Strategy | Multiplier | Intent |
+| --- | ---: | --- |
+| ORACLE | 1.00 | preserve roughly one month of infra runway |
+| APM_AWARE | 1.00 | disciplined operations |
+| METRICS_AWARE | 0.50 | moderate reserve |
+| REACTIVE_BASIC | 0.25 | mostly current-cash reactive |
+| YOLO_SCALE | 0.00 | spend aggressively; protect learning only |
+| CHEAPSKATE | 2.00 | preserve a large buffer |
+
+These multipliers are **simulation strategy parameters**, not game balance constants. The measurement-only rule prohibits changing core economy/capacity constants in this feature.
+
+Learning itself ignores the strategy runway multiplier and pays its actual cost whenever the baseline controller is eligible and the real cash balance can afford it.
+
+## 11. Oracle preview boundary
+
+`ORACLE` may compare immediate post-action load without mutating and rolling back the live game.
+
+Keep the existing `previewLoadWithTechnology()` behavior and add exactly the narrow read-only capabilities needed for capacity actions:
+
+```text
+previewLoadWithNodeResize(nodeId, size)
+previewLoadWithNodeScaleOut(nodeId)
+```
+
+Each method:
+
+1. clones `InfrastructureState`,
+2. applies the real infrastructure operation to the clone,
+3. runs the existing `GameEngine` load-calculation path with current features, proficiency, incidents, and traffic conditions,
+4. returns a `LoadSnapshot`,
+5. never changes live game state.
+
+The simulation can obtain projected monthly cost from an equivalently mutated `InfrastructureState.clone()` using the real `monthlyCost` calculation. It must not duplicate sizing or cost formulas.
+
+### Oracle local candidate selection
+
+`ORACLE` is still a heuristic, not look-ahead search.
+
+For the current exact bottleneck it first builds the bottleneck-specific candidate list from Section 12.1. It filters invalid/unaffordable actions, then previews each remaining candidate.
+
+For each candidate:
+
+```text
+currentMax = current maximum player-owned effective pressure
+previewMax = preview maximum player-owned effective pressure
+relief = max(0, currentMax - previewMax)
+oneMonthCost = immediateCost + max(0, projectedMonthlyCost - currentMonthlyCost)
+```
+
+Ranking:
+
+1. If one or more candidates reduce `previewMax` to `<= 0.85`, choose the candidate with the lowest `oneMonthCost`.
+2. Otherwise choose the highest `relief / max(1, oneMonthCost)`.
+3. Reject a candidate with `< 0.02` relief unless it is a required enabling action such as deploying ALB before APP scale-out.
+4. Exact ties use the fixed bottleneck-specific candidate order, then a stable action identifier.
+
+The technology preview represents the fully deployed technology's immediate load effect; the real build delay still applies after the strategy chooses `startTechnologyBuild()`. The oracle does not simulate future days to compensate for that delay.
+
+## 12. Strategy definitions
+
+### 12.1 `ORACLE`
 
 `ORACLE` is a strong full-information heuristic benchmark, not a mathematical optimum.
 
@@ -298,7 +385,7 @@ It sees:
 - current cash and cost exposure,
 - current feature/load state.
 
-Priority behavior:
+Bottleneck-specific candidate order:
 
 ```text
 DB I/O + read-heavy workload
@@ -311,17 +398,18 @@ DB CPU
   -> DB resize
 
 APP CPU
-  -> ALB when needed for horizontal scaling
-  -> APP scale-out when cost-effective
-  -> resize when the current size step is the better local action
+  -> ALB when needed to enable scale-out
+  -> APP scale-out
+  -> APP resize
 
 APP I/O + async/event-heavy workload
   -> queue technology
-  -> APP scale-out / resize
+  -> APP scale-out
+  -> APP resize
 
 QUEUE bottleneck
   -> queue resize
-  -> upgrade queue family only when sustained demand justifies it
+  -> next queue family only when the current family cannot provide sufficient local relief
 
 STORAGE bottleneck
   -> Object Storage if absent
@@ -331,11 +419,9 @@ ALB / Redis bottleneck
   -> resize that node
 ```
 
-The oracle may compare the immediate post-action load effect of candidate actions, but it does **not** run a multi-day search tree.
+The preview ranking in Section 11 chooses among valid candidates. There is no multi-day search tree.
 
-To support exact non-mutating comparison where needed, add a narrow read-only preview API rather than mutating and rolling back the live engine. The preview must use cloned infrastructure and the same load-calculation semantics as the live engine.
-
-### 10.2 `APM_AWARE`
+### 12.2 `APM_AWARE`
 
 Uses only the player-visible APM observation once unlocked.
 
@@ -350,9 +436,9 @@ ALB 130%, APP 74%, DB 50%
 -> react to APP only if it becomes the next real bottleneck
 ```
 
-It maintains a meaningful recurring-cost reserve and chooses the least expensive effective option among APM-supported remedies.
+Within remedies supported by the visible diagnosis, it chooses the valid affordable action with the lowest projected one-month infrastructure cost. It does **not** use oracle-only hidden load previews.
 
-### 10.3 `METRICS_AWARE`
+### 12.3 `METRICS_AWARE`
 
 Uses CPU / I/O / throughput / storage pressure but has no request-flow causal diagnosis.
 
@@ -361,14 +447,14 @@ Rules are resource-driven:
 ```text
 DB I/O      -> Redis / replica / DB resize
 DB CPU      -> replica / DB resize
-APP CPU     -> ALB + scale-out / resize
-APP I/O     -> queue / scale-out / resize
+APP CPU     -> ALB + scale-out / APP resize
+APP I/O     -> queue / scale-out / APP resize
 Storage     -> Object Storage / resize
 ```
 
-It acts on the highest visible resource pressure and can therefore misread masked downstream capacity compared with APM.
+It acts on the highest visible resource pressure. Within the rule's ordered choices it takes the first valid affordable action. It can therefore misread masked downstream capacity compared with APM.
 
-### 10.4 `REACTIVE_BASIC`
+### 12.4 `REACTIVE_BASIC`
 
 Uses only aggregate node load and health.
 
@@ -386,11 +472,11 @@ DB cannot resize further
 -> add read replica
 ```
 
-It does not intelligently choose Redis or queues as bottleneck remedies because the resource/workload signal needed for those decisions is hidden.
+It does not intelligently choose Redis or queues as bottleneck remedies because the resource/workload signal needed for those decisions is hidden. If the preferred action is invalid or unaffordable, it performs no normal investment that day rather than inspecting hidden alternatives.
 
-### 10.5 `YOLO_SCALE`
+### 12.5 `YOLO_SCALE`
 
-Represents the naive "money exists, scale first" behavior the balance harness is specifically intended to test.
+Represents the naive "money exists, scale first" behavior the harness is specifically intended to test.
 
 Behavior:
 
@@ -398,21 +484,21 @@ Behavior:
 node load >= 70%
 -> resize one step
 
-APP reaches medium pressure and cash is available
--> deploy ALB
--> add APP instances
+APP at/above 70% and horizontal capacity is available or can be enabled
+-> deploy ALB if needed
+-> add APP instances before specialized technology
 
-DB reaches medium pressure and cash is available
--> add replicas
+DB at/above 70%
+-> add replicas before specialized technology
 
-raw capacity before specialized technology
+raw capacity before Redis / queue remedies
 ```
 
-It invests before failure, considers recurring-cost runway weakly, and chooses `BURST` for viral spikes whenever immediate protected-cash rules allow it.
+It invests before failure, uses a `0.00` runway multiplier, and chooses `BURST` for viral spikes whenever the shared affordability rule permits it.
 
 If this strategy is consistently faster, cheaper, and safer than APM-aware play, the current economy/choice structure is a balance red flag.
 
-### 10.6 `CHEAPSKATE`
+### 12.6 `CHEAPSKATE`
 
 Represents delayed spending.
 
@@ -426,15 +512,15 @@ effective load <= hard limit
 -> avoid investment
 
 actual capacity failure
--> choose the cheapest plausible corrective action
+-> choose the cheapest valid plausible corrective action visible at BASIC level
 
-cash runway threatened
--> delay optional spending
+cash buffer would fall below 2 months of projected infra cost
+-> delay the action
 ```
 
-For viral events it normally rides while healthy and chooses `THROTTLE` when overload risk is visible. It almost never pays for `BURST`.
+For viral events it chooses `RIDE` while BASIC health is not degraded by overload/failure and `THROTTLE` when overload/failure is visible. It does not choose `BURST` in V1.
 
-## 11. Incident and viral policies
+## 13. Incident and viral policies
 
 ### Incident response
 
@@ -448,14 +534,16 @@ Default tendencies:
 
 | Strategy | Viral behavior |
 | --- | --- |
-| ORACLE | choose from pressure + cash + expected capacity effect |
-| APM_AWARE | use diagnosed bottleneck and cash reserve |
-| METRICS_AWARE | respond when resource overload is visible |
-| REACTIVE_BASIC | respond only when aggregate health/load looks dangerous |
-| YOLO_SCALE | prefer BURST when affordable |
-| CHEAPSKATE | prefer RIDE when healthy, THROTTLE when risky |
+| ORACLE | compare current exact pressure; use BURST only when it materially lowers overload and is affordable, THROTTLE when BURST is not justified, otherwise RIDE |
+| APM_AWARE | use visible diagnosis and reserve; BURST for clearly dangerous diagnosed overload when affordable, otherwise THROTTLE; RIDE while healthy |
+| METRICS_AWARE | BURST when visible resource pressure would exceed hard limit and affordable; otherwise THROTTLE; RIDE when resource headroom remains |
+| REACTIVE_BASIC | THROTTLE when aggregate health/load is already degraded; otherwise RIDE |
+| YOLO_SCALE | BURST whenever affordable; otherwise RIDE |
+| CHEAPSKATE | RIDE while healthy; THROTTLE when overload/failure is visible; never BURST |
 
-## 12. Capacity-action accounting
+A pending viral response is made once, using the real `GrowthEvent` one-response rule.
+
+## 14. Capacity-action accounting
 
 ### `prematureCapacityActions`
 
@@ -470,15 +558,15 @@ Technology builds are not counted by this metric.
 
 ### `lowUtilizationExpandedNodeDays`
 
-After a node has received a capacity expansion, count each later simulated node-day where:
+After a node has received at least one capacity expansion, count each later simulated node-day where:
 
 ```text
 target node effective ratio < 0.50
 ```
 
-Count node-days rather than multiplying the same day by the number of historical expansion actions. This distinguishes short-lived pre-provisioning from capacity that stays materially underused for long periods.
+Count a node at most once per simulated day regardless of how many historical expansions it received. This distinguishes short-lived pre-provisioning from capacity that stays materially underused for long periods.
 
-## 13. Run metrics
+## 15. Run metrics
 
 Each run records at least:
 
@@ -528,13 +616,14 @@ Definitions:
 - `failureDays`: days with `failureRate > 0`.
 - `severeFailureDays`: days with `failureRate >= 0.10`.
 - `cumulativeFailureBurden`: sum of daily `failureRate`; interpretable as failure-equivalent days.
-- `overloadDays`: days where any player-owned primary effective pressure exceeds `1.0`.
+- `overloadDays`: days where any player-owned effective resource pressure exceeds `1.0`.
+- `incidentCount`: count each unique incident ID the first day it appears.
 - `settledInfrastructureSpend`: sum of infrastructure charges from actual monthly settlements.
-- `infrastructureCostExposure`: sum of `currentMonthlyInfrastructureCost / 30` per simulated day, so partial final months and early over-provisioning remain visible analytically.
+- `infrastructureCostExposure`: sum of `currentMonthlyInfrastructureCost / 30` once per simulated day, so partial final months and early over-provisioning remain visible analytically.
 
-`minimumCash` is observed after every action and day transition so immediate build/burst spending is included.
+`minimumCash` is observed after incident/viral/investment/learning actions and after every day transition so immediate build/burst/learning spending is included.
 
-## 14. Reporting
+## 16. Reporting
 
 Generated artifacts are analysis output, not source-of-truth game data.
 
@@ -544,7 +633,7 @@ artifacts/balance/
   summary.json
 ```
 
-Generated artifacts should not be committed by default.
+Generated artifacts should be ignored by git and not committed by default.
 
 ### `runs.csv`
 
@@ -568,6 +657,8 @@ For numeric metrics include at least:
 - P25,
 - P75.
 
+Use deterministic nearest-rank quantiles on sorted values so repeated reports do not depend on a statistics library's interpolation default.
+
 For terminal status include counts and rates.
 
 ### Paired comparisons
@@ -575,13 +666,13 @@ For terminal status include counts and rates.
 Same-seed comparisons are first-class output. For each framework/database/seed group, compare strategy pairs on:
 
 - terminal outcome,
-- days to win where comparable,
+- days to win where both won,
 - infrastructure cost exposure,
 - cumulative failure burden,
 - premature capacity actions,
 - low-utilization expanded-node days.
 
-Primary comparisons should include:
+Primary comparisons:
 
 ```text
 APM_AWARE vs YOLO_SCALE
@@ -591,7 +682,9 @@ ORACLE vs APM_AWARE
 CHEAPSKATE vs APM_AWARE
 ```
 
-## 15. CLI
+For a paired numeric delta, define `left - right` and encode that direction in the report key/metadata. Do not silently flip signs per metric.
+
+## 17. CLI
 
 Add a dedicated command:
 
@@ -610,13 +703,13 @@ npm run balance -- --strategy APM_AWARE
 npm run balance -- --seed 17 --framework SPRING_BOOT --db POSTGRESQL --strategy APM_AWARE --trace
 ```
 
-`--trace` prints or writes a day/action decision trace for the selected narrow run. It is not enabled for the full matrix by default.
+`--trace` is valid only when filters select exactly one run. It emits a deterministic decision log containing day, visible observation summary, controller actions, strategy action, reason code, and resulting high-level state. It must not expose hidden oracle-only data for non-oracle strategies.
 
 No external CSV/reporting dependency is required unless implementation proves the standard library approach materially inadequate.
 
-## 16. Balance interpretation
+## 18. Balance interpretation
 
-The harness does not hard-code one numeric score. It reports several directional signals.
+The harness does not hard-code one numeric score. It reports directional signals.
 
 ### Healthy signals
 
@@ -626,7 +719,7 @@ Expected broad ordering:
 ORACLE ≳ APM_AWARE ≳ METRICS_AWARE > REACTIVE_BASIC
 ```
 
-This is a tendency, not a per-seed law.
+This is a tendency across distributions, not a per-seed law.
 
 Additional healthy behavior:
 
@@ -644,35 +737,41 @@ Additional healthy behavior:
 5. One or two ordinary mistakes cause widespread bankruptcy, implying difficulty is too hardcore.
 6. Nearly every strategy wins comfortably with growing cash, preserving the "money exists, click everything" problem.
 
-These findings become input to a separate balance-tuning design. This harness must not change constants in response.
+These findings become input to a separate balance-tuning design. This harness must not change constants or generate tuning recommendations in response.
 
-## 17. Failure behavior and integrity
+## 19. Failure behavior and integrity
 
 The harness must fail loudly rather than silently produce misleading balance data.
 
 - An invalid strategy action is a simulation error, not a skipped action.
 - Unsupported CLI values return a non-zero exit status with the invalid argument identified.
 - A strategy seeing data above its declared observation ceiling is a test failure.
-- A run that throws includes framework, database, seed, strategy, and day in the error context.
-- Full-report files are written only after all requested runs complete successfully, or via a safe temporary-file/rename pattern.
+- A run that throws includes framework, database, seed, strategy, and simulated day in the error context.
+- Full-report files are published only after all requested runs complete successfully, using temporary files followed by rename so a failed batch does not look complete.
 
-## 18. Testing strategy
+## 20. Testing strategy
 
 The full 2,700-game batch is **not** part of normal CI. Normal CI verifies deterministic building blocks with a small scenario set.
-
-Required tests:
 
 ### Scenario / determinism
 
 - same scenario + same strategy produces identical result,
 - scenario matrix cardinality is 2,700,
 - seed list and supported stack IDs are stable,
-- full simulation never exceeds 1,080 `advanceDay()` calls.
+- full simulation never exceeds 1,080 `advanceDay()` calls,
+- same framework/database/seed keeps the same seeded feature permutation even when strategy outcomes diverge.
 
 ### RNG isolation
 
 - when an independent incident RNG is supplied, incident candidate draw count cannot perturb the growth RNG sequence,
-- existing callers that provide only the legacy `random` source preserve shared-stream behavior.
+- existing callers that provide only the legacy `random` source preserve shared-stream behavior,
+- strategies never consume game random sources.
+
+### Preview purity
+
+- node-resize preview leaves live infrastructure, cash, load, incidents, and day unchanged,
+- node-scale-out preview leaves live state unchanged,
+- preview load matches the load obtained by performing the equivalent operation on an otherwise identical throwaway engine/state fixture.
 
 ### Observation boundaries
 
@@ -684,15 +783,26 @@ Required tests:
 
 ### Learning baseline
 
-- priorities execute in order when experience/prerequisites permit,
+- priorities execute in the documented order when experience/prerequisites permit,
 - no forced proficiency mutation occurs,
-- protected learning reserve blocks strategy-controlled immediate spending but not the learning task itself.
+- protected learning reserve is computed from the next unfinished baseline step,
+- identical policy is applied to every strategy,
+- inability to pay delays learning rather than cheating the level up.
+
+### Affordability
+
+- each strategy uses the documented runway multiplier,
+- technology build projected cost includes the eventual deployed recurring cost,
+- queue replacement uses replacement cost rather than double-counting both queues,
+- `BURST` uses current infrastructure cost because it adds no recurring node,
+- learning payment is not blocked by strategy runway multiplier.
 
 ### Strategy behavior
 
-Use focused fixtures to lock representative choices, for example:
+Use focused fixtures to lock representative choices:
 
-- ORACLE chooses Redis before DB size-up for a read-heavy DB I/O bottleneck when affordable,
+- ORACLE chooses Redis before DB size-up for a read-heavy DB I/O bottleneck when the preview ranking supports it,
+- ORACLE tie-breaks deterministically,
 - METRICS responds to visible DB I/O without hidden request-flow information,
 - REACTIVE_BASIC prefers resize because resource diagnosis is hidden,
 - YOLO_SCALE expands at the 70% policy threshold,
@@ -709,32 +819,37 @@ Use focused fixtures to lock representative choices, for example:
 ### Metrics / reporting
 
 - premature-capacity threshold is `< 0.70` and ignores active viral spikes,
-- low-utilization expanded-node threshold is `< 0.50`, counted as node-days,
+- low-utilization expanded-node threshold is `< 0.50`, counted once per expanded node per day,
 - cumulative failure burden sums daily failure rate,
+- incident count de-duplicates by incident ID,
 - partial-month infrastructure exposure is included,
-- aggregate mean/median/P25/P75 are correct,
+- aggregate mean/median/nearest-rank P25/P75 are correct,
 - paired comparisons match framework/database/seed before comparing strategies,
-- filtered CLI runs produce the expected row count.
+- paired delta direction is stable,
+- filtered CLI runs produce the expected row count,
+- `--trace` rejects filters that select more than one run.
 
 ### Manual/full validation
 
 Before considering the implementation complete, run the full 2,700-game matrix once outside the regular CI suite and inspect:
 
-- total row count,
+- exactly 2,700 run rows,
 - no invalid/aborted runs,
 - reproducibility of at least one rerun,
 - summary grouping completeness,
 - representative `--trace` output for ORACLE, APM, YOLO, and CHEAPSKATE.
 
-## 19. Implementation invariants
+## 21. Implementation invariants
 
 1. The live game remains the source of truth; the harness never reimplements game rules.
 2. No game balance constants change in this feature.
 3. Strategies use deterministic rules only.
 4. Observation limits are enforced structurally.
 5. Same-seed organic growth randomness is isolated from topology-dependent incident RNG consumption in balance runs.
-6. Feature progression remains the real `CommunityProgression`; strategies do not choose feature order.
-7. Learning follows one shared baseline for all strategies.
-8. One normal operating investment per day.
-9. `ORACLE` means full-information heuristic benchmark, not proven optimum.
-10. Full-matrix output is evidence for a later tuning task, not an automatic tuning mechanism.
+6. Default/legacy random behavior outside the harness remains compatible.
+7. Feature progression remains the real `CommunityProgression`; strategies do not choose feature order.
+8. Learning follows one shared policy for all strategies.
+9. One normal operating investment per day.
+10. `ORACLE` means full-information heuristic benchmark, not proven optimum.
+11. Oracle previews are pure and read-only.
+12. Full-matrix output is evidence for a later tuning task, not an automatic tuning mechanism.
