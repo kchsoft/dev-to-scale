@@ -19,6 +19,34 @@ const VIEW_KIND: Readonly<Record<InfrastructureNodeKind, TopologyNodeView['kind'
   EXTERNAL_SERVICE: 'external-service',
 };
 
+export interface OperationalPressureChange {
+  readonly pressure: OperationalPressure;
+  readonly beforeRatio: number;
+  readonly afterRatio: number;
+  readonly delta: number;
+}
+
+function pressureKey(pressure: Pick<OperationalPressure, 'nodeId' | 'resourceKind'>): string {
+  return `${pressure.nodeId}::${pressure.resourceKind}`;
+}
+
+export function operationalPressureChanges(
+  before: readonly OperationalPressure[],
+  after: readonly OperationalPressure[],
+): readonly OperationalPressureChange[] {
+  const beforeByKey = new Map(before.map((pressure) => [pressureKey(pressure), pressure] as const));
+  const changes = after.map((pressure) => {
+    const beforeRatio = beforeByKey.get(pressureKey(pressure))?.ratio ?? 0;
+    return Object.freeze({
+      pressure,
+      beforeRatio,
+      afterRatio: pressure.ratio,
+      delta: pressure.ratio - beforeRatio,
+    });
+  });
+  return Object.freeze(changes);
+}
+
 export function resourceLabel(kind: NodeResourceKind): string {
   return kind === 'IO' ? 'I/O' : kind;
 }
