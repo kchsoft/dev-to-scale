@@ -8,6 +8,17 @@ class ConstantRandom implements RandomSource {
   next(): number { return 0.99; }
 }
 
+class GrowthRandom implements RandomSource {
+  private index = 0;
+  private readonly values = [0.99, 0.99, 0] as const;
+
+  next(): number {
+    const value = this.values[this.index % this.values.length];
+    this.index += 1;
+    return value;
+  }
+}
+
 function launchedGame(): GameEngine {
   const game = new GameEngine({
     frameworkId: 'SPRING_BOOT',
@@ -19,6 +30,23 @@ function launchedGame(): GameEngine {
   for (let day = 0; day < 30 && !game.launched; day += 1) game.advanceDay();
   if (!game.launched) throw new Error('Expected launched game');
   return game;
+}
+
+function gameWithMissingRequiredQueue(): GameEngine {
+  const game = new GameEngine({
+    frameworkId: 'SPRING_BOOT',
+    databaseId: 'POSTGRESQL',
+    seed: 2,
+    random: new GrowthRandom(),
+    incidentRandom: new ConstantRandom(),
+    startingCash: 100_000_000,
+  });
+  const queueRequiredFeatures = new Set(['NOTIFICATION', 'AI_RECOMMENDATION', 'FOLLOW_FEED']);
+  for (let day = 0; day < 600; day += 1) {
+    game.advanceDay();
+    if (game.snapshot.completedFeatures.some((id) => queueRequiredFeatures.has(id))) return game;
+  }
+  throw new Error('Expected a queue-required feature to complete');
 }
 
 function unlockApm(game: GameEngine): void {
@@ -56,6 +84,24 @@ describe('balance observation boundaries', () => {
       id: 'REDIS', deployed: false, available: true, buildCost: 300_000, monthlyCost: 100_000,
     });
     expect('developer' in observation).toBe(false);
+  });
+
+  it('exposes a missing required EVENT_BUS dependency and clears it after SQS is deployed', () => {
+    const game = gameWithMissingRequiredQueue();
+
+    const missing = observeForStrategy(game, 'BASIC');
+    expect(missing.requiredDependencyGaps).toEqual([
+      {
+        role: 'EVENT_BUS',
+        workloadIds: expect.arrayContaining(['AI_RECOMMENDATION']),
+        candidateTechnologyIds: ['SQS', 'RABBITMQ', 'KAFKA'],
+      },
+    ]);
+
+    game.infrastructure.deployTechnology('SQS');
+    game.advanceDay();
+
+    expect(observeForStrategy(game, 'BASIC').requiredDependencyGaps).toEqual([]);
   });
 
   it('does not grant METRICS before the real skill unlock', () => {
