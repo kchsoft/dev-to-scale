@@ -12,6 +12,10 @@ export interface BalanceRunResult {
   terminalStatus: BalanceTerminalStatus;
   daysPlayed: number;
   finalDau: number;
+  peakDau: number;
+  completedFeatureCount: number;
+  missingRequiredDependencyDays: number;
+  peakMonthlyRevenue: number;
   endingCash: number;
   minimumCash: number;
   failureDays: number;
@@ -36,6 +40,10 @@ export interface BalanceRunResult {
 
 export class SimulationMetricsCollector {
   minimumCash: number;
+  peakDau = 0;
+  completedFeatureCount = 0;
+  missingRequiredDependencyDays = 0;
+  peakMonthlyRevenue = 0;
   failureDays = 0;
   severeFailureDays = 0;
   cumulativeFailureBurden = 0;
@@ -64,6 +72,20 @@ export class SimulationMetricsCollector {
 
   recordCash(cash: number): void {
     this.minimumCash = Math.min(this.minimumCash, cash);
+  }
+
+  recordProgressionDay(input: {
+    dau: number;
+    completedFeatureCount: number;
+    missingRequiredDependency: boolean;
+  }): void {
+    this.peakDau = Math.max(this.peakDau, input.dau);
+    this.completedFeatureCount = Math.max(this.completedFeatureCount, input.completedFeatureCount);
+    if (input.missingRequiredDependency) this.missingRequiredDependencyDays += 1;
+  }
+
+  recordMonthlyRevenue(revenue: number): void {
+    this.peakMonthlyRevenue = Math.max(this.peakMonthlyRevenue, revenue);
   }
 
   recordOperationalDay(input: {
@@ -146,6 +168,10 @@ export class SimulationMetricsCollector {
   }): BalanceRunResult {
     return {
       ...input,
+      peakDau: this.peakDau,
+      completedFeatureCount: this.completedFeatureCount,
+      missingRequiredDependencyDays: this.missingRequiredDependencyDays,
+      peakMonthlyRevenue: this.peakMonthlyRevenue,
       minimumCash: this.minimumCash,
       failureDays: this.failureDays,
       severeFailureDays: this.severeFailureDays,
