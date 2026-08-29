@@ -10,6 +10,7 @@ import type {
   MetricsBalanceObservation,
   OracleBalanceObservation,
   OracleExactPressure,
+  RequiredDependencyGapObservation,
 } from '../balance-observation';
 import { BALANCE_STRATEGIES } from '../strategy-registry';
 
@@ -21,6 +22,12 @@ const TECHNOLOGIES: readonly BalanceTechnologyOption[] = Object.freeze([
   { id: 'ALB', buildCost: 150_000, monthlyCost: 100_000, deployed: false, available: true },
   { id: 'OBJECT_STORAGE', buildCost: 200_000, monthlyCost: 80_000, deployed: false, available: true },
 ]);
+
+const EVENT_BUS_GAP: RequiredDependencyGapObservation = Object.freeze({
+  role: 'EVENT_BUS',
+  workloadIds: Object.freeze(['AI_RECOMMENDATION']),
+  candidateTechnologyIds: Object.freeze(['SQS', 'RABBITMQ', 'KAFKA']),
+});
 
 function node(overrides: Partial<BalanceNodeObservation> & Pick<BalanceNodeObservation, 'nodeId' | 'kind' | 'productId'>): BalanceNodeObservation {
   return Object.freeze({
@@ -45,6 +52,7 @@ function common(level: 'BASIC' | 'METRICS' | 'APM' | 'ORACLE', nodes: readonly B
     cash: 10_000_000,
     monthlyInfrastructureCost: nodes.reduce((sum, candidate) => sum + candidate.monthlyCost, 0),
     failureRate: 0,
+    requiredDependencyGaps: Object.freeze([]),
     serviceHealth: 'HEALTHY' as const,
     growthEvent: null,
     currentTechnologyBuildId: null,
@@ -90,6 +98,42 @@ function load(nodeId: string, nodeKind: 'DATABASE' | 'SERVER_GROUP', resourceKin
 const context = Object.freeze({ protectedLearningReserve: 0 });
 
 describe('deterministic balance strategies', () => {
+  it('all strategies repair an affordable required EVENT_BUS gap before ordinary capacity scaling', () => {
+    const app = node({
+      nodeId: 'app', kind: 'SERVER_GROUP', productId: 'SPRING_BOOT', aggregatePercent: 150, effectivePercent: 150,
+    });
+    const observation = Object.freeze({
+      ...basic([app]),
+      requiredDependencyGaps: Object.freeze([EVENT_BUS_GAP]),
+    });
+
+    for (const strategy of Object.values(BALANCE_STRATEGIES)) {
+      expect(strategy.decide(observation, context), strategy.id).toMatchObject({
+        type: 'START_TECHNOLOGY_BUILD', technologyId: 'SQS',
+      });
+    }
+  });
+
+  it('all strategies wait when a required dependency gap has no available affordable remedy', () => {
+    const app = node({
+      nodeId: 'app', kind: 'SERVER_GROUP', productId: 'SPRING_BOOT', aggregatePercent: 150, effectivePercent: 150,
+    });
+    const lockedQueues = TECHNOLOGIES.map((technology) => (
+      EVENT_BUS_GAP.candidateTechnologyIds.includes(technology.id)
+        ? { ...technology, available: false }
+        : technology
+    ));
+    const observation = Object.freeze({
+      ...basic([app]),
+      requiredDependencyGaps: Object.freeze([EVENT_BUS_GAP]),
+      technologyOptions: Object.freeze(lockedQueues),
+    });
+
+    for (const strategy of Object.values(BALANCE_STRATEGIES)) {
+      expect(strategy.decide(observation, context), strategy.id).toMatchObject({ type: 'NO_OP' });
+    }
+  });
+
   it('ORACLE chooses Redis for affordable read-heavy DB IO when local preview clears the target', () => {
     const db = node({
       nodeId: 'db', kind: 'DATABASE', productId: 'POSTGRESQL', aggregatePercent: 120, effectivePercent: 120,
