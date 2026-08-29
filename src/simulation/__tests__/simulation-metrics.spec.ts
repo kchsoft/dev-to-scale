@@ -43,6 +43,22 @@ describe('simulation metrics', () => {
     expect(metrics.infrastructureCostExposure).toBe(10_000);
   });
 
+  it('tracks peak progression, missing required dependency days, and peak monthly revenue', () => {
+    const metrics = new SimulationMetricsCollector(1_000_000);
+
+    metrics.recordProgressionDay({ dau: 100, completedFeatureCount: 1, missingRequiredDependency: false });
+    metrics.recordProgressionDay({ dau: 350, completedFeatureCount: 3, missingRequiredDependency: true });
+    metrics.recordProgressionDay({ dau: 300, completedFeatureCount: 2, missingRequiredDependency: true });
+    metrics.recordMonthlyRevenue(1_000_000);
+    metrics.recordMonthlyRevenue(900_000);
+    metrics.recordMonthlyRevenue(1_800_000);
+
+    expect(metrics.peakDau).toBe(350);
+    expect(metrics.completedFeatureCount).toBe(3);
+    expect(metrics.missingRequiredDependencyDays).toBe(2);
+    expect(metrics.peakMonthlyRevenue).toBe(1_800_000);
+  });
+
   it('deduplicates incident ids and monthly settlements while tracking minimum cash', () => {
     const metrics = new SimulationMetricsCollector(1_000_000);
 
