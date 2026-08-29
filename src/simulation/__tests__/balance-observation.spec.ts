@@ -42,6 +42,22 @@ describe('balance observation boundaries', () => {
     expect('developer' in observation).toBe(false);
   });
 
+  it('copies player-visible technology availability without leaking the developer profile', () => {
+    const game = launchedGame();
+    let observation = observeForStrategy(game, 'BASIC');
+    const lockedRedis = observation.technologyOptions.find(({ id }) => id === 'REDIS');
+    expect(lockedRedis).toMatchObject({ id: 'REDIS', deployed: false, available: false });
+
+    game.developer.get(skillRef.fundamental('DATABASE')).setLevel(2);
+    game.developer.get(skillRef.fundamental('NETWORK')).setLevel(2);
+    observation = observeForStrategy(game, 'BASIC');
+    const availableRedis = observation.technologyOptions.find(({ id }) => id === 'REDIS');
+    expect(availableRedis).toMatchObject({
+      id: 'REDIS', deployed: false, available: true, buildCost: 300_000, monthlyCost: 100_000,
+    });
+    expect('developer' in observation).toBe(false);
+  });
+
   it('does not grant METRICS before the real skill unlock', () => {
     const observation = observeForStrategy(launchedGame(), 'METRICS');
 
