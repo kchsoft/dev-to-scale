@@ -209,10 +209,15 @@ export function resourceRemedyCandidates(
     ];
   }
   if (node.kind === 'SERVER_GROUP' && resourceKind === 'IO') {
+    const resize = resizeAction(node, reason);
+    const alb = resize || observation.deployedTechnologies.includes('ALB')
+      ? null
+      : technologyAction(observation, 'ALB', `${reason}; enable ALB for scale-out`);
     return [
       observation.deployedTechnologies.some((id) => isQueueTechnology(id)) ? null : technologyAction(observation, 'SQS', reason),
+      alb,
       scaleOutAction(node, reason),
-      resizeAction(node, reason),
+      resize,
     ];
   }
   if (node.kind === 'OBJECT_STORAGE') {
