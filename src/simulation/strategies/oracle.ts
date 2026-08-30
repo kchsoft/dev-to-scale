@@ -1,7 +1,7 @@
 import { simulationActionId, type SimulationAction } from '../balance-action';
 import type { OracleBalanceObservation } from '../balance-observation';
 import type { BalanceStrategy, StrategyDecisionContext } from '../balance-strategy';
-import { decideOracleReleaseReadiness } from '../release-readiness';
+import { decideOraclePostReleaseStability, decideOracleReleaseReadiness } from '../release-readiness';
 import {
   affordable,
   hottestEffectiveNode,
@@ -95,6 +95,8 @@ export const oracleStrategy: BalanceStrategy = {
   ceiling: 'ORACLE',
   decide(observation, context) {
     if (observation.level !== 'ORACLE') return noOp('ORACLE observation unavailable');
+    const stability = decideOraclePostReleaseStability(observation, context);
+    if (stability) return stability;
     const readiness = decideOracleReleaseReadiness(observation, context);
     if (readiness) return readiness;
     return decideOracle(observation, context);
