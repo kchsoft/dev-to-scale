@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { BalanceScenario } from '../balance-scenario';
+import { SimulationMetricsCollector } from '../simulation-metrics';
 import { BALANCE_DAY_LIMIT, runBalanceScenario } from '../simulation-runner';
 
 const scenario: BalanceScenario = {
@@ -30,5 +31,20 @@ describe('balance simulation runner', () => {
       lastSettlementMonth: null,
       lastSettlementRevenue: null,
     }));
+  });
+
+  it('opens one seven-day metrics window for every completed community feature', () => {
+    const beginReleaseWindow = vi.spyOn(
+      SimulationMetricsCollector.prototype,
+      'beginFeatureReleaseWindow',
+    );
+
+    try {
+      const result = runBalanceScenario(scenario);
+      expect(result.completedFeatureCount).toBeGreaterThan(0);
+      expect(beginReleaseWindow).toHaveBeenCalledTimes(result.completedFeatureCount);
+    } finally {
+      beginReleaseWindow.mockRestore();
+    }
   });
 });
