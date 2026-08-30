@@ -240,7 +240,24 @@ describe('release readiness actions', () => {
     )).toBeNull();
   });
 
-  it('stabilizes live DB IO at 70 percent during an active post-release window', () => {
+  it('stabilizes live DB IO once the rounded METRICS signal reaches 71 percent during an active post-release window', () => {
+    const decideMetricsPostReleaseStability = (releaseReadiness as ReleaseReadinessPolicyModule)
+      .decideMetricsPostReleaseStability;
+    expect(typeof decideMetricsPostReleaseStability).toBe('function');
+    if (!decideMetricsPostReleaseStability) return;
+
+    expect(decideMetricsPostReleaseStability(
+      metricsObservation(40, 71),
+      { protectedLearningReserve: 0, postReleaseStabilityWindowActive: true },
+      'METRICS_AWARE',
+    )).toMatchObject({
+      type: 'START_TECHNOLOGY_BUILD',
+      technologyId: 'REDIS',
+      intent: 'POST_RELEASE_STABILITY_CAPACITY',
+    });
+  });
+
+  it('does not act on a rounded METRICS signal of 70 because it may still represent raw pressure below the boundary', () => {
     const decideMetricsPostReleaseStability = (releaseReadiness as ReleaseReadinessPolicyModule)
       .decideMetricsPostReleaseStability;
     expect(typeof decideMetricsPostReleaseStability).toBe('function');
@@ -250,11 +267,7 @@ describe('release readiness actions', () => {
       metricsObservation(40, 70),
       { protectedLearningReserve: 0, postReleaseStabilityWindowActive: true },
       'METRICS_AWARE',
-    )).toMatchObject({
-      type: 'START_TECHNOLOGY_BUILD',
-      technologyId: 'REDIS',
-      intent: 'POST_RELEASE_STABILITY_CAPACITY',
-    });
+    )).toBeNull();
   });
 
   it('does not use the live 70 percent watch outside the release window or below its boundary', () => {
