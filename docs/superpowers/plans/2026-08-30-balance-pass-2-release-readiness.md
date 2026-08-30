@@ -4,7 +4,7 @@
 
 **Goal:** Make informed strategies prevent pending-feature dependency and capacity failures before release, then prove the behavior with deterministic prevention metrics and the balance matrix.
 
-**Architecture:** Extend the existing balance-observation projector with a pending-feature contract and level-specific read-only release previews. Reuse the existing engine load calculator, add exact combined feature+action previews for ORACLE, tag preventative simulation actions explicitly, and record seven-day post-release health metrics in the runner. Strategy code remains isolated by observability ceiling and all actions still execute through the existing public engine commands.
+**Architecture:** Extend `balance-observation` with pending-feature metadata and level-specific read-only release previews. Reuse `GameEngine`'s live load calculator and add exact combined pending-feature + infrastructure-action previews for ORACLE. Tag preventative simulation actions explicitly and measure seven-day post-release health in the existing runner.
 
 **Tech Stack:** TypeScript, Vitest, deterministic balance runner, GitHub Actions one-off evidence workflows.
 
@@ -12,33 +12,27 @@
 
 ## Global Constraints
 
-- Keep Balance Pass 1 constants fixed: final progression `3_000_000`, phase-3 positive probability `0.58`, exit target `143_000_000`, ALB XLARGE throughput `1_800`.
-- Do not change the 1,080-day horizon, starting cash, workloads, revenue modifiers, incident/viral probabilities, infrastructure prices, framework/database modifiers, build costs/durations, learning costs/order, or automatic feature-release timing.
-- Preserve post-release REQUIRED-dependency recovery for all strategies as a correctness fallback.
-- BASIC must never receive projected resource loads; METRICS must never receive APM diagnosis or ORACLE exact internals; APM must never receive ORACLE exact demand/capacity internals.
-- All preview APIs are read-only, consume no RNG, and use the same load-calculation path as live state.
-- Use TDD: every behavior task starts RED, production changes follow only after the intended failure is observed.
-- Normal PR CI remains fast; 450-run pilot and 2,700-run matrix are temporary one-off workflows and are removed after evidence is captured.
+- Freeze Balance Pass 1 constants: progression final `3_000_000`, phase-3 probability `0.58`, exit target `143_000_000`, ALB XLARGE throughput `1_800`.
+- Do not change the 1,080-day horizon, starting cash, feature workloads/revenue, incident or viral probabilities, prices, framework/database modifiers, build costs/durations, learning rules/order, or automatic release timing.
+- Keep post-release REQUIRED dependency recovery for all strategies.
+- BASIC gets no projected resource load; METRICS gets no diagnosis/exact internals; APM gets no exact internals.
+- Preview paths must be read-only, consume no RNG, and use the same load calculator as live state.
+- Every behavior slice starts with a failing test and is committed only after the focused test is green.
+- The 450-run pilot and 2,700-run full matrix remain temporary workflows outside normal PR CI.
 
-## File Structure
+## File Responsibilities
 
-- `src/core/game-engine.ts` — exact read-only pending-feature + infrastructure-action preview methods.
-- `src/core/__tests__/game-engine.spec.ts` — combined-preview correctness and non-mutation/RNG regression tests.
-- `src/simulation/balance-action.ts` — explicit release-readiness action intent metadata.
-- `src/simulation/balance-observation.ts` — pending feature, upcoming dependency gaps, level-specific projected release views, ORACLE release-action port.
-- `src/simulation/__tests__/balance-observation.spec.ts` — observation-boundary and preview contract tests.
-- `src/simulation/release-readiness.ts` — shared preventative dependency selection and intent tagging; no strategy-specific capacity ranking.
-- `src/simulation/__tests__/release-readiness.spec.ts` — shared dependency readiness tests.
-- `src/simulation/simulation-metrics.ts` — preventative-action and seven-day post-release metrics.
-- `src/simulation/simulation-runner.ts` — release-window detection and successful preventative-action recording.
-- `src/simulation/__tests__/simulation-metrics.spec.ts` — metric unit tests.
-- `src/simulation/__tests__/simulation-runner.spec.ts` — runner integration / trace identity tests.
-- `src/simulation/strategies/metrics-aware.ts` — projected resource readiness.
-- `src/simulation/strategies/apm-aware.ts` — projected diagnosis readiness.
-- `src/simulation/strategies/oracle.ts` — exact combined-preview readiness ranking.
-- `src/simulation/__tests__/strategies.spec.ts` — strategy-level preventative behavior contracts.
-- `.github/workflows/balance-pass-2-pilot.yml` — temporary 450-run evidence.
-- `.github/workflows/balance-pass-2-full.yml` — temporary final 2,700-run evidence, created only after pilot acceptance.
+- `src/core/game-engine.ts`: exact combined pending-feature + technology/resize/scale-out previews.
+- `src/core/__tests__/game-engine.spec.ts`: preview correctness, state immutability, RNG non-consumption.
+- `src/simulation/balance-action.ts`: preventative action intent metadata.
+- `src/simulation/balance-observation.ts`: pending feature, upcoming dependency gaps, METRICS/APM/ORACLE release previews.
+- `src/simulation/__tests__/balance-observation.spec.ts`: observation boundaries and projection contracts.
+- `src/simulation/release-readiness.ts`: shared preventative dependency selection and intent tagging.
+- `src/simulation/__tests__/release-readiness.spec.ts`: shared readiness helper contracts.
+- `src/simulation/simulation-metrics.ts`: preventative and post-release health metrics.
+- `src/simulation/simulation-runner.ts`: release-window detection and successful preventative-action accounting.
+- `src/simulation/strategies/{metrics-aware,apm-aware,oracle}.ts`: strategy-specific projected readiness decisions.
+- `src/simulation/__tests__/{simulation-metrics,simulation-runner,strategies}.spec.ts`: metrics/runner/strategy regressions.
 
 ---
 
@@ -49,44 +43,6 @@
 - Test: `src/simulation/__tests__/balance-observation.spec.ts`
 
 **Interfaces:**
-- Produces `PendingFeatureObservation`.
-- Produces `CommonBalanceObservation.pendingFeature`.
-- Produces `CommonBalanceObservation.upcomingRequiredDependencyGaps`.
-- Reuses existing `RequiredDependencyGapObservation` and `requiredDependencyGaps(load)` semantics.
-
-- [ ] **Step 1: Write failing observation tests**
-
-Add representative tests that advance a deterministic engine until NOTIFICATION or another queue-required feature is under development, then assert:
-
-```ts
-expect(observation.pendingFeature).toMatchObject({
-  id: 'NOTIFICATION',
-  requiredResourceRoles: ['EVENT_BUS'],
-});
-expect(observation.pendingFeature?.estimatedRemainingDays).toBeGreaterThan(0);
-expect(observation.upcomingRequiredDependencyGaps).toEqual([
-  expect.objectContaining({
-    role: 'EVENT_BUS',
-    candidateTechnologyIds: ['SQS', 'RABBITMQ', 'KAFKA'],
-  }),
-]);
-```
-
-Also assert a BASIC observation has no `releasePreview` property.
-
-- [ ] **Step 2: Run the focused test and verify RED**
-
-Run:
-
-```bash
-npm test -- src/simulation/__tests__/balance-observation.spec.ts
-```
-
-Expected: FAIL because `pendingFeature` / `upcomingRequiredDependencyGaps` do not exist.
-
-- [ ] **Step 3: Implement the minimal common observation**
-
-In `balance-observation.ts`, add:
 
 ```ts
 export interface PendingFeatureObservation {
@@ -96,93 +52,127 @@ export interface PendingFeatureObservation {
 }
 ```
 
-Resolve the feature from `engine.snapshot.currentFeature?.id` through `COMMUNITY_FEATURES`; return `null` for bootstrap/no task. Derive `requiredResourceRoles` from request-route entries marked `REQUIRED`.
+`CommonBalanceObservation` gains:
 
-For upcoming gaps, call `engine.previewLoadWithFeature(feature)` and reuse the existing `requiredDependencyGaps(previewLoad)` projector so the candidate technology mapping remains single-sourced.
+```ts
+readonly pendingFeature: PendingFeatureObservation | null;
+readonly upcomingRequiredDependencyGaps: readonly RequiredDependencyGapObservation[];
+```
 
-- [ ] **Step 4: Re-run focused tests**
+- [ ] **Step 1: Write the failing observation test**
 
-Expected: PASS and BASIC still contains no projected load.
+Use the existing deterministic engine helpers in `balance-observation.spec.ts` to reach a queue-required pending feature. Assert:
 
-- [ ] **Step 5: Commit**
+```ts
+expect(observation.pendingFeature).toMatchObject({
+  requiredResourceRoles: ['EVENT_BUS'],
+});
+expect(observation.pendingFeature?.estimatedRemainingDays).toBeGreaterThan(0);
+expect(observation.upcomingRequiredDependencyGaps[0]).toMatchObject({
+  role: 'EVENT_BUS',
+  candidateTechnologyIds: ['SQS', 'RABBITMQ', 'KAFKA'],
+});
+expect('releasePreview' in observation).toBe(false);
+```
+
+- [ ] **Step 2: Run RED**
 
 ```bash
+npm test -- src/simulation/__tests__/balance-observation.spec.ts
+```
+
+Expected: missing pending/upcoming observation fields.
+
+- [ ] **Step 3: Implement pending feature projection**
+
+Resolve `engine.snapshot.currentFeature?.id` through `COMMUNITY_FEATURES`. Exclude bootstrap/no-task. Derive REQUIRED roles from `feature.requestRoute`.
+
+For upcoming gaps, compute `engine.previewLoadWithFeature(feature)` and pass that load into the same `requiredDependencyGaps(load)` function used for live gaps.
+
+- [ ] **Step 4: Run GREEN and commit**
+
+```bash
+npm test -- src/simulation/__tests__/balance-observation.spec.ts
 git add src/simulation/balance-observation.ts src/simulation/__tests__/balance-observation.spec.ts
-git commit -m "feat: expose pending release dependency readiness"
+git commit -m "feat: expose pending release dependencies"
 ```
 
 ---
 
-### Task 2: METRICS and APM Release Preview Projection
+### Task 2: METRICS and APM Release Preview
 
 **Files:**
 - Modify: `src/simulation/balance-observation.ts`
 - Test: `src/simulation/__tests__/balance-observation.spec.ts`
 
 **Interfaces:**
-- Produces `MetricsReleasePreview` and `ApmReleasePreview`.
-- `MetricsBalanceObservation.releasePreview` is metrics-only.
-- `ApmBalanceObservation.releasePreview` includes diagnosis.
-- ORACLE later extends the same preview shape.
 
-- [ ] **Step 1: Write failing ceiling tests**
+```ts
+export interface MetricsReleasePreview {
+  readonly resourceLoads: readonly BalanceResourceLoadObservation[];
+  readonly maxEffectivePercent: number;
+}
 
-For the same pending feature, assert:
+export interface ApmReleasePreview extends MetricsReleasePreview {
+  readonly diagnosis: BalanceDiagnosisObservation;
+}
+```
+
+- [ ] **Step 1: Write RED ceiling tests**
+
+Assert a METRICS observation with a pending feature has resource preview but no diagnosis:
 
 ```ts
 const metrics = observeForStrategy(engine, 'METRICS');
-expect(metrics.level).toBe('METRICS');
 if (metrics.level !== 'METRICS') throw new Error('expected METRICS');
 expect(metrics.releasePreview?.resourceLoads.length).toBeGreaterThan(0);
 expect(metrics.releasePreview?.maxEffectivePercent).toBeGreaterThanOrEqual(0);
 expect('diagnosis' in (metrics.releasePreview ?? {})).toBe(false);
+```
 
+Assert APM gains diagnosis but no exact pressures:
+
+```ts
 const apm = observeForStrategy(engine, 'APM');
-expect(apm.level).toBe('APM');
 if (apm.level !== 'APM') throw new Error('expected APM');
-expect(apm.releasePreview?.diagnosis.topBottleneck).not.toBeUndefined();
+expect(apm.releasePreview).not.toBeNull();
 expect('exactPressures' in (apm.releasePreview ?? {})).toBe(false);
 ```
 
-Also compare the release preview with `operationalPressures(engine.previewLoadWithFeature(feature))` for a known scenario.
+- [ ] **Step 2: Run RED**
 
-- [ ] **Step 2: Run focused tests and verify RED**
+Expected: `releasePreview` does not exist.
 
-Expected: FAIL because release preview types/projection do not exist.
+- [ ] **Step 3: Extract projection helpers**
 
-- [ ] **Step 3: Refactor load projectors to accept arbitrary load**
-
-Extract helpers such as:
+Refactor current live resource projection into:
 
 ```ts
-function resourceObservationsFromLoad(load: LoadSnapshot): readonly BalanceResourceLoadObservation[] { ... }
-
-function projectedDiagnosis(
-  engine: GameEngine,
-  feature: FeatureDefinition,
+function resourceObservationsFromLoad(
   load: LoadSnapshot,
-): BalanceDiagnosisObservation { ... }
+): readonly BalanceResourceLoadObservation[];
 ```
 
-For projected diagnosis, build the projected topology with current active features plus the pending feature, copy `engine.snapshot` with `load` replaced by the preview and completed feature ids including the pending feature, then call `OperationalViewProjector.project(...)` / `diagnosisText(...)` using that projected snapshot and topology.
+For APM diagnosis, create a projected snapshot with `load` replaced by `engine.previewLoadWithFeature(feature)` and build projected topology from current active features plus the pending feature. Pass that projected snapshot/topology through `OperationalViewProjector` so diagnosis labels and thresholds remain consistent with live APM.
 
-- [ ] **Step 4: Attach preview only at allowed ceilings**
+- [ ] **Step 4: Attach by ceiling only**
 
-- BASIC: no `releasePreview`.
-- METRICS: resource loads + max effective percent.
-- APM: same + diagnosis.
-- ORACLE: temporarily same APM preview until Task 3 adds exact fields.
+- BASIC: no `releasePreview` member.
+- METRICS: `MetricsReleasePreview`.
+- APM: `ApmReleasePreview`.
+- ORACLE: temporarily uses the APM shape until Task 3 extends it.
 
-- [ ] **Step 5: Re-run observation tests and commit**
+- [ ] **Step 5: Run GREEN and commit**
 
 ```bash
+npm test -- src/simulation/__tests__/balance-observation.spec.ts
 git add src/simulation/balance-observation.ts src/simulation/__tests__/balance-observation.spec.ts
-git commit -m "feat: project pending feature release load"
+git commit -m "feat: project pending release load"
 ```
 
 ---
 
-### Task 3: Exact ORACLE Combined Feature + Action Preview
+### Task 3: Exact ORACLE Combined Preview
 
 **Files:**
 - Modify: `src/core/game-engine.ts`
@@ -190,39 +180,78 @@ git commit -m "feat: project pending feature release load"
 - Test: `src/core/__tests__/game-engine.spec.ts`
 - Test: `src/simulation/__tests__/balance-observation.spec.ts`
 
-**Interfaces:**
-- Core produces:
-  - `previewLoadWithFeatureAndTechnology(feature, id)`
-  - `previewLoadWithFeatureAndNodeResize(feature, nodeId, size)`
-  - `previewLoadWithFeatureAndNodeScaleOut(feature, nodeId)`
-- `OraclePreviewPort.previewReleaseAction(action): LoadSnapshot` maps simulation actions onto those core methods.
-- `OracleReleasePreview.exactPressures` contains exact projected pressures before an action.
-
-- [ ] **Step 1: Write failing core preview tests**
-
-Use a deterministic launched engine with a pending feature. Capture serialized snapshot/infrastructure state, call each new preview method, and assert live state is unchanged.
-
-Add RNG non-consumption coverage using two identical engines:
+**Core interfaces:**
 
 ```ts
-const left = createTestEngine(seed);
-const right = createTestEngine(seed);
-prepareSamePendingFeature(left, right);
-left.previewLoadWithFeatureAndNodeResize(feature, 'app', ServerSize.XLARGE);
-for (let i = 0; i < 10; i += 1) {
-  expect(left.advanceDay()).toEqual(right.advanceDay());
+previewLoadWithFeatureAndTechnology(
+  feature: FeatureDefinition,
+  id: BuildableTechnologyId,
+): LoadSnapshot;
+
+previewLoadWithFeatureAndNodeResize(
+  feature: FeatureDefinition,
+  nodeId: InfrastructureNodeId,
+  size: ServerSize,
+): LoadSnapshot;
+
+previewLoadWithFeatureAndNodeScaleOut(
+  feature: FeatureDefinition,
+  nodeId: InfrastructureNodeId,
+): LoadSnapshot;
+```
+
+**Simulation interface:**
+
+```ts
+interface OraclePreviewPort {
+  // existing methods remain
+  previewReleaseAction(action: SimulationAction): LoadSnapshot;
 }
 ```
 
-Use an actual node id from the test topology rather than a guessed literal if existing helpers expose it.
+- [ ] **Step 1: Write RED core tests using existing test fixtures**
 
-- [ ] **Step 2: Verify RED**
+Use `launchedGame()`, `V1_NODE_IDS.app('SPRING_BOOT')`, `ServerSize.XLARGE`, and a concrete `COMMUNITY_FEATURES` value.
 
-Expected: methods are undefined.
+Capture:
 
-- [ ] **Step 3: Implement one internal projected-feature helper**
+```ts
+const before = game.snapshot;
+const cashBefore = game.snapshot.cash;
+const sizeBefore = game.infrastructure.nodeSize(appNodeId);
+```
 
-Add a private helper equivalent to:
+Call each combined preview and assert the returned load changes where expected while:
+
+```ts
+expect(game.snapshot).toEqual(before);
+expect(game.snapshot.cash).toBe(cashBefore);
+expect(game.infrastructure.nodeSize(appNodeId)).toBe(sizeBefore);
+```
+
+- [ ] **Step 2: Add an RNG non-consumption test**
+
+Use the existing `CountingRandom` fixture:
+
+```ts
+const random = new CountingRandom();
+const game = launchedGame(31, random);
+const callsBefore = random.calls;
+game.previewLoadWithFeatureAndNodeResize(
+  COMMUNITY_FEATURES.SEARCH,
+  V1_NODE_IDS.app('SPRING_BOOT'),
+  ServerSize.XLARGE,
+);
+expect(random.calls).toBe(callsBefore);
+```
+
+- [ ] **Step 3: Run RED**
+
+Expected: combined preview methods are undefined.
+
+- [ ] **Step 4: Implement through one feature-list helper**
+
+Add:
 
 ```ts
 private activeFeaturesIncluding(feature: FeatureDefinition): FeatureDefinition[] {
@@ -233,35 +262,40 @@ private activeFeaturesIncluding(feature: FeatureDefinition): FeatureDefinition[]
 }
 ```
 
-Implement the three public previews by cloning infrastructure, applying the action, and calling `calculateCurrentLoad(clone, this.activeFeaturesIncluding(feature), ignoredIncidents)`.
+Each combined method clones infrastructure, applies exactly one change, then calls `calculateCurrentLoad(clone, this.activeFeaturesIncluding(feature), ignoredIncidentNodeIds)`.
 
-Queue technology replacement must preserve the same retired-node incident ignore behavior as `previewLoadWithTechnology`.
+For technology replacement, preserve retired queue-node incident ignoring exactly as `previewLoadWithTechnology()` does.
 
-- [ ] **Step 4: Add ORACLE port tests**
+- [ ] **Step 5: Add ORACLE release port RED/GREEN test**
 
-Assert ORACLE observation exposes exact projected pressures and:
+Extend ORACLE release preview with `exactPressures`. For an actual candidate action:
 
 ```ts
-const result = oracle.previewPort.previewReleaseAction({
-  type: 'RESIZE_NODE', nodeId, size: ServerSize.XLARGE, reason: 'test',
-});
-expect(maxEffectiveRatioFromLoad(result)).toBeLessThanOrEqual(
-  maxEffectiveRatioFromLoad(oracle.releasePreview!.loadEquivalentForTest),
+const projectedAfter = oracle.previewPort.previewReleaseAction(action);
+const afterMax = Math.max(
+  0,
+  ...operationalPressures(projectedAfter).map(({ effectiveRatio }) => effectiveRatio),
 );
+const beforeMax = Math.max(
+  0,
+  ...(oracle.releasePreview?.exactPressures ?? []).map(({ effectiveRatio }) => effectiveRatio),
+);
+expect(afterMax).toBeLessThan(beforeMax);
 ```
 
-Do not expose a raw `LoadSnapshot` in the public observation solely for testing; compare through pressure helpers or the port result.
+This uses only public preview-port output and `operationalPressures`; no test-only observation field is added.
 
-- [ ] **Step 5: Commit after focused tests pass**
+- [ ] **Step 6: Run focused suites and commit**
 
 ```bash
+npm test -- src/core/__tests__/game-engine.spec.ts src/simulation/__tests__/balance-observation.spec.ts
 git add src/core/game-engine.ts src/core/__tests__/game-engine.spec.ts src/simulation/balance-observation.ts src/simulation/__tests__/balance-observation.spec.ts
-git commit -m "feat: add exact pending release action previews"
+git commit -m "feat: preview exact pending release actions"
 ```
 
 ---
 
-### Task 4: Explicit Preventative Action Intent
+### Task 4: Explicit Preventative Action Intent and Shared Dependency Readiness
 
 **Files:**
 - Modify: `src/simulation/balance-action.ts`
@@ -269,7 +303,6 @@ git commit -m "feat: add exact pending release action previews"
 - Create: `src/simulation/__tests__/release-readiness.spec.ts`
 
 **Interfaces:**
-- Produces:
 
 ```ts
 export type SimulationActionIntent =
@@ -277,46 +310,47 @@ export type SimulationActionIntent =
   | 'RELEASE_READINESS_CAPACITY';
 ```
 
-- Every `SimulationAction` may carry optional `intent`.
-- Produces `preventativeDependencyAction(observation, context, strategyId)`.
-- Produces `withReleaseReadinessIntent(action, intent)`.
-
-- [ ] **Step 1: Write RED tests for dependency readiness**
-
-Construct an observation with an upcoming EVENT_BUS gap and available SQS/RabbitMQ/Kafka. Assert the helper chooses the cheapest affordable valid technology and tags it:
+Every `SimulationAction` variant gains optional `readonly intent?: SimulationActionIntent`.
 
 ```ts
-expect(action).toMatchObject({
+export function withReleaseReadinessIntent(
+  action: SimulationAction,
+  intent: SimulationActionIntent,
+): SimulationAction;
+
+export function preventativeDependencyAction(
+  observation: BalanceObservation,
+  context: StrategyDecisionContext,
+  strategyId: BalanceStrategyId,
+): SimulationAction | null;
+```
+
+- [ ] **Step 1: Write RED helper tests**
+
+Given an upcoming EVENT_BUS gap and affordable options, assert:
+
+```ts
+expect(preventativeDependencyAction(observation, context, 'METRICS_AWARE')).toMatchObject({
   type: 'START_TECHNOLOGY_BUILD',
   technologyId: 'SQS',
   intent: 'RELEASE_READINESS_DEPENDENCY',
 });
 ```
 
-Also assert no action when there is no upcoming gap or none are affordable.
+Also assert `null` when there is no upcoming gap or no affordable candidate.
 
-- [ ] **Step 2: Implement intent metadata without changing action ids**
+- [ ] **Step 2: Implement intent without changing executable identity**
 
-`simulationActionId()` must remain based only on executable action identity; intent is diagnostic/provenance metadata.
+`simulationActionId()` continues to ignore intent. Implement `withReleaseReadinessIntent()` as a frozen copy.
 
-Implement:
+- [ ] **Step 3: Implement dependency helper**
 
-```ts
-export function withReleaseReadinessIntent(
-  action: SimulationAction,
-  intent: SimulationActionIntent,
-): SimulationAction {
-  return Object.freeze({ ...action, intent });
-}
-```
+Use the first upcoming gap, existing `technologyAction()`, and `cheapestAffordable()`. Do not duplicate cost/runway math.
 
-- [ ] **Step 3: Implement shared preventative dependency selection**
-
-Use existing `technologyAction`, `cheapestAffordable`, and the first upcoming gap. Do not duplicate affordability math.
-
-- [ ] **Step 4: Run tests and commit**
+- [ ] **Step 4: Run GREEN and commit**
 
 ```bash
+npm test -- src/simulation/__tests__/release-readiness.spec.ts
 git add src/simulation/balance-action.ts src/simulation/release-readiness.ts src/simulation/__tests__/release-readiness.spec.ts
 git commit -m "feat: classify release readiness actions"
 ```
@@ -331,62 +365,68 @@ git commit -m "feat: classify release readiness actions"
 - Test: `src/simulation/__tests__/simulation-metrics.spec.ts`
 - Test: `src/simulation/__tests__/simulation-runner.spec.ts`
 
-**Interfaces:**
-- Adds to `BalanceRunResult`:
-  - `preventativeDependencyBuildCount`
-  - `preventativeCapacityActionCount`
-  - `postReleaseOverloadDays`
-  - `featuresReleasedIntoOverload`
-- Collector produces:
-  - `beginFeatureReleaseWindow()`
-  - `recordPreventativeAction(intent)`
-- Seven-day release windows are metrics-only.
+**BalanceRunResult additions:**
 
-- [ ] **Step 1: Write metric RED tests**
+```ts
+preventativeDependencyBuildCount: number;
+preventativeCapacityActionCount: number;
+postReleaseOverloadDays: number;
+featuresReleasedIntoOverload: number;
+```
 
-Create a collector, start a release window, feed seven operational days with known ratios, and assert overload day count and one feature-overload count.
+**Collector additions:**
 
-Also test overlapping windows: one overloaded calendar day increments `postReleaseOverloadDays` once, while every active feature window becomes marked overloaded exactly once.
+```ts
+beginFeatureReleaseWindow(): void;
+recordPreventativeAction(intent: SimulationActionIntent): void;
+```
 
-- [ ] **Step 2: Implement release-window state in collector**
+- [ ] **Step 1: Write RED metric tests**
 
-Use internal windows:
+Start one release window, record seven operational days, make two days exceed effective ratio `1.0`, and assert:
+
+```ts
+expect(result.postReleaseOverloadDays).toBe(2);
+expect(result.featuresReleasedIntoOverload).toBe(1);
+```
+
+Start two overlapping windows and verify one overloaded calendar day increments `postReleaseOverloadDays` once but marks both active features overloaded once.
+
+- [ ] **Step 2: Implement metric windows**
+
+Use:
 
 ```ts
 private releaseWindows: { remainingDays: number; overloaded: boolean }[] = [];
 ```
 
-In `recordOperationalDay`, when at least one window is active and any effective ratio is `> 1`:
+`recordOperationalDay()`:
 
-- increment `postReleaseOverloadDays` once for the calendar day;
-- for every active not-yet-overloaded window, mark it and increment `featuresReleasedIntoOverload`;
-- decrement every active window and remove windows after seven recorded live days.
+1. computes overload once;
+2. if any release window is active and overloaded, increments `postReleaseOverloadDays` once;
+3. marks each active unmarked window and increments `featuresReleasedIntoOverload` once per feature;
+4. decrements remaining days and removes completed seven-day windows.
 
-- [ ] **Step 3: Detect releases in the runner**
+- [ ] **Step 3: Detect releases in runner**
 
-Before `engine.advanceDay()`, capture completed feature count. After advance, if the count increased, call `metrics.beginFeatureReleaseWindow()` once for each newly completed non-bootstrap feature.
+Immediately before `engine.advanceDay()` capture completed feature count. Immediately after advance, compare counts; call `beginFeatureReleaseWindow()` once for every new completed non-bootstrap feature.
 
-Because the window begins after the release and operational metrics are recorded at the start of each subsequent loop, the next loop is the first live release day.
+The next loop's `observeDailyOperationalMetrics()` becomes first live release day.
 
 - [ ] **Step 4: Record successful preventative intent**
 
-After an investment executes successfully:
+After successful normal investment execution:
 
 ```ts
 if (action.intent) metrics.recordPreventativeAction(action.intent);
 ```
 
-Dependency intent increments dependency-build count; capacity intent increments capacity-action count.
-
-- [ ] **Step 5: Preserve trace identity**
-
-Run existing trace-on/off identity tests plus the runner suite. No metric instrumentation may alter decisions, RNG, or engine state.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Run metric/runner suites, including trace identity, and commit**
 
 ```bash
+npm test -- src/simulation/__tests__/simulation-metrics.spec.ts src/simulation/__tests__/simulation-runner.spec.ts
 git add src/simulation/simulation-metrics.ts src/simulation/simulation-runner.ts src/simulation/__tests__/simulation-metrics.spec.ts src/simulation/__tests__/simulation-runner.spec.ts
-git commit -m "feat: measure post release readiness outcomes"
+git commit -m "feat: measure release readiness outcomes"
 ```
 
 ---
@@ -394,43 +434,50 @@ git commit -m "feat: measure post release readiness outcomes"
 ### Task 6: METRICS Preventative Policy
 
 **Files:**
-- Modify: `src/simulation/strategies/metrics-aware.ts`
 - Modify: `src/simulation/release-readiness.ts`
-- Test: `src/simulation/__tests__/strategies.spec.ts`
+- Modify: `src/simulation/strategies/metrics-aware.ts`
 - Test: `src/simulation/__tests__/release-readiness.spec.ts`
+- Test: `src/simulation/__tests__/strategies.spec.ts`
 
-**Interfaces:**
-- Produces `decideMetricsReleaseReadiness(observation, context, strategyId)`.
-- Returns dependency action first, then projected capacity action, then `null` to allow live logic.
-
-- [ ] **Step 1: Write RED strategy tests**
-
-Representative tests:
-
-1. pending queue-required feature + no queue -> SQS build **before** feature completion;
-2. no dependency gap + projected DB IO >=85% -> resource-aware remedy with `RELEASE_READINESS_CAPACITY` intent;
-3. projected max <85% -> no preventative capacity action and normal live decision remains unchanged.
-
-- [ ] **Step 2: Implement METRICS release readiness**
-
-At the top of `metricsAwareStrategy.decide`:
+**Interface:**
 
 ```ts
-const readiness = decideMetricsReleaseReadiness(observation, context, 'METRICS_AWARE');
-if (readiness) return readiness;
-return decideFromMetrics(observation, context, 'METRICS_AWARE');
+export function decideMetricsReleaseReadiness(
+  observation: BalanceObservation,
+  context: StrategyDecisionContext,
+  strategyId: 'METRICS_AWARE' | 'APM_AWARE',
+): SimulationAction | null;
 ```
 
-The helper must use projected `releasePreview.resourceLoads`, current owned node state, existing `resourceRemedyCandidates`, and `firstAffordable`; wrap the selected capacity action with `RELEASE_READINESS_CAPACITY`.
+- [ ] **Step 1: Write RED tests**
 
-- [ ] **Step 3: Verify CHEAPSKATE and REACTIVE remain unchanged**
+Cover:
 
-Run their existing strategy tests and add one explicit assertion that the presence of `pendingFeature` alone does not cause either to spend.
+1. upcoming queue requirement -> SQS before feature completion;
+2. no dependency gap + projected DB IO >=85% -> first affordable DB IO remedy with `RELEASE_READINESS_CAPACITY`;
+3. projected max <85% -> `null` readiness and unchanged live decision.
 
-- [ ] **Step 4: Commit**
+Add explicit regressions that REACTIVE_BASIC and CHEAPSKATE do not spend merely because `pendingFeature` exists.
+
+- [ ] **Step 2: Implement METRICS readiness**
+
+`decideMetricsReleaseReadiness()`:
+
+1. calls `preventativeDependencyAction()` first;
+2. requires METRICS/APM/ORACLE observation with a non-null release preview;
+3. exits when max projected effective percent <85;
+4. selects hottest projected resource;
+5. resolves current owned node with `nodeFor()`;
+6. selects `firstAffordable(resourceRemedyCandidates(...))`;
+7. wraps selected action with `RELEASE_READINESS_CAPACITY`.
+
+At top of `metricsAwareStrategy.decide`, return readiness when non-null, otherwise call existing `decideFromMetrics()`.
+
+- [ ] **Step 3: Run GREEN and commit**
 
 ```bash
-git add src/simulation/strategies/metrics-aware.ts src/simulation/release-readiness.ts src/simulation/__tests__/strategies.spec.ts src/simulation/__tests__/release-readiness.spec.ts
+npm test -- src/simulation/__tests__/release-readiness.spec.ts src/simulation/__tests__/strategies.spec.ts
+git add src/simulation/release-readiness.ts src/simulation/strategies/metrics-aware.ts src/simulation/__tests__/release-readiness.spec.ts src/simulation/__tests__/strategies.spec.ts
 git commit -m "feat: prepare metric aware releases"
 ```
 
@@ -439,33 +486,41 @@ git commit -m "feat: prepare metric aware releases"
 ### Task 7: APM Preventative Policy
 
 **Files:**
-- Modify: `src/simulation/strategies/apm-aware.ts`
 - Modify: `src/simulation/release-readiness.ts`
+- Modify: `src/simulation/strategies/apm-aware.ts`
 - Test: `src/simulation/__tests__/strategies.spec.ts`
 
-**Interfaces:**
-- Produces `decideApmReleaseReadiness(observation, context)`.
+**Interface:**
 
-- [ ] **Step 1: Write RED APM tests**
-
-Create a projected release where multiple resources are elevated but the APM diagnosis identifies DB IO as top bottleneck. Assert APM chooses the cheapest affordable diagnosis-supported DB IO remedy, not a generic APP resize.
-
-Also assert it performs upcoming dependency readiness even when current live load is healthy.
-
-- [ ] **Step 2: Implement APM readiness**
-
-Ordering inside `apmAwareStrategy.decide`:
-
-```text
-upcoming dependency -> projected APM diagnosis -> existing live APM/METRICS fallback
+```ts
+export function decideApmReleaseReadiness(
+  observation: BalanceObservation,
+  context: StrategyDecisionContext,
+): SimulationAction | null;
 ```
 
-Use `cheapestAffordable(resourceRemedyCandidates(...))` and mark the action `RELEASE_READINESS_CAPACITY`.
+- [ ] **Step 1: Write RED APM diagnosis test**
 
-- [ ] **Step 3: Run strategy suites and commit**
+Construct an APM observation where several projected resources are elevated and projected diagnosis points to DB IO. Assert readiness chooses the cheapest affordable diagnosis-supported DB IO remedy, tagged `RELEASE_READINESS_CAPACITY`.
+
+Also assert upcoming dependency readiness occurs while live load is healthy.
+
+- [ ] **Step 2: Implement APM ordering**
+
+```text
+upcoming dependency
+-> projected APM diagnosis when >=85%
+-> existing live APM decision
+-> existing METRICS fallback when APM is not unlocked
+```
+
+Use `cheapestAffordable(resourceRemedyCandidates(...))` for diagnosed remedies.
+
+- [ ] **Step 3: Run GREEN and commit**
 
 ```bash
-git add src/simulation/strategies/apm-aware.ts src/simulation/release-readiness.ts src/simulation/__tests__/strategies.spec.ts
+npm test -- src/simulation/__tests__/strategies.spec.ts
+git add src/simulation/release-readiness.ts src/simulation/strategies/apm-aware.ts src/simulation/__tests__/strategies.spec.ts
 git commit -m "feat: prepare apm diagnosed releases"
 ```
 
@@ -474,67 +529,71 @@ git commit -m "feat: prepare apm diagnosed releases"
 ### Task 8: ORACLE Exact Preventative Policy
 
 **Files:**
-- Modify: `src/simulation/strategies/oracle.ts`
 - Modify: `src/simulation/release-readiness.ts`
+- Modify: `src/simulation/strategies/oracle.ts`
 - Test: `src/simulation/__tests__/strategies.spec.ts`
 
-**Interfaces:**
-- Produces `decideOracleReleaseReadiness(observation, context)`.
-- Uses `observation.previewPort.previewReleaseAction(action)` for every ranked candidate.
-
-- [ ] **Step 1: Write RED ORACLE ranking tests**
-
-Build a scenario with at least two affordable remedies where:
-
-- both reduce projected pressure;
-- only one brings post-release max <=0.85;
-- the satisfying action is not first in candidate order.
-
-Assert ORACLE chooses the exact satisfying candidate based on combined preview.
-
-Add a second case where no candidate reaches 0.85 and assert highest relief-per-one-month-cost wins.
-
-- [ ] **Step 2: Implement exact projected ranking**
-
-Use the existing live ORACLE ranking shape but compute:
+**Interface:**
 
 ```ts
-const releaseCurrentMax = maxExactReleaseRatio(observation.releasePreview);
+export function decideOracleReleaseReadiness(
+  observation: OracleBalanceObservation,
+  context: StrategyDecisionContext,
+): SimulationAction | null;
+```
+
+- [ ] **Step 1: Write RED exact-ranking test**
+
+Create an ORACLE observation with two affordable candidates where only the second candidate's `previewReleaseAction()` brings projected max ratio to <=0.85. Assert the second candidate wins even when it is later in candidate order.
+
+Add a second test where none reaches 0.85 and assert highest relief / one-month cost wins with deterministic tie-breaking.
+
+- [ ] **Step 2: Implement projected ranking**
+
+Use:
+
+```ts
+const currentMax = Math.max(
+  0,
+  ...observation.releasePreview.exactPressures.map(({ effectiveRatio }) => effectiveRatio),
+);
 const nextMax = maxEffectiveRatioFromPreview(
   observation.previewPort.previewReleaseAction(action),
 );
-const relief = Math.max(0, releaseCurrentMax - nextMax);
+const relief = Math.max(0, currentMax - nextMax);
 ```
 
-Preserve affordability, one-month cost, negligible-relief rejection, deterministic tie-breaking, and required ALB enablement exception.
+Preserve existing affordability, monthly-cost ranking, negligible-relief filter, ALB-enablement exception, and `simulationActionId()` tie-break.
 
-- [ ] **Step 3: Ensure normal ORACLE live policy remains fallback**
+Wrap selected preventative action with `RELEASE_READINESS_CAPACITY`.
 
-If no pending release or projected max <0.85, existing live ORACLE behavior must be byte-for-byte decision-equivalent for representative observations.
+- [ ] **Step 3: Preserve live ORACLE fallback**
 
-- [ ] **Step 4: Commit**
+When no pending feature exists or projected max <0.85, representative existing ORACLE tests must produce the same live action as before this task.
+
+- [ ] **Step 4: Run GREEN and commit**
 
 ```bash
-git add src/simulation/strategies/oracle.ts src/simulation/release-readiness.ts src/simulation/__tests__/strategies.spec.ts
+npm test -- src/simulation/__tests__/strategies.spec.ts
+git add src/simulation/release-readiness.ts src/simulation/strategies/oracle.ts src/simulation/__tests__/strategies.spec.ts
 git commit -m "feat: prepare oracle projected releases"
 ```
 
 ---
 
-### Task 9: Full Fast Verification Before Balance Evidence
+### Task 9: Fast Branch Verification
 
-**Files:**
-- No new production files unless a failing verification reveals a defect.
+**Files:** none unless verification exposes a defect.
 
-- [ ] **Step 1: Run unit/integration tests**
+- [ ] **Step 1: Run all tests**
 
 ```bash
 npm test
 ```
 
-Expected: all tests PASS.
+Expected: all PASS.
 
-- [ ] **Step 2: Run static/build verification**
+- [ ] **Step 2: Run static/build checks**
 
 ```bash
 npm run typecheck
@@ -543,92 +602,88 @@ npm run build
 
 Expected: PASS.
 
-- [ ] **Step 3: Run deterministic balance smoke**
+- [ ] **Step 3: Run deterministic smoke twice**
 
-Use one informed and one riskier scenario twice and diff generated rows/traces. Expected: same-scenario outputs are identical.
+Run the same fully-filtered informed scenario twice and diff result/trace artifacts. Repeat for REACTIVE_BASIC. Expected: byte-identical same-scenario output.
 
-- [ ] **Step 4: Inspect a representative trace**
+- [ ] **Step 4: Inspect one pre-release trace**
 
-Choose a seed where a required dependency is upcoming. Confirm METRICS/APM/ORACLE show a readiness action before feature completion while REACTIVE does not.
+Confirm an informed strategy emits a readiness action while `completedFeatureCount` has not yet advanced; REACTIVE_BASIC on the same scenario must not emit that feature-specific readiness action.
 
-- [ ] **Step 5: Commit only if verification required a fix**
+- [ ] **Step 5: Commit only real fixes**
 
-No empty verification commit.
+Do not create an empty verification commit.
 
 ---
 
-### Task 10: 450-Run Pilot Matrix
+### Task 10: 450-Run Pilot
 
 **Files:**
 - Create temporarily: `.github/workflows/balance-pass-2-pilot.yml`
-- Delete after artifacts/results are captured.
+- Delete after evidence capture.
 
-**Interfaces:**
-- 15 framework/database jobs.
-- Each job runs seeds `5 8 17 23 29` with all six strategies: 30 rows/job.
-- Aggregate total: exactly 450 rows.
+**Matrix:**
 
-- [ ] **Step 1: Add one-off pilot workflow**
-
-Matrix:
-
-```yaml
-framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
-database: [POSTGRESQL, MYSQL, MONGODB]
+```text
+5 frameworks × 3 databases × seeds [5,8,17,23,29] × 6 strategies = 450
 ```
 
-Inside each shard:
+- [ ] **Step 1: Add 15-shard workflow**
 
-```bash
-for seed in 5 8 17 23 29; do
-  npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed"
-  # preserve each six-row runs.csv before the next seed
- done
+Each framework/database shard loops the five seeds. Each `npm run balance -- --framework ... --db ... --seed ...` produces six rows. Preserve those five CSVs and aggregate them with exactly one header.
+
+Assert per shard:
+
+```text
+30 data rows
+6 rows per seed
+all five fixed seeds present
 ```
 
-Aggregate shard CSVs with one header and assert exactly 30 data rows.
+- [ ] **Step 2: Run and validate global integrity**
 
-- [ ] **Step 2: Run workflow and assert integrity**
+Require:
 
-Required:
+```text
+15 successful artifacts
+450 rows
+450 unique scenario keys
+75 rows per strategy
+30 rows per framework/database pair
+```
 
-- 15 successful artifacts;
-- 30 rows each;
-- 450 unique `(framework,database,seed,strategy)` keys;
-- 75 rows per strategy;
-- all five seeds present for all 15 stacks.
+- [ ] **Step 3: Evaluate pilot causality**
 
-- [ ] **Step 3: Evaluate pilot criteria**
+Report by cohort:
 
-Report:
-
-- WON/BANKRUPT/TIMEOUT;
-- informed/riskier win rates and delta;
-- `postReleaseOverloadDays` per run by cohort;
-- `missingRequiredDependencyDays` per run by cohort;
-- preventative action counts;
-- median infrastructure exposure, ending cash, bankruptcy by cohort;
+- win/bankrupt/timeout;
+- win-rate delta;
+- missingRequiredDependencyDays/run;
+- postReleaseOverloadDays/run;
+- preventative dependency/capacity actions;
+- infrastructure exposure;
+- ending cash;
+- bankruptcy;
 - winner-day median/range.
 
-Proceed to Task 11 only if prevention metrics improve causally and strategy delta moves materially toward +10pp without breaking global difficulty.
+Proceed only if prevention metrics improve and the cohort gap moves materially toward +10pp without breaking the global difficulty/spend shape.
 
-- [ ] **Step 4: Remove pilot workflow after evidence is preserved**
+- [ ] **Step 4: Remove pilot workflow**
 
-Commit the workflow deletion so normal PR CI remains fast.
+Commit removal after artifact evidence is preserved.
 
 ---
 
-### Task 11: Final 2,700 Matrix and Integration
+### Task 11: Final 2,700 Matrix and Merge
 
 **Files:**
 - Create temporarily: `.github/workflows/balance-pass-2-full.yml`
-- Update: PR #19 body if Balance Pass 1 is ready to land.
-- Create/update: Balance Pass 2 stacked PR metadata.
-- Delete full workflow after evidence capture.
+- Delete after evidence capture.
+- Update PR #19 and Balance Pass 2 stacked PR metadata with final evidence.
 
-- [ ] **Step 1: Run exact full matrix**
+- [ ] **Step 1: Run full 15-shard matrix**
 
-15 framework/database shards, each invoking the existing full seed set for 180 rows:
+Each framework/database shard runs:
 
 ```bash
 npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE"
@@ -636,48 +691,44 @@ npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE"
 
 Assert 180 rows and `summary.runCount === 180` per shard.
 
-- [ ] **Step 2: Aggregate and validate integrity**
+- [ ] **Step 2: Validate global integrity**
 
-Required:
-
-- 2,700 rows exactly;
-- 450 per strategy;
-- 180 per framework/database pair;
-- seeds 1-30;
-- zero duplicate scenario keys.
-
-- [ ] **Step 3: Apply every hard acceptance criterion from the spec**
-
-Accept only if all hold:
+Require exactly:
 
 ```text
-overall win: 15%-45%
-bankruptcy: 10%-35%
-timeout: >0
+2700 rows
+450 per strategy
+180 per framework/database pair
+seeds 1-30
+0 duplicate (framework,database,seed,strategy) keys
+```
+
+- [ ] **Step 3: Apply every hard spec criterion**
+
+```text
+overall win 15%-45%
+bankruptcy 10%-35%
+timeout > 0
 >=4 strategies with wins
-max strategy win rate <=80%
-informed win rate - riskier win rate >=10pp
-informed postReleaseOverloadDays/run <= 80% of riskier
-informed missingRequiredDependencyDays/run <= 50% of riskier
-winner median: 500-1000
+max individual strategy win <=80%
+informed - riskier win rate >=10pp
+informed postReleaseOverloadDays/run <=80% of riskier
+informed missingRequiredDependencyDays/run <=50% of riskier
+winner median 500-1000
 early wins remain rare
 ```
 
-Document spend sanity and per-stack fairness review.
+Also document spend sanity and all 15 stack comparisons.
 
-- [ ] **Step 4: Remove one-off full workflow**
+- [ ] **Step 4: Remove full workflow and run fresh normal CI**
 
-Do not leave 2,700-run CI on ordinary PR pushes.
+Require test, typecheck, build, CLI smoke, deterministic rerun, representative traces, and artifact hygiene green on the final tree.
 
-- [ ] **Step 5: Run fresh normal CI on final tree**
+- [ ] **Step 5: Merge in stack order only if accepted**
 
-Require tests, typecheck, build, smoke, determinism, representative traces, and artifact hygiene all green.
+1. Merge PR #19 (Balance Pass 1 baseline) after fresh green CI and confirmed mergeability.
+2. Update Balance Pass 2 onto the new `feature/playable-mvp` base without overwriting unexpected remote work.
+3. Run fresh normal CI on the updated Balance Pass 2 tree.
+4. Merge Balance Pass 2 only when CI is green and the final 2,700 evidence corresponds to the production tree.
 
-- [ ] **Step 6: Integrate in stack order only if accepted**
-
-1. Merge PR #19 (playable Balance Pass 1 baseline) after fresh green CI and confirmed mergeability.
-2. Rebase/update Balance Pass 2 against the newly merged `feature/playable-mvp` without force-pushing over unexpected remote work.
-3. Run fresh normal CI on the rebased Balance Pass 2 tree.
-4. Merge Balance Pass 2 only if CI is green and the final 2,700 evidence still corresponds to the production tree.
-
-If any hard criterion fails, keep the balance PRs unmerged and diagnose the failed causal signal rather than weakening acceptance thresholds.
+If any hard criterion fails, leave the balance PRs unmerged and diagnose the causal failure instead of weakening thresholds.
