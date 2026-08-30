@@ -75,4 +75,35 @@ describe('simulation metrics', () => {
     expect(metrics.settledInfrastructureSpend).toBe(700_000);
     expect(metrics.minimumCash).toBe(650_000);
   });
+
+  it('tracks preventative actions and overload during the seven live days after a feature release', () => {
+    const metrics = new SimulationMetricsCollector(1_000_000);
+
+    metrics.recordPreventativeAction('RELEASE_READINESS_DEPENDENCY');
+    metrics.recordPreventativeAction('RELEASE_READINESS_CAPACITY');
+    metrics.beginFeatureReleaseWindow();
+    for (let day = 0; day < 7; day += 1) {
+      metrics.recordOperationalDay({
+        failureRate: 0,
+        effectiveRatios: [day === 1 || day === 5 ? 1.01 : 0.8],
+      });
+    }
+
+    expect(metrics.preventativeDependencyBuildCount).toBe(1);
+    expect(metrics.preventativeCapacityActionCount).toBe(1);
+    expect(metrics.postReleaseOverloadDays).toBe(2);
+    expect(metrics.featuresReleasedIntoOverload).toBe(1);
+  });
+
+  it('counts one overloaded calendar day once while marking every overlapping release window', () => {
+    const metrics = new SimulationMetricsCollector(1_000_000);
+
+    metrics.beginFeatureReleaseWindow();
+    metrics.recordOperationalDay({ failureRate: 0, effectiveRatios: [0.8] });
+    metrics.beginFeatureReleaseWindow();
+    metrics.recordOperationalDay({ failureRate: 0, effectiveRatios: [1.01] });
+
+    expect(metrics.postReleaseOverloadDays).toBe(1);
+    expect(metrics.featuresReleasedIntoOverload).toBe(2);
+  });
 });
