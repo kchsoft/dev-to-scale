@@ -76,6 +76,20 @@ describe('simulation metrics', () => {
     expect(metrics.minimumCash).toBe(650_000);
   });
 
+  it('exposes the same seven-day release window that operational metrics count', () => {
+    const metrics = new SimulationMetricsCollector(1_000_000);
+
+    expect(metrics.hasActiveReleaseWindow()).toBe(false);
+    metrics.beginFeatureReleaseWindow();
+
+    for (let day = 0; day < 7; day += 1) {
+      expect(metrics.hasActiveReleaseWindow()).toBe(true);
+      metrics.recordOperationalDay({ failureRate: 0, effectiveRatios: [0.8] });
+    }
+
+    expect(metrics.hasActiveReleaseWindow()).toBe(false);
+  });
+
   it('tracks preventative actions and overload during the seven live days after a feature release', () => {
     const metrics = new SimulationMetricsCollector(1_000_000);
 
