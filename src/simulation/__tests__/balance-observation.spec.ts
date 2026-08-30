@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { GameEngine } from '../../core/game-engine';
 import type { RandomSource } from '../../core/growth';
+import { ServerSize, SERVER_SIZE_VALUES } from '../../core/infrastructure';
 import { skillRef } from '../../core/learning';
+import { operationalPressures } from '../../core/operational-pressure';
+import type { SimulationAction } from '../balance-action';
 import { observeForStrategy } from '../balance-observation';
 
 class ConstantRandom implements RandomSource {
@@ -135,6 +138,45 @@ describe('balance observation boundaries', () => {
     expect(observation.releasePreview?.resourceLoads.length).toBeGreaterThan(0);
     expect(observation.releasePreview?.diagnosis).toBeDefined();
     expect('exactPressures' in (observation.releasePreview ?? {})).toBe(false);
+  });
+
+  it('gives ORACLE exact pending release pressures and combined action preview', () => {
+    const observation = observeForStrategy(gameWithPendingRequiredQueue(), 'ORACLE');
+
+    expect(observation.level).toBe('ORACLE');
+    if (observation.level !== 'ORACLE') throw new Error('Expected ORACLE');
+    expect(observation.releasePreview?.exactPressures.length).toBeGreaterThan(0);
+    expect(typeof observation.previewPort.previewReleaseAction).toBe('function');
+
+    const preview = observation.releasePreview;
+    if (!preview) throw new Error('Expected pending release preview');
+    const resizeTarget = [...preview.exactPressures]
+      .sort((left, right) => right.effectiveRatio - left.effectiveRatio)
+      .find((pressure) => {
+        const node = observation.nodes.find(({ nodeId }) => nodeId === pressure.nodeId);
+        return node && node.size !== ServerSize.XLARGE;
+      });
+    if (!resizeTarget) throw new Error('Expected a resizeable projected bottleneck');
+    const node = observation.nodes.find(({ nodeId }) => nodeId === resizeTarget.nodeId)!;
+    const nextSize = SERVER_SIZE_VALUES[SERVER_SIZE_VALUES.indexOf(node.size) + 1];
+    if (!nextSize) throw new Error('Expected next node size');
+    const action: SimulationAction = {
+      type: 'RESIZE_NODE',
+      nodeId: resizeTarget.nodeId,
+      size: nextSize,
+      reason: 'test projected release capacity',
+    };
+
+    const projectedAfter = observation.previewPort.previewReleaseAction(action);
+    const afterMax = Math.max(
+      0,
+      ...operationalPressures(projectedAfter).map(({ effectiveRatio }) => effectiveRatio),
+    );
+    const beforeMax = Math.max(
+      0,
+      ...preview.exactPressures.map(({ effectiveRatio }) => effectiveRatio),
+    );
+    expect(afterMax).toBeLessThan(beforeMax);
   });
 
   it('copies player-visible technology availability without leaking the developer profile', () => {
