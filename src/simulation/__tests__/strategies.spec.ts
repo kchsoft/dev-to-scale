@@ -157,6 +157,7 @@ describe('deterministic balance strategies', () => {
         previewTechnology: () => load('db', 'DATABASE', 'IO', 0.8),
         previewResize: () => load('db', 'DATABASE', 'IO', 0.95),
         previewScaleOut: () => load('db', 'DATABASE', 'IO', 0.9),
+        previewReleaseAction: () => load('db', 'DATABASE', 'IO', 0.9),
         projectedMonthlyCost: (action: SimulationAction) => action.type === 'START_TECHNOLOGY_BUILD' ? 200_000 : 250_000,
       }),
     });
