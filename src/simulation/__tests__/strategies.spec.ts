@@ -199,6 +199,50 @@ describe('deterministic balance strategies', () => {
     });
   });
 
+  it('METRICS prepares a risky pending release while live load is still healthy', () => {
+    const db = node({
+      nodeId: 'db', kind: 'DATABASE', productId: 'POSTGRESQL', effectivePercent: 40, aggregatePercent: 40,
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const projectedDbIo = Object.freeze({
+      nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const, percent: 90,
+      effectivePercent: 90, hardLimitPercent: 100, status: 'WARNING' as const,
+    });
+    const observation: MetricsBalanceObservation = Object.freeze({
+      ...metrics([db], []),
+      pendingFeature: Object.freeze({
+        id: 'SEARCH' as const,
+        estimatedRemainingDays: 3,
+        requiredResourceRoles: Object.freeze([]),
+      }),
+      releasePreview: Object.freeze({
+        resourceLoads: Object.freeze([projectedDbIo]),
+        maxEffectivePercent: 90,
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.METRICS_AWARE.decide(observation, context)).toMatchObject({
+      type: 'START_TECHNOLOGY_BUILD',
+      technologyId: 'REDIS',
+      intent: 'RELEASE_READINESS_CAPACITY',
+    });
+  });
+
+  it('REACTIVE_BASIC and CHEAPSKATE do not spend merely because a feature is pending', () => {
+    const app = node({ nodeId: 'app', kind: 'SERVER_GROUP', productId: 'SPRING_BOOT', aggregatePercent: 40, effectivePercent: 40 });
+    const observation: BasicBalanceObservation = Object.freeze({
+      ...basic([app]),
+      pendingFeature: Object.freeze({
+        id: 'SEARCH' as const,
+        estimatedRemainingDays: 3,
+        requiredResourceRoles: Object.freeze([]),
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.REACTIVE_BASIC.decide(observation, context)).toMatchObject({ type: 'NO_OP' });
+    expect(BALANCE_STRATEGIES.CHEAPSKATE.decide(observation, context)).toMatchObject({ type: 'NO_OP' });
+  });
+
   it('REACTIVE_BASIC resizes the hottest aggregate node at 100 percent', () => {
     const app = node({ nodeId: 'app', kind: 'SERVER_GROUP', productId: 'SPRING_BOOT', aggregatePercent: 100 });
 
