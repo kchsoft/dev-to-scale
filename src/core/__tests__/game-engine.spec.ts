@@ -265,8 +265,8 @@ describe('game engine orchestration', () => {
       .toBeGreaterThan(nodeResource(searchOnly, 'SERVER_GROUP', 'CPU')!.capacity);
     expect(nodeResource(scaledOut, 'DATABASE', 'CPU')!.capacity)
       .toBeGreaterThan(nodeResource(searchOnly, 'DATABASE', 'CPU')!.capacity);
-    expect(resourceLoad(maxNodeLoad(withStorage, { nodeKind: 'OBJECT_STORAGE' })!, 'THROUGHPUT')!.capacity)
-      .toBeGreaterThan(resourceLoad(maxNodeLoad(imageOnly, { nodeKind: 'OBJECT_STORAGE' })!, 'THROUGHPUT')!.capacity);
+    expect(resourceLoad(maxNodeLoad(withStorage, { nodeKind: 'OBJECT_STORAGE' })!, 'STORAGE')!.capacity)
+      .toBeGreaterThan(resourceLoad(maxNodeLoad(imageOnly, { nodeKind: 'OBJECT_STORAGE' })!, 'STORAGE')!.capacity);
 
     expect(game.snapshot).toEqual(before);
     expect(game.snapshot.cash).toBe(cashBefore);
