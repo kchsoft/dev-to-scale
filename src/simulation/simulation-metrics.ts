@@ -102,6 +102,10 @@ export class SimulationMetricsCollector {
     this.releaseWindows.push({ remainingDays: 7, overloaded: false });
   }
 
+  hasActiveReleaseWindow(): boolean {
+    return this.releaseWindows.length > 0;
+  }
+
   recordPreventativeAction(intent: SimulationActionIntent): void {
     if (intent === 'RELEASE_READINESS_DEPENDENCY') this.preventativeDependencyBuildCount += 1;
     if (intent === 'RELEASE_READINESS_CAPACITY') this.preventativeCapacityActionCount += 1;
