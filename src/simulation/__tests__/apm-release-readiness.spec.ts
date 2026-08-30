@@ -205,8 +205,8 @@ describe('APM release readiness', () => {
       nodeId: 'db',
       kind: 'DATABASE',
       productId: 'POSTGRESQL',
-      aggregatePercent: 70,
-      effectivePercent: 70,
+      aggregatePercent: 71,
+      effectivePercent: 71,
       status: 'WARNING',
       scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
     });
@@ -215,7 +215,7 @@ describe('APM release readiness', () => {
       resourceLoads: Object.freeze([
         Object.freeze({
           nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
-          percent: 70, effectivePercent: 70, hardLimitPercent: 100, status: 'WARNING' as const,
+          percent: 71, effectivePercent: 71, hardLimitPercent: 100, status: 'WARNING' as const,
         }),
       ]),
       diagnosis: Object.freeze({ topBottleneck: null, text: null }),
