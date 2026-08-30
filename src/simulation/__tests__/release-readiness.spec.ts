@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ServerSize } from '../../core/infrastructure';
 import * as balanceAction from '../balance-action';
-import type { BasicBalanceObservation } from '../balance-observation';
+import type { BalanceTechnologyOption, BasicBalanceObservation } from '../balance-observation';
 import * as strategyHelpers from '../strategy-helpers';
 
 interface ReleaseReadinessActionModule {
@@ -18,6 +18,15 @@ interface ReleaseReadinessStrategyHelpers {
     strategyId: 'METRICS_AWARE',
   ) => balanceAction.SimulationAction | null;
 }
+
+const TECHNOLOGY_OPTIONS: readonly BalanceTechnologyOption[] = Object.freeze([
+  { id: 'REDIS', buildCost: 300_000, monthlyCost: 100_000, deployed: false, available: false },
+  { id: 'SQS', buildCost: 200_000, monthlyCost: 80_000, deployed: false, available: true },
+  { id: 'RABBITMQ', buildCost: 500_000, monthlyCost: 150_000, deployed: false, available: true },
+  { id: 'KAFKA', buildCost: 1_500_000, monthlyCost: 350_000, deployed: false, available: true },
+  { id: 'ALB', buildCost: 150_000, monthlyCost: 100_000, deployed: false, available: false },
+  { id: 'OBJECT_STORAGE', buildCost: 200_000, monthlyCost: 80_000, deployed: false, available: false },
+]);
 
 function observation(overrides: Partial<BasicBalanceObservation> = {}): BasicBalanceObservation {
   return Object.freeze({
@@ -46,14 +55,7 @@ function observation(overrides: Partial<BasicBalanceObservation> = {}): BasicBal
     growthEvent: null,
     currentTechnologyBuildId: null,
     deployedTechnologies: Object.freeze([]),
-    technologyOptions: Object.freeze([
-      { id: 'REDIS', buildCost: 300_000, monthlyCost: 100_000, deployed: false, available: false },
-      { id: 'SQS', buildCost: 200_000, monthlyCost: 80_000, deployed: false, available: true },
-      { id: 'RABBITMQ', buildCost: 500_000, monthlyCost: 150_000, deployed: false, available: true },
-      { id: 'KAFKA', buildCost: 1_500_000, monthlyCost: 350_000, deployed: false, available: true },
-      { id: 'ALB', buildCost: 150_000, monthlyCost: 100_000, deployed: false, available: false },
-      { id: 'OBJECT_STORAGE', buildCost: 200_000, monthlyCost: 80_000, deployed: false, available: false },
-    ]),
+    technologyOptions: TECHNOLOGY_OPTIONS,
     nodes: Object.freeze([]),
     ...overrides,
   });
