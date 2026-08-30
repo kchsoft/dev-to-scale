@@ -14,9 +14,6 @@ import {
   technologyAction,
 } from './strategy-helpers';
 
-const RELEASE_STABILITY_TARGET_RATIO = 0.70;
-const RELEASE_STABILITY_TARGET_PERCENT = RELEASE_STABILITY_TARGET_RATIO * 100;
-
 export function preventativeDependencyAction(
   observation: BalanceObservation,
   context: StrategyDecisionContext,
@@ -48,7 +45,7 @@ export function decideMetricsReleaseReadiness(
   if (dependency) return dependency;
 
   if (!('releasePreview' in observation) || !observation.releasePreview) return null;
-  if (observation.releasePreview.maxEffectivePercent < RELEASE_STABILITY_TARGET_PERCENT) return null;
+  if (observation.releasePreview.maxEffectivePercent < 85) return null;
 
   const resource = [...observation.releasePreview.resourceLoads].sort((left, right) => (
     right.effectivePercent - left.effectivePercent
@@ -83,9 +80,9 @@ export function decideApmReleaseReadiness(
   }
 
   const preview = observation.releasePreview;
-  if (!preview || preview.maxEffectivePercent < RELEASE_STABILITY_TARGET_PERCENT) return null;
+  if (!preview || preview.maxEffectivePercent < 85) return null;
   const bottleneck = preview.diagnosis.topBottleneck;
-  if (!bottleneck || bottleneck.effectivePercent < RELEASE_STABILITY_TARGET_PERCENT) return null;
+  if (!bottleneck || bottleneck.effectivePercent < 85) return null;
 
   const node = nodeFor(observation, bottleneck.nodeId);
   if (!node) return null;
@@ -129,7 +126,7 @@ export function decideOracleReleaseReadiness(
   const preview = observation.releasePreview;
   if (!preview) return null;
   const currentMax = Math.max(0, ...preview.exactPressures.map(({ effectiveRatio }) => effectiveRatio));
-  if (currentMax < RELEASE_STABILITY_TARGET_RATIO) return null;
+  if (currentMax < 0.85) return null;
 
   const ranked = oracleReleaseCandidates(observation).map((action, order) => {
     if (!affordable(observation, context, 'ORACLE', action)) return null;
@@ -142,7 +139,7 @@ export function decideOracleReleaseReadiness(
     return { action, order, nextMax, relief, oneMonthCost };
   }).filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
 
-  const target = ranked.filter(({ nextMax }) => nextMax <= RELEASE_STABILITY_TARGET_RATIO);
+  const target = ranked.filter(({ nextMax }) => nextMax <= 0.85);
   if (target.length > 0) {
     target.sort((left, right) => (
       left.oneMonthCost - right.oneMonthCost

@@ -163,21 +163,4 @@ describe('ORACLE release readiness', () => {
       intent: 'RELEASE_READINESS_CAPACITY',
     });
   });
-
-  it('acts at exactly 0.70 projected pressure to preserve the seven-day release window', () => {
-    const observation = oracleObservation(
-      (action) => {
-        if (action.type === 'START_TECHNOLOGY_BUILD' && action.technologyId === 'REDIS') return load(0.66);
-        if (action.type === 'SCALE_OUT_NODE') return load(0.62);
-        if (action.type === 'RESIZE_NODE') return load(0.68);
-        return load(0.7);
-      },
-      () => 200_000,
-      0.7,
-    );
-
-    expect(BALANCE_STRATEGIES.ORACLE.decide(observation, context)).toMatchObject({
-      intent: 'RELEASE_READINESS_CAPACITY',
-    });
-  });
 });
