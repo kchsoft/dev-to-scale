@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [feature/playable-mvp]
 
+concurrency:
+  group: balance-pass-1-final-threshold-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   sweep:
     if: github.head_ref == 'feature/deterministic-balance-simulation-harness'
