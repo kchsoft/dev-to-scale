@@ -108,7 +108,9 @@ export class SimulationMetricsCollector {
 
   recordPreventativeAction(intent: SimulationActionIntent): void {
     if (intent === 'RELEASE_READINESS_DEPENDENCY') this.preventativeDependencyBuildCount += 1;
-    if (intent === 'RELEASE_READINESS_CAPACITY') this.preventativeCapacityActionCount += 1;
+    if (intent === 'RELEASE_READINESS_CAPACITY' || intent === 'POST_RELEASE_STABILITY_CAPACITY') {
+      this.preventativeCapacityActionCount += 1;
+    }
   }
 
   recordOperationalDay(input: {
