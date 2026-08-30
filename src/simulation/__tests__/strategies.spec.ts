@@ -55,6 +55,7 @@ function common(level: 'BASIC' | 'METRICS' | 'APM' | 'ORACLE', nodes: readonly B
     requiredDependencyGaps: Object.freeze([]),
     pendingFeature: null,
     upcomingRequiredDependencyGaps: Object.freeze([]),
+    releasePreview: null,
     serviceHealth: 'HEALTHY' as const,
     growthEvent: null,
     currentTechnologyBuildId: null,
