@@ -190,14 +190,14 @@ describe('release readiness actions', () => {
     });
   });
 
-  it('prepares the hottest projected DB IO resource at 85 percent or above', () => {
+  it('prepares the hottest projected DB IO resource at 70 percent or above', () => {
     const decideMetricsReleaseReadiness = (releaseReadiness as ReleaseReadinessPolicyModule)
       .decideMetricsReleaseReadiness;
     expect(typeof decideMetricsReleaseReadiness).toBe('function');
     if (!decideMetricsReleaseReadiness) return;
 
     expect(decideMetricsReleaseReadiness(
-      metricsObservation(90),
+      metricsObservation(70),
       { protectedLearningReserve: 0 },
       'METRICS_AWARE',
     )).toMatchObject({
@@ -207,14 +207,14 @@ describe('release readiness actions', () => {
     });
   });
 
-  it('does not prepare projected capacity below the 85 percent threshold', () => {
+  it('does not prepare projected capacity below the 70 percent stability target', () => {
     const decideMetricsReleaseReadiness = (releaseReadiness as ReleaseReadinessPolicyModule)
       .decideMetricsReleaseReadiness;
     expect(typeof decideMetricsReleaseReadiness).toBe('function');
     if (!decideMetricsReleaseReadiness) return;
 
     expect(decideMetricsReleaseReadiness(
-      metricsObservation(84),
+      metricsObservation(69),
       { protectedLearningReserve: 0 },
       'METRICS_AWARE',
     )).toBeNull();
