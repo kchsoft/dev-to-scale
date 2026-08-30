@@ -146,6 +146,7 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
 
   while (engine.status === 'RUNNING' && daysPlayed < BALANCE_DAY_LIMIT) {
     try {
+      const postReleaseStabilityWindowActive = metrics.hasActiveReleaseWindow();
       observeDailyOperationalMetrics(engine, metrics);
 
       const incidentControl = executor.maybeStartIncidentResponse(engine);
@@ -157,7 +158,10 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
       metrics.recordCash(engine.snapshot.cash);
 
       const protectedLearningReserve = BaselineLearningController.protectedReserve(engine);
-      const decisionContext = { protectedLearningReserve } as const;
+      const decisionContext = {
+        protectedLearningReserve,
+        postReleaseStabilityWindowActive,
+      } as const;
       const observation = observeForStrategy(engine, strategy.ceiling);
 
       const viralCashBefore = engine.snapshot.cash;
