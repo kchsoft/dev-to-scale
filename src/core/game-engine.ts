@@ -348,11 +348,7 @@ export class GameEngine {
    * The same proficiency, incidents, technologies and temporary traffic conditions are used.
    */
   previewLoadWithFeature(feature: FeatureDefinition): LoadSnapshot {
-    const active = this.activeFeaturesForLoad();
-    const projectedFeatures = active.some((candidate) => candidate.id === feature.id)
-      ? active
-      : [...active, feature];
-    return this.calculateCurrentLoad(this.infrastructure, projectedFeatures);
+    return this.calculateCurrentLoad(this.infrastructure, this.activeFeaturesIncluding(feature));
   }
 
   /**
@@ -372,6 +368,23 @@ export class GameEngine {
     );
   }
 
+  /** Preview a feature release together with one technology deployment without mutating live state. */
+  previewLoadWithFeatureAndTechnology(
+    feature: FeatureDefinition,
+    id: BuildableTechnologyId,
+  ): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    const retired = infrastructure.deployTechnology(id);
+    const ignoredIncidentNodeIds = new Set(
+      retired.map((technology) => v1NodeIdForTechnology(technology)),
+    );
+    return this.calculateCurrentLoad(
+      infrastructure,
+      this.activeFeaturesIncluding(feature),
+      ignoredIncidentNodeIds,
+    );
+  }
+
   /** Preview a node resize through the same load calculation without mutating live infrastructure. */
   previewLoadWithNodeResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadSnapshot {
     const infrastructure = this.infrastructure.clone();
@@ -379,11 +392,32 @@ export class GameEngine {
     return this.calculateCurrentLoad(infrastructure);
   }
 
+  /** Preview a feature release together with one node resize without mutating live state. */
+  previewLoadWithFeatureAndNodeResize(
+    feature: FeatureDefinition,
+    nodeId: InfrastructureNodeId,
+    size: ServerSize,
+  ): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    infrastructure.resizeNode(nodeId, size);
+    return this.calculateCurrentLoad(infrastructure, this.activeFeaturesIncluding(feature));
+  }
+
   /** Preview an APP/DB horizontal scale action while preserving live validation and state. */
   previewLoadWithNodeScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot {
     const infrastructure = this.infrastructure.clone();
     infrastructure.scaleOutNode(nodeId);
     return this.calculateCurrentLoad(infrastructure);
+  }
+
+  /** Preview a feature release together with one APP/DB scale-out without mutating live state. */
+  previewLoadWithFeatureAndNodeScaleOut(
+    feature: FeatureDefinition,
+    nodeId: InfrastructureNodeId,
+  ): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    infrastructure.scaleOutNode(nodeId);
+    return this.calculateCurrentLoad(infrastructure, this.activeFeaturesIncluding(feature));
   }
 
   private ensureRunning(): void {
@@ -434,6 +468,13 @@ export class GameEngine {
 
   private activeFeaturesForLoad(): FeatureDefinition[] {
     return this._launched ? [COMMUNITY_BOOTSTRAP, ...this.completedFeatureDefinitions] : [];
+  }
+
+  private activeFeaturesIncluding(feature: FeatureDefinition): FeatureDefinition[] {
+    const active = this.activeFeaturesForLoad();
+    return active.some((candidate) => candidate.id === feature.id)
+      ? active
+      : [...active, feature];
   }
 
   private finishFeatureIfComplete(): void {
