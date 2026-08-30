@@ -28,6 +28,15 @@ class NoIncidentRandom implements RandomSource {
   next(): number { return 0.99; }
 }
 
+class CountingRandom implements RandomSource {
+  calls = 0;
+
+  next(): number {
+    this.calls += 1;
+    return 0.99;
+  }
+}
+
 function launchedGame(seed = 10, random: RandomSource = new SafePositiveRandom()): GameEngine {
   const game = new GameEngine({
     frameworkId: 'SPRING_BOOT',
@@ -41,6 +50,18 @@ function launchedGame(seed = 10, random: RandomSource = new SafePositiveRandom()
 }
 
 describe('game engine orchestration', () => {
+  it('keeps the legacy random source as the incident source when incidentRandom is omitted', () => {
+    const random = new CountingRandom();
+    const game = new GameEngine({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 1,
+      random,
+    });
+
+    expect((game as unknown as { incidentRandom: RandomSource }).incidentRandom).toBe(random);
+  });
+
   it('uses the completed feature definition growth bonus on the following day', () => {
     function dauAfterFirstFeature(growthBonus: number): number {
       const game = new GameEngine({
@@ -97,6 +118,38 @@ describe('game engine orchestration', () => {
     game.scaleOutInfrastructureNode(databaseNodeId);
     expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeCloseTo(game.infrastructure.database.cpuCapacity);
     expect(nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity).toBeGreaterThan(dbCapacityBeforeReplica);
+  });
+
+  it('previews APP resize without mutating live infrastructure', () => {
+    const game = launchedGame(16);
+    const appNodeId = V1_NODE_IDS.app('SPRING_BOOT');
+    const beforeSize = game.infrastructure.app.size;
+    const beforeCapacity = nodeResource(game.snapshot.load, 'SERVER_GROUP', 'CPU')!.capacity;
+
+    const preview = game.previewLoadWithNodeResize(appNodeId, ServerSize.MEDIUM);
+
+    expect(game.infrastructure.app.size).toBe(beforeSize);
+    expect(nodeResource(preview, 'SERVER_GROUP', 'CPU')!.capacity).toBeGreaterThan(beforeCapacity);
+  });
+
+  it('previews DB scale-out without mutating the live replica count', () => {
+    const game = launchedGame(17);
+    const databaseNodeId = V1_NODE_IDS.database('POSTGRESQL');
+    const beforeReplicaCount = game.infrastructure.database.replicaCount;
+    const beforeCapacity = nodeResource(game.snapshot.load, 'DATABASE', 'CPU')!.capacity;
+
+    const preview = game.previewLoadWithNodeScaleOut(databaseNodeId);
+
+    expect(game.infrastructure.database.replicaCount).toBe(beforeReplicaCount);
+    expect(nodeResource(preview, 'DATABASE', 'CPU')!.capacity).toBeGreaterThan(beforeCapacity);
+  });
+
+  it('preserves APP scale-out validation while previewing', () => {
+    const game = launchedGame(18);
+    const appNodeId = V1_NODE_IDS.app('SPRING_BOOT');
+
+    expect(() => game.previewLoadWithNodeScaleOut(appNodeId)).toThrow('ALB is required before application scale-out');
+    expect(game.infrastructure.app.count).toBe(1);
   });
 
   it('publishes deployed queue capacity in the same snapshot that completes the build', () => {

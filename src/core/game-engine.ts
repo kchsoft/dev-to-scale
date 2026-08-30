@@ -32,6 +32,7 @@ export interface GameEngineConfig {
   seed: number;
   startingCash?: number;
   random?: RandomSource;
+  incidentRandom?: RandomSource;
 }
 
 export interface LastMonthlySettlement {
@@ -107,6 +108,7 @@ export class GameEngine {
   readonly finance: FinanceAccount;
 
   private readonly random: RandomSource;
+  private readonly incidentRandom: RandomSource;
   private readonly incidentGenerator = new IncidentGenerator();
   private readonly monthlyLedger = new MonthlyEconomyLedger();
   private readonly completedFeatureDefinitions: FeatureDefinition[] = [];
@@ -122,6 +124,7 @@ export class GameEngine {
 
   constructor(readonly config: GameEngineConfig) {
     this.random = config.random ?? new SeededRandomSource(config.seed ^ 0x9e3779b9);
+    this.incidentRandom = config.incidentRandom ?? this.random;
     this.infrastructure = InfrastructureState.initial(config.frameworkId, config.databaseId);
     this.progression = new CommunityProgression(config.seed);
     this.finance = new FinanceAccount(config.startingCash ?? 3_000_000);
@@ -369,6 +372,20 @@ export class GameEngine {
     );
   }
 
+  /** Preview a node resize through the same load calculation without mutating live infrastructure. */
+  previewLoadWithNodeResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    infrastructure.resizeNode(nodeId, size);
+    return this.calculateCurrentLoad(infrastructure);
+  }
+
+  /** Preview an APP/DB horizontal scale action while preserving live validation and state. */
+  previewLoadWithNodeScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    infrastructure.scaleOutNode(nodeId);
+    return this.calculateCurrentLoad(infrastructure);
+  }
+
   private ensureRunning(): void {
     if (this._status !== 'RUNNING') throw new Error(`Game is ${this._status}`);
   }
@@ -482,7 +499,7 @@ export class GameEngine {
     const incident = this.incidentGenerator.tryGenerate(
       IncidentTopology.candidates(this.incidentTopologyContext()),
       this.incidents.activeNodeIds,
-      this.random,
+      this.incidentRandom,
       this.techDebt.incidentRiskMultiplier,
     );
     if (incident) this.incidents.add(incident);
