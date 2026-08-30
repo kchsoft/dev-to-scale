@@ -147,6 +147,33 @@ describe('APM release readiness', () => {
     });
   });
 
+  it('does not stabilize a diagnosis rounded up to 70 percent while raw pressure is still below the boundary', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 70,
+      effectivePercent: 70,
+      status: 'WARNING',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      diagnosis: Object.freeze({
+        topBottleneck: Object.freeze({
+          nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.699,
+          effectiveRatio: 0.699, percent: 70, effectivePercent: 70, hardLimitPercent: 100,
+          capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
+        }),
+        text: 'Live PostgreSQL I/O bottleneck',
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'NO_OP',
+    });
+  });
+
   it('does not stabilize a diagnosed live bottleneck below 70 percent', () => {
     const db = node({
       nodeId: 'db',
