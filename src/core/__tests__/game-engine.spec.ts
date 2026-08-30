@@ -235,6 +235,60 @@ describe('game engine orchestration', () => {
     expect(nodeResource(projected, 'DATABASE', 'CPU')!.demand + nodeResource(projected, 'DATABASE', 'IO')!.demand).toBeGreaterThan(nodeResource(before, 'DATABASE', 'CPU')!.demand + nodeResource(before, 'DATABASE', 'IO')!.demand);
   });
 
+  it('previews a feature and one infrastructure action together without mutating live state', () => {
+    const game = launchedGame(30);
+    const appNodeId = V1_NODE_IDS.app('SPRING_BOOT');
+    const databaseNodeId = V1_NODE_IDS.database('POSTGRESQL');
+    const before = game.snapshot;
+    const cashBefore = before.cash;
+    const appSizeBefore = game.infrastructure.nodeSize(appNodeId);
+    const replicaCountBefore = game.infrastructure.database.replicaCount;
+    const technologiesBefore = [...game.infrastructure.deployedTechnologies];
+
+    const searchOnly = game.previewLoadWithFeature(COMMUNITY_FEATURES.SEARCH);
+    const resized = game.previewLoadWithFeatureAndNodeResize(
+      COMMUNITY_FEATURES.SEARCH,
+      appNodeId,
+      ServerSize.XLARGE,
+    );
+    const scaledOut = game.previewLoadWithFeatureAndNodeScaleOut(
+      COMMUNITY_FEATURES.SEARCH,
+      databaseNodeId,
+    );
+    const imageOnly = game.previewLoadWithFeature(COMMUNITY_FEATURES.IMAGE_UPLOAD);
+    const withStorage = game.previewLoadWithFeatureAndTechnology(
+      COMMUNITY_FEATURES.IMAGE_UPLOAD,
+      'OBJECT_STORAGE',
+    );
+
+    expect(nodeResource(resized, 'SERVER_GROUP', 'CPU')!.capacity)
+      .toBeGreaterThan(nodeResource(searchOnly, 'SERVER_GROUP', 'CPU')!.capacity);
+    expect(nodeResource(scaledOut, 'DATABASE', 'CPU')!.capacity)
+      .toBeGreaterThan(nodeResource(searchOnly, 'DATABASE', 'CPU')!.capacity);
+    expect(resourceLoad(maxNodeLoad(withStorage, { nodeKind: 'OBJECT_STORAGE' })!, 'THROUGHPUT')!.capacity)
+      .toBeGreaterThan(resourceLoad(maxNodeLoad(imageOnly, { nodeKind: 'OBJECT_STORAGE' })!, 'THROUGHPUT')!.capacity);
+
+    expect(game.snapshot).toEqual(before);
+    expect(game.snapshot.cash).toBe(cashBefore);
+    expect(game.infrastructure.nodeSize(appNodeId)).toBe(appSizeBefore);
+    expect(game.infrastructure.database.replicaCount).toBe(replicaCountBefore);
+    expect([...game.infrastructure.deployedTechnologies]).toEqual(technologiesBefore);
+  });
+
+  it('does not consume RNG while previewing a feature and action together', () => {
+    const random = new CountingRandom();
+    const game = launchedGame(31, random);
+    const callsBefore = random.calls;
+
+    game.previewLoadWithFeatureAndNodeResize(
+      COMMUNITY_FEATURES.SEARCH,
+      V1_NODE_IDS.app('SPRING_BOOT'),
+      ServerSize.XLARGE,
+    );
+
+    expect(random.calls).toBe(callsBefore);
+  });
+
   it('preserves proficiency and incident health when previewing a technology', () => {
     const game = launchedGame(14);
     game.developer.get(skillRef.technology('POSTGRESQL')).setLevel(10);
