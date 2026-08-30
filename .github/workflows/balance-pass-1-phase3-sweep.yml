@@ -1,0 +1,69 @@
+name: Balance Pass 1 Phase 3 Growth Sweep
+
+on:
+  pull_request:
+    branches: [feature/playable-mvp]
+
+concurrency:
+  group: balance-pass-1-phase3-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    if: github.head_ref == 'feature/deterministic-balance-simulation-harness'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+        probability:
+          - value: '0.60'
+            label: p60
+          - value: '0.62'
+            label: p62
+          - value: '0.65'
+            label: p65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run 180-scenario phase-3 shard
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+          PHASE3_PROBABILITY: ${{ matrix.probability.value }}
+        run: |
+          mkdir -p artifacts/balance
+          node - "$PHASE3_PROBABILITY" <<'NODE'
+          const fs = require('fs');
+          const probability = process.argv[2];
+          const path = 'src/core/growth.ts';
+          const source = fs.readFileSync(path, 'utf8');
+          const expected = '  3: 0.58,\n};';
+          if (!source.includes(expected)) {
+            throw new Error('expected phase-3 probability 0.58 was not found');
+          }
+          const updated = source.replace(expected, `  3: ${probability},\n};`);
+          if (updated === source) throw new Error('phase-3 probability replacement did not change growth.ts');
+          if (!updated.includes(`  3: ${probability},\n};`)) {
+            throw new Error(`effective phase-3 probability ${probability} was not written`);
+          }
+          fs.writeFileSync(path, updated);
+          console.log(`[phase3-sweep] effective positive-day probability=${probability}`);
+          NODE
+          npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" > artifacts/balance/console.log
+          node - <<'NODE'
+          const fs = require('fs');
+          const rows = fs.readFileSync('artifacts/balance/runs.csv', 'utf8').trimEnd().split('\n').length - 1;
+          if (rows !== 180) throw new Error(`expected 180 rows, got ${rows}`);
+          const summary = JSON.parse(fs.readFileSync('artifacts/balance/summary.json', 'utf8'));
+          if (summary.runCount !== 180) throw new Error(`expected runCount=180, got ${summary.runCount}`);
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-phase3-${{ matrix.probability.label }}-${{ matrix.framework }}-${{ matrix.database }}
+          path: artifacts/balance/
+          if-no-files-found: error
