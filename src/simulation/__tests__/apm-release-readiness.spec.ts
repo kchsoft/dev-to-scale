@@ -112,7 +112,7 @@ describe('APM release readiness', () => {
     });
   });
 
-  it('stabilizes a live diagnosed bottleneck at 70 percent during the release window', () => {
+  it('does not stabilize a healthy live diagnosis below the normal APM urgency threshold', () => {
     const db = node({
       nodeId: 'db',
       kind: 'DATABASE',
@@ -137,6 +137,41 @@ describe('APM release readiness', () => {
           capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
         }),
         text: 'Live PostgreSQL I/O bottleneck',
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'NO_OP',
+    });
+  });
+
+  it('stabilizes a degraded live diagnosis at 70 percent during the release window', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 70,
+      effectivePercent: 70,
+      status: 'WARNING',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      failureRate: 0.01,
+      serviceHealth: 'DEGRADED',
+      resourceLoads: Object.freeze([
+        Object.freeze({
+          nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
+          percent: 70, effectivePercent: 70, hardLimitPercent: 100, status: 'WARNING' as const,
+        }),
+      ]),
+      diagnosis: Object.freeze({
+        topBottleneck: Object.freeze({
+          nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.7,
+          effectiveRatio: 0.7, percent: 70, effectivePercent: 70, hardLimitPercent: 100,
+          capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
+        }),
+        text: 'Live PostgreSQL I/O bottleneck with request failures',
       }),
     });
 
@@ -185,6 +220,7 @@ describe('APM release readiness', () => {
     });
     const observation: ApmBalanceObservation = Object.freeze({
       ...baseApm([db]),
+      serviceHealth: 'DEGRADED',
       diagnosis: Object.freeze({
         topBottleneck: Object.freeze({
           nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.69,
