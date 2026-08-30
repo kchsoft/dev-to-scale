@@ -108,6 +108,41 @@ describe('APM release readiness', () => {
     });
   });
 
+  it('treats a diagnosed 70 percent pending-release bottleneck as needing stability headroom', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      releasePreview: Object.freeze({
+        resourceLoads: Object.freeze([
+          Object.freeze({
+            nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
+            percent: 70, effectivePercent: 70, hardLimitPercent: 100, status: 'WARNING' as const,
+          }),
+        ]),
+        maxEffectivePercent: 70,
+        diagnosis: Object.freeze({
+          topBottleneck: Object.freeze({
+            nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.7,
+            effectiveRatio: 0.7, percent: 70, effectivePercent: 70, hardLimitPercent: 100,
+            capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
+          }),
+          text: 'Projected PostgreSQL I/O bottleneck',
+        }),
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, context)).toMatchObject({
+      type: 'SCALE_OUT_NODE',
+      nodeId: 'db',
+      intent: 'RELEASE_READINESS_CAPACITY',
+    });
+  });
+
   it('prepares an upcoming dependency while live APM load is healthy', () => {
     const app = node({ nodeId: 'app', kind: 'SERVER_GROUP', productId: 'SPRING_BOOT' });
     const observation: ApmBalanceObservation = Object.freeze({
