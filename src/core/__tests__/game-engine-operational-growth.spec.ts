@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GameEngine } from '../game-engine';
 import { RandomSource } from '../growth';
-import { LoadSnapshot } from '../infrastructure';
+import { LoadSnapshot, ServerSize } from '../infrastructure';
 import { createNodeLoadSnapshot, createNodeResourceLoad } from '../node-load';
 
 class StablePositiveRandom implements RandomSource {
@@ -37,11 +37,13 @@ function engineWithLoad(load: LoadSnapshot): GameEngine {
     _launched: boolean;
     _dau: number;
     _load: LoadSnapshot;
+    _growthReferenceLoad: LoadSnapshot;
     advanceGrowth: () => void;
   };
   state._launched = true;
   state._dau = 1_000;
   state._load = load;
+  state._growthReferenceLoad = load;
   return engine;
 }
 
@@ -125,6 +127,18 @@ describe('game engine operational growth pressure', () => {
     const overloadedExternal = engineWithLoad(operationalLoad({ external: 9.99 }));
 
     expect(advanceGrowth(overloadedExternal)).toBe(advanceGrowth(baseline));
+  });
+
+  it('does not let a same-day capacity correction erase the previously observed overload penalty', () => {
+    const untreated = engineWithLoad(operationalLoad({ alb: 1.2 }));
+    const corrected = engineWithLoad(operationalLoad({ alb: 1.2 }));
+
+    corrected.resizeInfrastructureNode('v1:app:SPRING_BOOT', ServerSize.MEDIUM);
+    untreated.advanceDay();
+    corrected.advanceDay();
+
+    expect(corrected.dau).toBe(untreated.dau);
+    expect(corrected.dau).toBe(810);
   });
 
   it('uses incidentRandom for incident rolls when configured', () => {
