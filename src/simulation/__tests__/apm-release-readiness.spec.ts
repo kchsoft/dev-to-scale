@@ -68,7 +68,7 @@ function baseApm(nodes: readonly BalanceNodeObservation[]): ApmBalanceObservatio
 const context = Object.freeze({ protectedLearningReserve: 0 });
 
 describe('APM release readiness', () => {
-  it('uses projected diagnosis instead of the hottest projected percentage', () => {
+  it('uses projected diagnosis and chooses its cheapest affordable supported remedy', () => {
     const app = node({ nodeId: 'app', kind: 'SERVER_GROUP', productId: 'SPRING_BOOT' });
     const db = node({
       nodeId: 'db',
@@ -102,8 +102,8 @@ describe('APM release readiness', () => {
     });
 
     expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, context)).toMatchObject({
-      type: 'START_TECHNOLOGY_BUILD',
-      technologyId: 'REDIS',
+      type: 'SCALE_OUT_NODE',
+      nodeId: 'db',
       intent: 'RELEASE_READINESS_CAPACITY',
     });
   });
