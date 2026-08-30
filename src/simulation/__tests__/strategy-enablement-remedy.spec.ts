@@ -13,6 +13,8 @@ const observation: MetricsBalanceObservation = Object.freeze({
   monthlyInfrastructureCost: 2_000_000,
   failureRate: 0.05,
   requiredDependencyGaps: Object.freeze([]),
+  pendingFeature: null,
+  upcomingRequiredDependencyGaps: Object.freeze([]),
   serviceHealth: 'DEGRADED',
   growthEvent: null,
   currentTechnologyBuildId: null,
