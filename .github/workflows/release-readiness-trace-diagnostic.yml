@@ -1,0 +1,112 @@
+name: Release Readiness Trace Diagnostic
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout restored 85 percent policy
+        uses: actions/checkout@v4
+        with:
+          path: policy85
+      - name: Checkout rejected 70 percent experiment
+        uses: actions/checkout@v4
+        with:
+          ref: 05790b862c4abfbbbf90c069d29622f054512ec5
+          path: policy70
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: |
+          (cd policy85 && npm install)
+          (cd policy70 && npm install)
+      - name: Run paired traces
+        run: |
+          set -euo pipefail
+          mkdir -p traces
+          run_trace() {
+            local root="$1"
+            local label="$2"
+            local framework="$3"
+            local database="$4"
+            local seed="$5"
+            local strategy="$6"
+            (cd "$root" && npm run balance -- --framework "$framework" --db "$database" --seed "$seed" --strategy "$strategy" --trace) \
+              > "traces/${label}-${framework}-${database}-${seed}-${strategy}.log"
+          }
+          for policy in 85 70; do
+            root="policy${policy}"
+            run_trace "$root" "$policy" ASPNET_CORE MONGODB 5 METRICS_AWARE
+            run_trace "$root" "$policy" ASPNET_CORE MYSQL 5 APM_AWARE
+            run_trace "$root" "$policy" ASPNET_CORE MYSQL 29 ORACLE
+          done
+      - name: Summarize first divergence and release windows
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const dir = 'traces';
+          const files = fs.readdirSync(dir).filter(name => name.endsWith('.log'));
+          function parse(name) {
+            const text = fs.readFileSync(path.join(dir, name), 'utf8');
+            const trace = text.split('\n').filter(line => line.startsWith('[trace] ')).map(line => JSON.parse(line.slice(8)));
+            const terminal = text.split('\n').find(line => line.startsWith('[balance] terminal ')) ?? '';
+            const releases = [];
+            for (let i = 1; i < trace.length; i += 1) {
+              if (trace[i].completedFeatureCount > trace[i - 1].completedFeatureCount) {
+                releases.push({
+                  day: trace[i].day,
+                  completedFeatureCount: trace[i].completedFeatureCount,
+                  nextSeven: trace.slice(i, i + 7).map(entry => ({
+                    day: entry.day,
+                    actionId: entry.actionId,
+                    actionReason: entry.actionReason,
+                    hottestVisibleSignal: entry.hottestVisibleSignal,
+                  })),
+                });
+              }
+            }
+            return { trace, terminal, releases };
+          }
+          const pairs = [
+            ['ASPNET_CORE-MONGODB-5-METRICS_AWARE'],
+            ['ASPNET_CORE-MYSQL-5-APM_AWARE'],
+            ['ASPNET_CORE-MYSQL-29-ORACLE'],
+          ];
+          const out = [];
+          for (const [key] of pairs) {
+            const a = parse(`85-${key}.log`);
+            const b = parse(`70-${key}.log`);
+            const length = Math.min(a.trace.length, b.trace.length);
+            let firstDivergence = null;
+            for (let i = 0; i < length; i += 1) {
+              const left = a.trace[i];
+              const right = b.trace[i];
+              if (left.day !== right.day || left.actionId !== right.actionId || left.actionReason !== right.actionReason) {
+                firstDivergence = { index: i, policy85: left, policy70: right };
+                break;
+              }
+            }
+            out.push({
+              scenario: key,
+              terminal85: a.terminal,
+              terminal70: b.terminal,
+              traceDays85: a.trace.length,
+              traceDays70: b.trace.length,
+              firstDivergence,
+              releases85: a.releases,
+              releases70: b.releases,
+            });
+          }
+          fs.writeFileSync(path.join(dir, 'summary.json'), JSON.stringify(out, null, 2));
+          NODE
+          cat traces/summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-readiness-trace-diagnostic
+          path: traces/
+          if-no-files-found: error
