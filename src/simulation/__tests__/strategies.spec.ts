@@ -53,6 +53,8 @@ function common(level: 'BASIC' | 'METRICS' | 'APM' | 'ORACLE', nodes: readonly B
     monthlyInfrastructureCost: nodes.reduce((sum, candidate) => sum + candidate.monthlyCost, 0),
     failureRate: 0,
     requiredDependencyGaps: Object.freeze([]),
+    pendingFeature: null,
+    upcomingRequiredDependencyGaps: Object.freeze([]),
     serviceHealth: 'HEALTHY' as const,
     growthEvent: null,
     currentTechnologyBuildId: null,
