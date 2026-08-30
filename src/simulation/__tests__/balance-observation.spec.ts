@@ -88,7 +88,7 @@ describe('balance observation boundaries', () => {
     expect('developer' in observation).toBe(false);
   });
 
-  it('exposes pending feature requirements without exposing projected load to BASIC', () => {
+  it('exposes pending feature requirements before release without exposing projected load to BASIC', () => {
     const game = gameWithPendingRequiredQueue();
     const currentFeatureId = game.snapshot.currentFeature?.id;
     if (!currentFeatureId) throw new Error('Expected pending feature');
