@@ -40,7 +40,7 @@ jobs:
             key="${framework}-${database}-${seed}"
             for policy in baseline watch; do
               (cd "$policy" && npm run balance -- --framework "$framework" --db "$database" --seed "$seed" --strategy APM_AWARE --trace) \
-                > "../traces/${policy}-${key}.log"
+                > "traces/${policy}-${key}.log"
             done
           done
       - name: Analyze first divergence
