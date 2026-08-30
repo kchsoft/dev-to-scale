@@ -7,24 +7,18 @@ Ultimate base: `feature/playable-mvp`
 
 ## Context
 
-The deterministic balance harness and harness-correctness fixes have been split out and merged into `feature/playable-mvp` through PR #20.
+The deterministic harness and correctness fixes were split into PR #20 and merged into `feature/playable-mvp`.
 
-Balance Pass 1 then established a playable late-game baseline and exhaustively tested the three global late-game axes that were intentionally allowed in that pass:
-
-- final progression threshold;
-- phase-3 positive organic-growth probability;
-- exit monthly-revenue target.
-
-The current Balance Pass 1 branch uses:
+Balance Pass 1 then established a playable late-game baseline with:
 
 - progression tail: `300k -> 900k -> 2M -> 3M`;
 - phase-3 positive-day probability: `0.58`;
 - exit monthly-revenue target: `143M`;
 - ALB XLARGE throughput: `1,800`.
 
-Those values make wins possible, preserve bankruptcy and timeout outcomes, and produce winner-day medians around the intended late-game window. However, the strategy-quality acceptance signal remains missing.
+Those values make wins possible while preserving bankruptcy, timeout, and late winner-day distributions. The remaining failure is strategy signal: better-observed strategies do not materially outperform reactive/riskier strategies.
 
-The 2,700-run candidate matrix at the playable baseline produced an informed-cohort win rate only slightly above the intentionally flawed/riskier cohort. Subsequent full sensitivity sweeps showed that global constants cannot create the desired separation without mostly helping all strategies together:
+Full sensitivity evidence showed that this cannot be repaired by further global late-game tuning.
 
 ### Final-threshold sensitivity
 
@@ -42,128 +36,55 @@ The 2,700-run candidate matrix at the playable baseline produced an informed-coh
 | 0.62 | 42.89% | 41.85% | 43.93% | -2.07pp |
 | 0.65 | 47.59% | 47.33% | 47.85% | -0.52pp |
 
-`0.65` also violates the intended 45% overall-win ceiling. Exit-target sensitivity likewise failed to produce a meaningful informed advantage.
+`0.65` also violates the 45% overall-win ceiling. Exit-target sensitivity likewise failed to create meaningful cohort separation.
 
-The conclusion is structural: the harness currently gives better-observed strategies too little preventative advantage. Most strategies ultimately perform a similar remedy, with the main difference being whether they react around 85% or after crossing 100%. In addition, all strategies share the same baseline learning controller and all six receive identical post-failure REQUIRED-dependency recovery from the registry wrapper. This makes the better-observability strategies efficient troubleshooters, but not meaningfully better operators.
+The structural cause is that informed strategies are currently better troubleshooters, not better operators. All strategies share the same learning controller, live REQUIRED-dependency recovery is applied identically by the registry wrapper, and most capacity decisions eventually converge on similar remedies. Better observability often changes only whether a remedy happens around 85% or after crossing 100%.
 
 ## Goal
 
-Make pre-release production readiness a real operational skill.
+Make **pre-release production readiness** a real operational skill.
 
-A skilled strategy should be able to inspect a feature that is already being developed, anticipate the production risk of releasing it, and prepare infrastructure before the feature starts receiving live traffic.
+A skilled strategy should inspect a feature already under development, anticipate the production risk of releasing it, and prepare infrastructure before live traffic reaches the new code.
 
-The desired game behavior is:
+The player-facing lesson is:
 
-- the developer knows which feature is currently being built and approximately when it will ship;
-- the developer knows explicit architectural requirements of their own feature, such as a REQUIRED event bus;
-- better observability enables progressively better pre-release load analysis;
-- informed strategies can build required dependencies or add targeted capacity before release;
-- reactive/passive strategies are still allowed to ship unprepared and recover afterward;
-- YOLO can still spend early, but without the precision of observability-aware planning;
-- no strategy receives hidden probability buffs, revenue buffs, capacity buffs, or artificial penalties;
-- every strategy continues to use the same public engine actions and affordability rules.
+> Load-test and capacity-plan before shipping a feature instead of waiting for production to fail.
 
-The player-facing lesson should be recognizable to a developer: **load-test and capacity-plan before shipping a feature, rather than waiting for production to fail.**
+No strategy receives hidden probability, revenue, cost, or capacity modifiers. Every strategy continues to use the same public engine commands and affordability rules.
 
 ## Approaches considered
 
-### A. Give informed strategies cheaper infrastructure or direct success bonuses
+### A. Strategy-specific economic or capacity buffs
 
-Examples would include reduced build cost, lower incident probability, or extra capacity when an informed strategy is active.
+Rejected. This can force a win-rate gap but turns strategy identity into a hidden modifier and teaches no operational concept.
 
-Pros:
+### B. Artificially weaken reactive strategies
 
-- easy to force a win-rate gap.
+Rejected as the primary mechanism. REACTIVE_BASIC should remain a plausible novice operator, not a strawman.
 
-Cons:
+### C. Release-readiness observation and preventative decisions
 
-- strategy identity becomes a hidden game modifier rather than a consequence of better decisions;
-- does not teach an operational concept;
-- makes the harness less representative of the player-facing game.
+Recommended and approved.
 
-Rejected.
+Use the current feature-development state and existing read-only `GameEngine.previewLoadWithFeature(feature)` path to model a pre-release load test. Informed strategies act on the preview before automatic release; reactive strategies continue to react to the live service afterward.
 
-### B. Make reactive strategies deliberately worse
+### D. Manual deployment gate
 
-Examples would include delaying their response, increasing runway requirements, or forcing poor technology choices.
-
-Pros:
-
-- also easy to create a cohort gap.
-
-Cons:
-
-- weakens the meaning of the comparison;
-- risks turning REACTIVE_BASIC into a strawman;
-- does not add a new gameplay decision.
-
-Rejected as the primary mechanism.
-
-### C. Add release-readiness observation and preventative decisions
-
-Use the current feature-development state and the existing read-only `GameEngine.previewLoadWithFeature(feature)` capability to model a pre-release load test.
-
-Informed strategies use this information to prepare before the automatic feature release. Reactive strategies continue to respond to the live system after release.
-
-Pros:
-
-- creates a real operational decision rather than a hidden bonus;
-- reuses existing engine behavior and preview infrastructure;
-- directly addresses REQUIRED-dependency outage days and post-release overload;
-- preserves the meaning of BASIC/METRICS/APM/ORACLE observation ceilings;
-- naturally produces a trade-off between early spend and production stability.
-
-Cons:
-
-- expands observation contracts and strategy semantics;
-- requires new metrics to prove that any win-rate improvement comes from prevention rather than accidental spending.
-
-Recommended and approved direction.
-
-### D. Add a manual deployment gate / hold-release command
-
-The player could stop a completed feature from shipping until readiness checks pass.
-
-This is a valid future mechanic, but it changes the core development/release loop more substantially than required for this pass. The current engine already gives strategies a decision step each day before `advanceDay()`, so preventative infrastructure can be started while the feature is still in progress without adding deployment scheduling.
-
-Deferred.
+Deferred. A hold/release command is a valid future game mechanic, but the existing daily decision before `advanceDay()` already gives enough time to prepare while a feature is being developed.
 
 ## Existing engine support
 
-`GameSnapshot.currentFeature` already exposes:
+`GameSnapshot.currentFeature` already exposes feature id, progress, required work, elapsed days, and estimated remaining days.
 
-- feature id;
-- progress;
-- required work;
-- elapsed days;
-- estimated remaining days.
+`GameEngine.previewLoadWithFeature(feature)` already calculates the load that would exist immediately after an unreleased feature ships using the same current DAU, infrastructure, skills, incidents, technologies, temporary traffic state, and live load-calculation path.
 
-`GameEngine.previewLoadWithFeature(feature)` already computes the load that would exist immediately after an unreleased feature ships, using the same:
-
-- current DAU;
-- infrastructure;
-- developer proficiency;
-- incidents;
-- deployed technologies;
-- temporary traffic state;
-- load-calculation path used by the live game.
-
-This preview is read-only and therefore is the source of truth for release-readiness projections.
-
-The game also already records feature definitions with request routes and REQUIRED/OPTIONAL topology requirements. For example, NOTIFICATION, AI_RECOMMENDATION and FOLLOW_FEED explicitly require a queue/event-bus path.
+Feature definitions also already declare request routes and REQUIRED/OPTIONAL topology roles. NOTIFICATION, AI_RECOMMENDATION, and FOLLOW_FEED, for example, require a queue/event-bus path.
 
 ## Observation model
 
-### Common pending-feature observation
+### Common pending feature
 
-Add a nullable `pendingFeature` to `CommonBalanceObservation`.
-
-It is present only when:
-
-- the service has launched;
-- a non-bootstrap feature is currently under development.
-
-It contains only information the developer should intrinsically know about their own work:
+Add a nullable pending feature to `CommonBalanceObservation`:
 
 ```ts
 interface PendingFeatureObservation {
@@ -173,52 +94,48 @@ interface PendingFeatureObservation {
 }
 ```
 
-The common observation does **not** expose exact future load numbers.
+It exists only after launch while a non-bootstrap feature is under development.
 
-`requiredResourceRoles` is derived from REQUIRED entries in the feature's declared request route. This is architecture knowledge, not production observability.
+This is intrinsic development knowledge. It does not reveal future production load.
 
 ### Upcoming dependency gaps
 
 Add `upcomingRequiredDependencyGaps` to the common observation.
 
-Unlike the existing `requiredDependencyGaps`, which is derived from failed live request traces after a feature has shipped, the upcoming form is derived from:
+It is derived from:
 
-- the pending feature's REQUIRED resource roles;
-- the currently deployed topology;
-- the same allowed candidate technology mapping used for live dependency recovery.
+- REQUIRED roles declared by the pending feature;
+- currently deployed topology;
+- the same compatible technology mapping used by live dependency recovery.
 
 Example:
 
 ```text
-FOLLOW_FEED is being developed
--> request route requires EVENT_BUS
--> no queue technology is deployed
--> upcomingRequiredDependencyGaps contains EVENT_BUS with SQS/RabbitMQ/Kafka candidates
+FOLLOW_FEED is under development
+-> requires EVENT_BUS
+-> no queue is deployed
+-> upcoming gap exposes SQS / RabbitMQ / Kafka candidates
 ```
 
-This information is visible to every strategy, but only the informed strategies gain a new preventative policy in this pass. Reactive/riskier strategies are intentionally free to ignore it until the existing live-gap recovery path activates.
-
-The current post-release registry wrapper remains in place as a safety/correctness fallback so a poor strategy does not permanently deadlock the simulation.
+Every strategy may see this architectural fact. Only the informed strategies gain a new preventative policy in this pass. The existing live `requiredDependencyGaps` wrapper remains the post-release correctness fallback for strategies that ship unprepared.
 
 ## Release preview by observation ceiling
 
-The preview is generated from `GameEngine.previewLoadWithFeature()` but projected through the strategy's existing observation ceiling.
+The source of truth is `GameEngine.previewLoadWithFeature()` and the preview is projected through the existing observation ceilings.
 
 ### BASIC
 
-BASIC receives:
+BASIC sees:
 
-- `pendingFeature`;
-- `upcomingRequiredDependencyGaps`;
-- current aggregate node health, as today.
+- pending feature identity and remaining time;
+- explicit upcoming REQUIRED-role gaps;
+- current aggregate node health.
 
-BASIC does not receive projected post-release load.
-
-This preserves the meaning of REACTIVE_BASIC: it knows what it is shipping, but lacks instrumentation to estimate where the capacity problem will land.
+It receives no projected post-release load.
 
 ### METRICS
 
-METRICS additionally receives a `releasePreview` containing projected resource-level percentages for the pending feature:
+METRICS additionally receives:
 
 ```ts
 interface MetricsReleasePreview {
@@ -227,17 +144,11 @@ interface MetricsReleasePreview {
 }
 ```
 
-The projected values use the same resource observation format already visible for the live service.
-
-METRICS therefore answers:
-
-> If this feature shipped now, which CPU/IO/throughput resource would be hottest and how close would it be to its effective limit?
-
-It does not receive exact raw demand/capacity internals or action simulation.
+This answers which projected CPU/IO/throughput resource would be hottest if the feature shipped now. It does not expose exact raw demand/capacity values or action simulation.
 
 ### APM
 
-APM receives the METRICS release preview plus a projected diagnosis:
+APM receives the metrics preview plus projected diagnosis:
 
 ```ts
 interface ApmReleasePreview extends MetricsReleasePreview {
@@ -245,17 +156,11 @@ interface ApmReleasePreview extends MetricsReleasePreview {
 }
 ```
 
-The diagnosis identifies the projected top bottleneck using the same node/resource semantics as live APM diagnosis.
-
-APM therefore answers:
-
-> If this feature shipped now, what would be the primary bottleneck?
-
-This enables targeted technology/capacity preparation rather than generic scale-up.
+The diagnosis identifies the projected primary node/resource bottleneck using the same semantics as live APM diagnosis.
 
 ### ORACLE
 
-ORACLE receives exact projected operational pressures for the pending feature:
+ORACLE receives exact projected pressures:
 
 ```ts
 interface OracleReleasePreview extends ApmReleasePreview {
@@ -263,21 +168,21 @@ interface OracleReleasePreview extends ApmReleasePreview {
 }
 ```
 
-The Oracle preview port is extended only as far as needed to rank preventative actions against the pending release. It must remain read-only and must not mutate the live engine or consume RNG.
+ORACLE also **must** receive exact combined `pending feature + candidate action` previews. Approximate relief scoring is not acceptable for the ORACLE contract.
 
-For the first implementation, ORACLE must be able to compare the projected release pressure with the relief offered by candidate actions. If exact combined `feature + candidate action` preview is necessary to do this correctly, add symmetric core read-only preview methods for:
+Add symmetric read-only core preview methods for:
 
 - pending feature + technology deployment;
 - pending feature + node resize;
 - pending feature + node scale-out.
 
-Do **not** import simulation-layer `SimulationAction` types into `src/core`.
+These methods must use the same load-calculation path as live state, must not consume RNG, and must not mutate the live engine.
 
-The simulation layer may wrap those core preview methods behind `OraclePreviewPort`.
+Do not import simulation-layer `SimulationAction` into `src/core`. The balance observation layer wraps the three core methods behind `OraclePreviewPort` and maps a candidate action to the appropriate preview method.
 
-## Strategy semantics
+## Strategy decision order
 
-Global Balance Pass 1 constants stay frozen while evaluating this design:
+Global Balance Pass 1 constants remain frozen during this pass:
 
 ```text
 progression tail = 300k / 900k / 2M / 3M
@@ -286,227 +191,160 @@ exit monthly revenue = 143M
 ALB XLARGE throughput = 1,800
 ```
 
-### Shared rule for informed strategies
+For `METRICS_AWARE`, `APM_AWARE`, and `ORACLE`:
 
-`METRICS_AWARE`, `APM_AWARE`, and `ORACLE` gain a pre-release readiness phase before their existing live-service decision.
+1. preserve existing live REQUIRED-dependency recovery as the highest-priority correctness fallback;
+2. if an upcoming REQUIRED dependency is missing, start an affordable preventative dependency build;
+3. otherwise evaluate pending-release capacity risk;
+4. if no meaningful affordable preventative action exists, fall through to existing live-service logic.
 
-Decision ordering:
+This prevents readiness logic from hiding an already-broken live dependency.
 
-1. existing live REQUIRED-dependency recovery remains the highest-priority correctness fallback;
-2. if an upcoming REQUIRED dependency is missing, attempt an affordable preventative dependency build;
-3. otherwise evaluate release capacity risk when a pending feature exists;
-4. if no meaningful affordable preventative action exists, fall through to the strategy's existing live-service logic.
+### Preventative dependency build
 
-This ordering prevents readiness logic from masking a currently broken production dependency.
+An informed strategy starts the cheapest affordable compatible dependency as soon as the upcoming gap becomes visible. It does not wait until the final development days because technology construction itself takes time.
 
-### Preventative dependency selection
-
-For an upcoming dependency gap, informed strategies start the cheapest affordable compatible dependency using the same public technology-build command and existing affordability policy.
-
-The build starts as soon as the upcoming gap becomes visible; it is **not** delayed until the last few development days. This matters because technology construction itself takes time.
-
-There is no special instant-deploy behavior.
+There is no instant deployment and no special build-duration reduction.
 
 ### METRICS_AWARE
 
-METRICS uses the projected release resource loads.
-
-Initial policy:
-
-- if projected max effective load is below 85%, no release-capacity action is required;
+- if projected max effective load is below 85%, take no release-capacity action;
 - otherwise select the projected hottest player-owned node/resource;
-- choose the first affordable resource-aware remedy using the existing `resourceRemedyCandidates` ordering;
-- after the preventative action, normal live-service logic continues on subsequent days.
-
-METRICS does not receive an exact action-result preview. It acts on visible projected resource pressure.
+- choose the first affordable remedy using existing `resourceRemedyCandidates` ordering;
+- use no exact action-result preview.
 
 ### APM_AWARE
 
-APM uses the projected diagnosis.
-
-Initial policy:
-
-- if projected top bottleneck is below 85%, no release-capacity action is required;
-- otherwise select the diagnosed node/resource;
-- choose the cheapest affordable diagnosis-supported remedy from `resourceRemedyCandidates`;
-- preserve existing technology suitability rules and topology validation.
-
-APM should be more targeted than METRICS when several resources are elevated.
+- if projected diagnosed bottleneck is below 85%, take no release-capacity action;
+- otherwise use the diagnosed node/resource;
+- choose the cheapest affordable diagnosis-supported remedy;
+- retain topology validation and existing technology suitability rules.
 
 ### ORACLE
 
-ORACLE evaluates the exact projected release pressure.
-
-Initial policy:
-
-- if projected max effective ratio is below `0.85`, no preventative action is required;
-- build the same candidate set that would be valid for the projected hottest node/resource;
+- if projected max effective ratio is below `0.85`, take no preventative action;
+- build candidates for the projected hottest node/resource;
 - discard unaffordable candidates;
-- rank candidates by projected post-release relief and one-month cost;
-- prefer a candidate that brings the projected release max to `<= 0.85` at the lowest cost;
+- score every candidate using its **exact combined post-release preview**;
+- prefer the lowest-cost candidate that brings projected max effective ratio to `<= 0.85`;
 - otherwise choose the highest meaningful relief-per-cost candidate;
-- reject candidates with negligible projected relief unless they are a required topology enabler such as ALB.
-
-This mirrors the existing ORACLE live policy, but scores the upcoming release instead of only the already-live service.
+- reject negligible-relief candidates except required topology enablers such as ALB.
 
 ### REACTIVE_BASIC
 
-No new preventative policy.
-
-It sees that a feature is being developed and can see explicit REQUIRED roles, but continues to act only when BASIC live aggregate load reaches the existing red threshold.
-
-If the new feature ships without a required dependency, the existing post-release dependency-recovery wrapper repairs it after the gap becomes live.
-
-This remains a plausible novice operator rather than a deliberately sabotaged strategy.
+No new preventative policy. It knows what is being developed, but waits for the existing BASIC live red threshold. If a REQUIRED dependency is missing after release, the existing recovery fallback repairs it.
 
 ### YOLO_SCALE
 
-No new feature-specific preview policy.
-
-It retains its existing generic preemptive scaling at 70% BASIC aggregate load and BURST preference during viral spikes.
-
-YOLO may sometimes be accidentally ready for a release, but it pays for capacity without knowing whether it addresses the coming bottleneck.
+No feature-specific preview policy. It keeps generic 70% BASIC preemptive scaling and BURST preference. It can accidentally be release-ready, but without knowing whether its spending targets the upcoming bottleneck.
 
 ### CHEAPSKATE
 
-No new preventative policy.
+No preventative policy. It continues waiting for hard-limit pressure and preserving its larger runway.
 
-It continues to wait for hard-limit pressure and preserve its large runway. It may benefit from the common knowledge of a pending feature only through existing behavior; it does not proactively spend for release readiness.
+## Readiness threshold
 
-## Why the 85% readiness target remains unchanged
-
-The informed live strategies already use 85% as the meaningful headroom boundary. Reusing the same boundary for release readiness avoids inventing another tuning parameter and keeps the mental model consistent:
+Use the existing informed-strategy headroom boundary:
 
 ```text
 < 85% projected effective load -> enough headroom
->= 85% -> prepare before shipping
+>= 85% -> prepare before release
 ```
 
-This pass must not tune the 85% threshold to force acceptance. If the strategy signal remains weak, diagnose the behavior rather than immediately adding threshold sweep dimensions.
+Do not sweep this threshold in Balance Pass 2 to force acceptance. If the strategy signal remains weak, diagnose behavior instead.
 
 ## Metrics
 
-Win rate alone is insufficient evidence because an informed strategy could win more simply by overspending.
+Win rate alone is insufficient because an informed strategy could win more by brute-force spending.
 
-Add release-readiness metrics to `BalanceRunResult` / `SimulationMetricsCollector`.
+Add the following evidence.
 
-### Prevented dependency evidence
-
-Track:
-
-- `preventativeDependencyBuildCount` — technology builds started because of an upcoming REQUIRED dependency;
-- existing `missingRequiredDependencyDays` remains the post-release failure metric.
-
-Acceptance signal:
-
-- informed strategies should materially reduce live missing-dependency days relative to the riskier cohort;
-- the full matrix should not show informed strategies creating **more** live missing-dependency days than the baseline.
-
-### Release-overload evidence
-
-Track a seven-day observation window after every non-bootstrap feature release.
-
-A `postReleaseOverloadDay` is a day within that window where the maximum effective operational ratio exceeds `1.0`.
+### Dependency prevention
 
 Record:
 
-- `postReleaseOverloadDays`;
-- `featuresReleasedIntoOverload` — count a feature once if any of its first seven live days exceeds `1.0`;
-- `preventativeCapacityActionCount` — resize / scale-out / technology action selected by release-readiness policy.
+- `preventativeDependencyBuildCount`;
+- existing `missingRequiredDependencyDays`.
 
-The seven-day window is an evidence window only. It does not change engine behavior.
+### Release overload
 
-### Spend evidence
+For each non-bootstrap feature release, observe its first seven live days. This seven-day window is metrics-only and changes no engine behavior.
 
-Existing infrastructure exposure and technology-build-spend metrics remain authoritative.
+Record:
 
-Review:
+- `postReleaseOverloadDays`: days in those windows where max effective ratio exceeds `1.0`;
+- `featuresReleasedIntoOverload`: a feature counts once if any of its first seven days exceeds `1.0`;
+- `preventativeCapacityActionCount`: readiness-triggered resize, scale-out, or technology actions.
 
-- median monthly infrastructure exposure;
-- technology build spend;
-- ending cash;
-- bankruptcy rate.
+### Spend sanity
 
-A strategy-signal pass is not acceptable if the informed cohort wins only by indiscriminate spending that destroys the intended economic trade-off.
+Continue using existing infrastructure exposure, technology-build spend, ending cash, and bankruptcy metrics.
 
 ## Acceptance criteria
 
 ### Outcome bands
 
-For the final 2,700-run matrix:
+For the final 2,700 runs:
 
-- overall win rate: 15%-45%;
-- bankruptcy rate: 10%-35%;
-- timeout remains non-zero;
-- at least four of six strategies record wins;
-- no strategy exceeds 80% wins.
-
-These stay unchanged from Balance Pass 1.
+- overall win rate 15%-45%;
+- bankruptcy rate 10%-35%;
+- timeout non-zero;
+- at least four of six strategies win;
+- no strategy exceeds 80% win rate.
 
 ### Strategy signal
 
-Define informed:
+Informed cohort:
 
 - `METRICS_AWARE`;
 - `APM_AWARE`;
 - `ORACLE`.
 
-Define riskier/flawed:
+Riskier/flawed cohort:
 
 - `REACTIVE_BASIC`;
 - `YOLO_SCALE`;
 - `CHEAPSKATE`.
 
-Hard acceptance:
+Hard criterion:
 
 - informed aggregate win rate exceeds riskier aggregate win rate by at least **10 percentage points**.
 
-Strict ordering inside either cohort is not required.
+Strict ordering inside a cohort is not required.
 
 ### Prevention signal
 
-Hard acceptance:
+Hard criteria:
 
 - informed aggregate `postReleaseOverloadDays` per run is at least **20% lower** than riskier aggregate;
 - informed aggregate `missingRequiredDependencyDays` per run is at least **50% lower** than riskier aggregate.
 
-If the denominator is zero for the riskier cohort, treat the corresponding ratio criterion as not applicable and document the absolute values instead. A zero/zero result cannot be used as evidence of preventative advantage.
-
-These metrics establish causality: the informed cohort must win more because it actually releases healthier systems.
+If the riskier denominator is zero, the corresponding percentage criterion is not applicable and the absolute values must be documented. Zero/zero is not evidence of preventative advantage.
 
 ### Game length
 
-Among winners:
-
-- median winning day remains between 500 and 1,000;
-- wins before day 365 remain rare, using the same Balance Pass 1 rule.
+- winner-day median remains 500-1,000;
+- wins before day 365 remain rare under the existing Balance Pass 1 rule.
 
 ### Spend sanity
 
-No hard ratio is imposed initially because preventative infrastructure should legitimately cost money.
+Investigate before acceptance if:
 
-However, before accepting the pass, investigate if the informed cohort's median infrastructure exposure is more than 50% above the riskier cohort or if its bankruptcy rate exceeds the riskier cohort. Such a result suggests brute-force overprovisioning rather than useful readiness planning.
+- informed median infrastructure exposure is more than 50% above riskier;
+- informed bankruptcy rate exceeds riskier.
+
+These are review triggers rather than hard rejection thresholds because legitimate preventative capacity has a cost.
 
 ### Stack fairness
 
-As in Pass 1, inspect all 15 framework/database stacks.
-
-Flag stacks where:
-
-- the cohort win-rate direction reverses strongly;
-- release-overload prevention disappears;
-- a framework/database combination becomes nearly deterministic regardless of strategy.
-
-No new hard per-stack threshold is introduced in this pass.
+Inspect all 15 framework/database stacks. Investigate strong cohort-direction reversals, disappearance of prevention benefit, or nearly deterministic stack outcomes.
 
 ## Calibration method
 
-The previous five-tuple calibration set proved too seed-sensitive. Balance Pass 2 therefore uses a broader pilot before any final matrix.
-
-Pilot matrix:
+The old five-tuple calibration sample was too seed-sensitive. Balance Pass 2 uses a broader pilot:
 
 ```text
-5 frameworks × 3 databases × 5 fixed seeds × 6 strategies = 450 runs
+5 frameworks × 3 databases × 5 seeds × 6 strategies = 450 runs
 ```
 
 Fixed seeds:
@@ -515,88 +353,83 @@ Fixed seeds:
 5, 8, 17, 23, 29
 ```
 
-This preserves the useful prior seeds while covering **all 15 stacks** instead of sampling only five stack/seed tuples.
+This covers every framework/database stack before a full matrix.
 
 Pilot review includes:
 
 - terminal outcomes;
-- informed-vs-riskier win-rate delta;
+- informed-vs-riskier win delta;
 - missing dependency days;
 - post-release overload days;
 - preventative action counts;
-- infra exposure / ending cash;
+- infrastructure exposure and ending cash;
 - winner-day distribution.
 
-If the pilot does not show the intended causal prevention signal, do not run the full 2,700 matrix. Diagnose strategy behavior first.
+Do not run the final matrix unless the pilot shows the intended causal prevention signal.
 
-The final candidate must still run:
+Final evidence remains exactly:
 
 ```text
 5 frameworks × 3 databases × 30 seeds × 6 strategies = 2,700 runs
 ```
 
-with the same integrity checks used by the deterministic harness.
+with the existing row-count, per-strategy, per-stack, seed, duplicate-key, and determinism checks.
 
-## TDD and implementation boundaries
+## TDD implementation slices
 
-Implement in causal slices.
+Implement causally:
 
-1. Pending-feature observation and upcoming dependency-gap projection.
-2. Release load preview projected through METRICS/APM/ORACLE ceilings.
-3. Metrics for post-release overload and preventative actions.
-4. METRICS preventative dependency/capacity policy.
-5. APM preventative policy.
-6. ORACLE preventative policy and any required combined read-only preview methods.
-7. 450-run pilot.
-8. Only if plausible: full 2,700-run evidence.
+1. pending-feature observation and upcoming dependency-gap projection;
+2. METRICS/APM release preview projection;
+3. exact ORACLE pending-feature and combined-action preview contract;
+4. post-release overload and preventative-action metrics;
+5. METRICS preventative dependency/capacity policy;
+6. APM preventative policy;
+7. ORACLE preventative policy;
+8. 450-run pilot;
+9. only if plausible, full 2,700-run evidence.
 
-Each behavior slice starts with a failing contract/regression test.
+Each behavior slice begins with a failing test.
 
-Required observation tests must prove:
+Observation/regression tests must prove:
 
-- BASIC does not gain projected resource load;
-- METRICS does not gain APM diagnosis or ORACLE exact pressure;
-- APM does not gain ORACLE exact demand/capacity internals;
-- preview construction does not mutate live infrastructure, feature state, RNG sequence, cash, or day;
+- BASIC never gains projected resource loads;
+- METRICS never gains APM diagnosis or ORACLE exact internals;
+- APM never gains ORACLE exact demand/capacity internals;
+- combined previews do not mutate infrastructure, feature state, RNG sequence, cash, or day;
 - trace on/off remains result-identical.
 
-Strategy tests must prove preventative actions happen **before** feature completion for representative cases.
+Strategy tests must prove representative preventative actions occur before feature completion.
 
 ## Non-goals
 
 Balance Pass 2 does not change:
 
-- the 1080-day horizon;
+- 1080-day horizon;
 - starting cash;
-- feature workload definitions;
-- feature revenue modifiers;
-- incident generation probability or severity;
-- viral event probability or modifiers;
+- feature workloads or revenue modifiers;
+- incident or viral-event probabilities/modifiers;
 - infrastructure prices;
-- framework/database capacity modifiers;
+- framework/database modifiers;
 - Balance Pass 1 late-game constants (`3M`, `0.58`, `143M`, ALB XLARGE `1,800`);
-- technology build costs or build durations;
-- learning costs or the shared baseline learning sequence;
-- automatic feature-completion/release timing;
-- post-release REQUIRED-dependency recovery correctness fallback;
+- technology build costs/durations;
+- learning costs or shared baseline learning order;
+- automatic feature completion/release timing;
+- post-release REQUIRED-dependency recovery fallback;
 - public game commands.
 
-The pass changes what strategies can infer from an **already-known pending release** and how informed strategies act on that information.
+This pass changes what a strategy can infer from an already-known pending release and how informed strategies act on that information.
 
 ## Decision rule
 
-If the 450-run pilot shows:
+Run the 450-run pilot first.
 
-- improved prevention metrics;
-- a substantial movement toward the +10pp cohort target;
-- acceptable overall difficulty and spend;
+If prevention metrics improve and the cohort delta moves materially toward +10pp without breaking difficulty/spend, run the full 2,700 matrix.
 
-then run the full 2,700 matrix.
+If prevention improves but win separation remains weak, investigate whether healthy release behavior is insufficiently rewarded by the current failure/growth economy before touching strategy thresholds.
 
-If prevention metrics improve but win-rate separation remains weak, investigate whether healthy release behavior is insufficiently rewarded by the existing growth/failure economy before changing strategy thresholds.
+If prevention does not improve, debug the observation/action path rather than tuning global constants.
 
-If prevention metrics do **not** improve, the release-readiness policy is not doing what it claims; debug the observation/action path rather than tuning global constants.
+If the final matrix satisfies all hard criteria, merge the playable Balance Pass 1 baseline first if it is still stacked, verify the rebased Balance Pass 2 CI, then merge Balance Pass 2.
 
-If the full matrix satisfies all hard criteria, merge the playable Balance Pass 1 baseline first if still stacked, then merge Balance Pass 2 after fresh merged-base CI verification.
-
-If it fails, keep both balance PRs unmerged until the failing criterion has a causal explanation. The already-merged deterministic harness remains unaffected.
+If the final matrix fails, keep the balance PRs unmerged until the failing criterion has a causal explanation. The already-merged deterministic harness remains unaffected.
