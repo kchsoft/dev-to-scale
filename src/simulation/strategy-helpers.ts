@@ -3,7 +3,11 @@ import { operationalPressures } from '../core/operational-pressure';
 import type { BuildableTechnologyId } from '../core/technology';
 import type { NodeResourceKind } from '../core/node-load';
 import type { InfrastructureNodeKind } from '../core/topology';
-import { simulationActionId, type SimulationAction } from './balance-action';
+import {
+  simulationActionId,
+  withReleaseReadinessIntent,
+  type SimulationAction,
+} from './balance-action';
 import type {
   BalanceNodeObservation,
   BalanceObservation,
@@ -166,6 +170,28 @@ export function cheapestAffordable(
       const rightCost = immediateCost(observation, right) + projectedMonthlyCost(observation, right);
       return leftCost - rightCost || simulationActionId(left).localeCompare(simulationActionId(right));
     })[0] ?? null;
+}
+
+export function preventativeDependencyAction(
+  observation: BalanceObservation,
+  context: StrategyDecisionContext,
+  strategyId: BalanceStrategyId,
+): SimulationAction | null {
+  const gap = observation.upcomingRequiredDependencyGaps[0];
+  if (!gap) return null;
+
+  const reason = `prepare ${gap.role} before ${gap.workloadIds.join(', ')} release`;
+  const action = cheapestAffordable(
+    observation,
+    context,
+    strategyId,
+    gap.candidateTechnologyIds.map((technologyId) => (
+      technologyAction(observation, technologyId, reason)
+    )),
+  );
+  return action
+    ? withReleaseReadinessIntent(action, 'RELEASE_READINESS_DEPENDENCY')
+    : null;
 }
 
 export function rawCapacityCandidates(
