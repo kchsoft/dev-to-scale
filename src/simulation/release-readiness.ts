@@ -1,11 +1,15 @@
-import { withReleaseReadinessIntent, type SimulationAction } from './balance-action';
-import type { BalanceObservation } from './balance-observation';
+import { simulationActionId, withReleaseReadinessIntent, type SimulationAction } from './balance-action';
+import type { BalanceObservation, OracleBalanceObservation } from './balance-observation';
 import type { BalanceStrategyId } from './balance-scenario';
 import type { StrategyDecisionContext } from './balance-strategy';
 import {
+  affordable,
   cheapestAffordable,
   firstAffordable,
+  immediateCost,
+  maxEffectiveRatioFromPreview,
   nodeFor,
+  projectedMonthlyCost,
   resourceRemedyCandidates,
   technologyAction,
 } from './strategy-helpers';
@@ -91,5 +95,68 @@ export function decideApmReleaseReadiness(
   );
   return action
     ? withReleaseReadinessIntent(action, 'RELEASE_READINESS_CAPACITY')
+    : null;
+}
+
+function oracleReleaseCandidates(observation: OracleBalanceObservation): readonly SimulationAction[] {
+  const pressure = [...(observation.releasePreview?.exactPressures ?? [])].sort((left, right) => (
+    right.effectiveRatio - left.effectiveRatio
+    || left.nodeId.localeCompare(right.nodeId)
+    || left.resourceKind.localeCompare(right.resourceKind)
+  ))[0];
+  if (!pressure) return [];
+
+  const node = nodeFor(observation, pressure.nodeId);
+  if (!node) return [];
+  return resourceRemedyCandidates(
+    observation,
+    node,
+    pressure.resourceKind,
+    `prepare ORACLE ${pressure.nodeKind} ${pressure.resourceKind} ${pressure.effectiveRatio.toFixed(2)}x for release`,
+  ).filter((candidate): candidate is SimulationAction => candidate !== null);
+}
+
+export function decideOracleReleaseReadiness(
+  observation: OracleBalanceObservation,
+  context: StrategyDecisionContext,
+): SimulationAction | null {
+  const dependency = preventativeDependencyAction(observation, context, 'ORACLE');
+  if (dependency) return dependency;
+
+  const preview = observation.releasePreview;
+  if (!preview) return null;
+  const currentMax = Math.max(0, ...preview.exactPressures.map(({ effectiveRatio }) => effectiveRatio));
+  if (currentMax < 0.85) return null;
+
+  const ranked = oracleReleaseCandidates(observation).map((action, order) => {
+    if (!affordable(observation, context, 'ORACLE', action)) return null;
+    const nextMax = maxEffectiveRatioFromPreview(observation.previewPort.previewReleaseAction(action));
+    const relief = Math.max(0, currentMax - nextMax);
+    const oneMonthCost = immediateCost(observation, action)
+      + Math.max(0, projectedMonthlyCost(observation, action) - observation.monthlyInfrastructureCost);
+    const requiredAlbEnablement = action.type === 'START_TECHNOLOGY_BUILD' && action.technologyId === 'ALB';
+    if (relief < 0.02 && !requiredAlbEnablement) return null;
+    return { action, order, nextMax, relief, oneMonthCost };
+  }).filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
+
+  const target = ranked.filter(({ nextMax }) => nextMax <= 0.85);
+  if (target.length > 0) {
+    target.sort((left, right) => (
+      left.oneMonthCost - right.oneMonthCost
+      || left.order - right.order
+      || simulationActionId(left.action).localeCompare(simulationActionId(right.action))
+    ));
+    return withReleaseReadinessIntent(target[0].action, 'RELEASE_READINESS_CAPACITY');
+  }
+
+  ranked.sort((left, right) => {
+    const leftScore = left.relief / Math.max(1, left.oneMonthCost);
+    const rightScore = right.relief / Math.max(1, right.oneMonthCost);
+    return rightScore - leftScore
+      || left.order - right.order
+      || simulationActionId(left.action).localeCompare(simulationActionId(right.action));
+  });
+  return ranked[0]
+    ? withReleaseReadinessIntent(ranked[0].action, 'RELEASE_READINESS_CAPACITY')
     : null;
 }
