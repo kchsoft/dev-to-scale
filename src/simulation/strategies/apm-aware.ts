@@ -1,4 +1,5 @@
 import type { BalanceStrategy } from '../balance-strategy';
+import { decideApmReleaseReadiness } from '../release-readiness';
 import { cheapestAffordable, hottestResource, noOp, nodeFor, resourceRemedyCandidates } from '../strategy-helpers';
 import { decideFromMetrics } from './metrics-aware';
 
@@ -6,6 +7,9 @@ export const apmAwareStrategy: BalanceStrategy = {
   id: 'APM_AWARE',
   ceiling: 'APM',
   decide(observation, context) {
+    const readiness = decideApmReleaseReadiness(observation, context);
+    if (readiness) return readiness;
+
     if (observation.level !== 'APM' && observation.level !== 'ORACLE') {
       return decideFromMetrics(observation, context, 'APM_AWARE');
     }
