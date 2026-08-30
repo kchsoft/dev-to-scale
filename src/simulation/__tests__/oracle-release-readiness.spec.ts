@@ -97,7 +97,7 @@ function oracleObservation(
     resourceLoads: Object.freeze([]),
     diagnosis: Object.freeze({ topBottleneck: null, text: null }),
     exactPressures: Object.freeze([exactDbIo(0.4)]),
-    workloadTags: Object.freeze(['READ_HEAVY']),
+    workloadTags: Object.freeze(['READ_HEAVY'] as const),
     releasePreview: Object.freeze({
       resourceLoads: Object.freeze([Object.freeze({
         nodeId: 'db',
