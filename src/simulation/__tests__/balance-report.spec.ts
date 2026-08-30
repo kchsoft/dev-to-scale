@@ -132,12 +132,17 @@ describe('balance report', () => {
   });
 
   it('serializes runs with a stable explicit CSV column order', () => {
-    const csv = serializeRunsCsv([run()]);
+    const csv = serializeRunsCsv([run({
+      preventativeDependencyBuildCount: 2,
+      preventativeCapacityActionCount: 3,
+      postReleaseOverloadDays: 4,
+      featuresReleasedIntoOverload: 5,
+    })]);
     const lines = csv.trimEnd().split('\n');
 
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toBe('frameworkId,databaseId,seed,strategyId,terminalStatus,daysPlayed,finalDau,peakDau,completedFeatureCount,missingRequiredDependencyDays,peakMonthlyRevenue,endingCash,minimumCash,failureDays,severeFailureDays,cumulativeFailureBurden,overloadDays,incidentCount,technologyBuildSpend,learningSpend,burstSpend,settledInfrastructureSpend,infrastructureCostExposure,resizeCount,appScaleOutCount,dbReplicaActionCount,prematureCapacityActions,lowUtilizationExpandedNodeDays,viralRideCount,viralThrottleCount,viralBurstCount');
-    expect(lines[1].startsWith('SPRING_BOOT,POSTGRESQL,1,APM_AWARE,WON,300,10000000,12000000,10,4,950000000')).toBe(true);
+    expect(lines[0]).toBe('frameworkId,databaseId,seed,strategyId,terminalStatus,daysPlayed,finalDau,peakDau,completedFeatureCount,missingRequiredDependencyDays,peakMonthlyRevenue,endingCash,minimumCash,failureDays,severeFailureDays,cumulativeFailureBurden,overloadDays,preventativeDependencyBuildCount,preventativeCapacityActionCount,postReleaseOverloadDays,featuresReleasedIntoOverload,incidentCount,technologyBuildSpend,learningSpend,burstSpend,settledInfrastructureSpend,infrastructureCostExposure,resizeCount,appScaleOutCount,dbReplicaActionCount,prematureCapacityActions,lowUtilizationExpandedNodeDays,viralRideCount,viralThrottleCount,viralBurstCount');
+    expect(lines[1]).toContain(',10,2,3,4,5,3,');
   });
 
   it('returns JSON-serializable plain report objects', () => {
