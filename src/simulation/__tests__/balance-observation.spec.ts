@@ -32,6 +32,24 @@ function launchedGame(): GameEngine {
   return game;
 }
 
+function gameWithPendingRequiredQueue(): GameEngine {
+  const game = new GameEngine({
+    frameworkId: 'SPRING_BOOT',
+    databaseId: 'POSTGRESQL',
+    seed: 2,
+    random: new GrowthRandom(),
+    incidentRandom: new ConstantRandom(),
+    startingCash: 100_000_000,
+  });
+  const queueRequiredFeatures = new Set(['NOTIFICATION', 'AI_RECOMMENDATION', 'FOLLOW_FEED']);
+  for (let day = 0; day < 600; day += 1) {
+    game.advanceDay();
+    const current = game.snapshot.currentFeature;
+    if (current && queueRequiredFeatures.has(current.id)) return game;
+  }
+  throw new Error('Expected a queue-required feature to be under development');
+}
+
 function gameWithMissingRequiredQueue(): GameEngine {
   const game = new GameEngine({
     frameworkId: 'SPRING_BOOT',
@@ -68,6 +86,28 @@ describe('balance observation boundaries', () => {
     expect('rawLoad' in observation).toBe(false);
     expect('infrastructure' in observation).toBe(false);
     expect('developer' in observation).toBe(false);
+  });
+
+  it('exposes pending feature requirements without exposing projected load to BASIC', () => {
+    const game = gameWithPendingRequiredQueue();
+    const currentFeatureId = game.snapshot.currentFeature?.id;
+    if (!currentFeatureId) throw new Error('Expected pending feature');
+
+    const observation = observeForStrategy(game, 'BASIC');
+
+    expect(observation.pendingFeature).toMatchObject({
+      id: currentFeatureId,
+      requiredResourceRoles: ['EVENT_BUS'],
+    });
+    expect(observation.pendingFeature?.estimatedRemainingDays).toBeGreaterThan(0);
+    expect(observation.upcomingRequiredDependencyGaps).toEqual([
+      {
+        role: 'EVENT_BUS',
+        workloadIds: [currentFeatureId],
+        candidateTechnologyIds: ['SQS', 'RABBITMQ', 'KAFKA'],
+      },
+    ]);
+    expect('releasePreview' in observation).toBe(false);
   });
 
   it('copies player-visible technology availability without leaking the developer profile', () => {
