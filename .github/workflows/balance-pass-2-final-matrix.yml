@@ -1,0 +1,231 @@
+name: Balance Pass 2 Final Matrix
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run thirty-seed stack matrix
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          set -euo pipefail
+          mkdir -p final-matrix
+          aggregate="final-matrix/${FRAMEWORK}-${DATABASE}.csv"
+          : > "$aggregate"
+          first=1
+          for seed in $(seq 1 30); do
+            npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed" > /dev/null
+            if [ "$first" -eq 1 ]; then
+              cat artifacts/balance/runs.csv > "$aggregate"
+              first=0
+            else
+              tail -n +2 artifacts/balance/runs.csv >> "$aggregate"
+            fi
+          done
+      - name: Validate shard
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const file = `final-matrix/${process.env.FRAMEWORK}-${process.env.DATABASE}.csv`;
+          const lines = fs.readFileSync(file, 'utf8').trimEnd().split('\n');
+          if (lines.length !== 181) throw new Error(`expected header + 180 rows, got ${lines.length}`);
+          const header = lines[0].split(',');
+          const strategyIndex = header.indexOf('strategyId');
+          const seedIndex = header.indexOf('seed');
+          const expected = ['REACTIVE_BASIC','METRICS_AWARE','APM_AWARE','ORACLE','YOLO_SCALE','CHEAPSKATE'];
+          const seen = new Set();
+          for (const line of lines.slice(1)) {
+            const values = line.split(',');
+            seen.add(`${values[seedIndex]}|${values[strategyIndex]}`);
+          }
+          if (seen.size !== 180) throw new Error(`expected 180 unique seed-strategy keys, got ${seen.size}`);
+          for (let seed = 1; seed <= 30; seed += 1) {
+            for (const strategy of expected) {
+              if (!seen.has(`${seed}|${strategy}`)) throw new Error(`missing ${seed}|${strategy}`);
+            }
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final-matrix-${{ matrix.framework }}-${{ matrix.database }}
+          path: final-matrix/*.csv
+          if-no-files-found: error
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: shard
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: final-matrix-*
+          path: final-all
+          merge-multiple: true
+      - name: Aggregate final matrix and evaluate gates
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = 'final-all';
+          const files = fs.readdirSync(root).filter(name => name.endsWith('.csv')).sort();
+          if (files.length !== 15) throw new Error(`expected 15 stack CSVs, got ${files.length}`);
+
+          function parseCsv(file) {
+            const lines = fs.readFileSync(path.join(root, file), 'utf8').trimEnd().split('\n');
+            const header = lines[0].split(',');
+            return lines.slice(1).map(line => {
+              const values = line.split(',');
+              return Object.fromEntries(header.map((key, index) => [key, values[index]]));
+            });
+          }
+          const rows = files.flatMap(parseCsv);
+          if (rows.length !== 2700) throw new Error(`expected 2700 rows, got ${rows.length}`);
+
+          const strategies = ['REACTIVE_BASIC','METRICS_AWARE','APM_AWARE','ORACLE','YOLO_SCALE','CHEAPSKATE'];
+          const informed = new Set(['METRICS_AWARE','APM_AWARE','ORACLE']);
+          const riskier = new Set(['REACTIVE_BASIC','YOLO_SCALE','CHEAPSKATE']);
+          const keys = new Set();
+          for (const row of rows) {
+            const key = `${row.frameworkId}|${row.databaseId}|${row.seed}|${row.strategyId}`;
+            if (keys.has(key)) throw new Error(`duplicate key ${key}`);
+            keys.add(key);
+          }
+          if (keys.size !== 2700) throw new Error(`expected 2700 unique keys, got ${keys.size}`);
+          for (const strategy of strategies) {
+            const count = rows.filter(row => row.strategyId === strategy).length;
+            if (count !== 450) throw new Error(`${strategy}: expected 450 rows, got ${count}`);
+          }
+
+          const mean = xs => xs.reduce((a,b) => a+b, 0) / xs.length;
+          const median = xs => {
+            if (xs.length === 0) return null;
+            const sorted = [...xs].sort((a,b) => a-b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+          };
+          const numeric = (selected, key) => selected.map(row => Number(row[key]));
+          function summarize(selected) {
+            const wins = selected.filter(row => row.terminalStatus === 'WON');
+            const bankrupt = selected.filter(row => row.terminalStatus === 'BANKRUPT');
+            const timeout = selected.filter(row => row.terminalStatus === 'TIMEOUT');
+            return {
+              runs: selected.length,
+              wins: wins.length,
+              bankrupt: bankrupt.length,
+              timeout: timeout.length,
+              winRate: wins.length / selected.length,
+              bankruptcyRate: bankrupt.length / selected.length,
+              timeoutRate: timeout.length / selected.length,
+              meanMissingRequiredDependencyDays: mean(numeric(selected, 'missingRequiredDependencyDays')),
+              meanPostReleaseOverloadDays: mean(numeric(selected, 'postReleaseOverloadDays')),
+              meanFeaturesReleasedIntoOverload: mean(numeric(selected, 'featuresReleasedIntoOverload')),
+              meanPreventativeDependencyBuildCount: mean(numeric(selected, 'preventativeDependencyBuildCount')),
+              meanPreventativeCapacityActionCount: mean(numeric(selected, 'preventativeCapacityActionCount')),
+              meanPrematureCapacityActions: mean(numeric(selected, 'prematureCapacityActions')),
+              meanLowUtilizationExpandedNodeDays: mean(numeric(selected, 'lowUtilizationExpandedNodeDays')),
+              meanInfrastructureCostExposure: mean(numeric(selected, 'infrastructureCostExposure')),
+              medianInfrastructureCostExposure: median(numeric(selected, 'infrastructureCostExposure')),
+              meanFailureDays: mean(numeric(selected, 'failureDays')),
+              meanOverloadDays: mean(numeric(selected, 'overloadDays')),
+              meanDaysPlayed: mean(numeric(selected, 'daysPlayed')),
+              winnerDayMedian: median(numeric(wins, 'daysPlayed')),
+              winsBefore365: wins.filter(row => Number(row.daysPlayed) < 365).length,
+            };
+          }
+
+          const overall = summarize(rows);
+          const informedRows = rows.filter(row => informed.has(row.strategyId));
+          const riskierRows = rows.filter(row => riskier.has(row.strategyId));
+          const informedSummary = summarize(informedRows);
+          const riskierSummary = summarize(riskierRows);
+          const perStrategy = Object.fromEntries(strategies.map(strategy => [
+            strategy,
+            summarize(rows.filter(row => row.strategyId === strategy)),
+          ]));
+
+          const stackIds = [...new Set(rows.map(row => `${row.frameworkId}|${row.databaseId}`))].sort();
+          const perStack = Object.fromEntries(stackIds.map(stack => {
+            const [frameworkId, databaseId] = stack.split('|');
+            const selected = rows.filter(row => row.frameworkId === frameworkId && row.databaseId === databaseId);
+            const left = summarize(selected.filter(row => informed.has(row.strategyId)));
+            const right = summarize(selected.filter(row => riskier.has(row.strategyId)));
+            return [stack, {
+              informedWinRate: left.winRate,
+              riskierWinRate: right.winRate,
+              winDelta: left.winRate - right.winRate,
+              informedPostReleaseOverloadDays: left.meanPostReleaseOverloadDays,
+              riskierPostReleaseOverloadDays: right.meanPostReleaseOverloadDays,
+              postReleaseRatio: right.meanPostReleaseOverloadDays === 0 ? null : left.meanPostReleaseOverloadDays / right.meanPostReleaseOverloadDays,
+              informedMissingDependencyDays: left.meanMissingRequiredDependencyDays,
+              riskierMissingDependencyDays: right.meanMissingRequiredDependencyDays,
+            }];
+          }));
+
+          const strategyWinners = strategies.filter(strategy => perStrategy[strategy].wins > 0).length;
+          const winDelta = informedSummary.winRate - riskierSummary.winRate;
+          const postReleaseRatio = riskierSummary.meanPostReleaseOverloadDays === 0
+            ? null
+            : informedSummary.meanPostReleaseOverloadDays / riskierSummary.meanPostReleaseOverloadDays;
+          const dependencyRatio = riskierSummary.meanMissingRequiredDependencyDays === 0
+            ? null
+            : informedSummary.meanMissingRequiredDependencyDays / riskierSummary.meanMissingRequiredDependencyDays;
+          const hardGates = {
+            overallWinBand: overall.winRate >= 0.15 && overall.winRate <= 0.45,
+            bankruptcyBand: overall.bankruptcyRate >= 0.10 && overall.bankruptcyRate <= 0.35,
+            timeoutNonZero: overall.timeout > 0,
+            atLeastFourStrategiesWin: strategyWinners >= 4,
+            noStrategyAbove80Percent: strategies.every(strategy => perStrategy[strategy].winRate <= 0.80),
+            informedWinAdvantageAtLeast10pp: winDelta >= 0.10,
+            informedPostReleaseOverloadAtLeast20PercentLower: postReleaseRatio !== null && postReleaseRatio <= 0.80,
+            informedMissingDependencyAtLeast50PercentLower: dependencyRatio !== null && dependencyRatio <= 0.50,
+            winnerMedian500To1000: overall.winnerDayMedian !== null && overall.winnerDayMedian >= 500 && overall.winnerDayMedian <= 1000,
+          };
+          const reviewFlags = {
+            informedMedianInfraMoreThan50PercentAboveRiskier:
+              informedSummary.medianInfrastructureCostExposure > riskierSummary.medianInfrastructureCostExposure * 1.5,
+            informedBankruptcyAboveRiskier: informedSummary.bankruptcyRate > riskierSummary.bankruptcyRate,
+            winsBefore365: overall.winsBefore365,
+          };
+
+          const report = {
+            rowCount: rows.length,
+            uniqueKeyCount: keys.size,
+            overall,
+            informed: informedSummary,
+            riskier: riskierSummary,
+            cohortDelta: {
+              winRate: winDelta,
+              postReleaseOverloadRatio: postReleaseRatio,
+              missingDependencyRatio: dependencyRatio,
+            },
+            perStrategy,
+            perStack,
+            hardGates,
+            allHardGatesPass: Object.values(hardGates).every(Boolean),
+            reviewFlags,
+          };
+          fs.writeFileSync('balance-pass-2-final-matrix-summary.json', JSON.stringify(report, null, 2));
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-pass-2-final-matrix-summary
+          path: balance-pass-2-final-matrix-summary.json
+          if-no-files-found: error
