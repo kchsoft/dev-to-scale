@@ -33,7 +33,23 @@ jobs:
           FINAL_THRESHOLD: ${{ matrix.threshold.value }}
         run: |
           mkdir -p artifacts/balance
-          sed -i "s/dauThreshold: 3_000_000/dauThreshold: ${FINAL_THRESHOLD}/" src/core/progression.ts
+          node - "$FINAL_THRESHOLD" <<'NODE'
+          const fs = require('fs');
+          const threshold = process.argv[2];
+          const path = 'src/core/progression.ts';
+          const source = fs.readFileSync(path, 'utf8');
+          const expected = '  3_000_000,\n] as const;';
+          if (!source.includes(expected)) {
+            throw new Error('expected final 3_000_000 progression threshold was not found exactly once');
+          }
+          const updated = source.replace(expected, `  ${threshold},\n] as const;`);
+          if (updated === source) throw new Error('threshold replacement did not change progression.ts');
+          if (!updated.includes(`  ${threshold},\n] as const;`)) {
+            throw new Error(`effective threshold ${threshold} was not written`);
+          }
+          fs.writeFileSync(path, updated);
+          console.log(`[threshold-sweep] effective final threshold=${threshold}`);
+          NODE
           npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" > artifacts/balance/console.log
           node - <<'NODE'
           const fs = require('fs');
