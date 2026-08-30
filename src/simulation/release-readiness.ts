@@ -6,6 +6,7 @@ import {
   affordable,
   cheapestAffordable,
   firstAffordable,
+  hottestResource,
   immediateCost,
   maxEffectiveRatioFromPreview,
   nodeFor,
@@ -33,6 +34,30 @@ export function preventativeDependencyAction(
   );
   return action
     ? withReleaseReadinessIntent(action, 'RELEASE_READINESS_DEPENDENCY')
+    : null;
+}
+
+export function decideMetricsPostReleaseStability(
+  observation: BalanceObservation,
+  context: StrategyDecisionContext,
+  strategyId: 'METRICS_AWARE' | 'APM_AWARE',
+): SimulationAction | null {
+  if (!context.postReleaseStabilityWindowActive) return null;
+
+  const resource = hottestResource(observation);
+  if (!resource || resource.effectivePercent < 70) return null;
+
+  const node = nodeFor(observation, resource.nodeId);
+  if (!node) return null;
+  const reason = `stabilize live ${resource.nodeKind} ${resource.resourceKind} after release at ${resource.effectivePercent}%`;
+  const action = firstAffordable(
+    observation,
+    context,
+    strategyId,
+    resourceRemedyCandidates(observation, node, resource.resourceKind, reason),
+  );
+  return action
+    ? withReleaseReadinessIntent(action, 'POST_RELEASE_STABILITY_CAPACITY')
     : null;
 }
 
