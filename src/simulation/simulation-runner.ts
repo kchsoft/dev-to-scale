@@ -175,6 +175,7 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
       executor.executeNormalInvestment(engine, action);
       const actionCashAfter = engine.snapshot.cash;
 
+      if (action.intent) metrics.recordPreventativeAction(action.intent);
       if (action.type === 'START_TECHNOLOGY_BUILD') {
         metrics.recordTechnologyBuildSpend(actionCashBefore - actionCashAfter);
       } else if (action.type === 'RESIZE_NODE' || action.type === 'SCALE_OUT_NODE') {
@@ -208,7 +209,12 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
         }));
       }
 
+      const completedFeatureCountBeforeAdvance = engine.snapshot.completedFeatures.length;
       engine.advanceDay();
+      const releasedFeatureCount = engine.snapshot.completedFeatures.length - completedFeatureCountBeforeAdvance;
+      for (let release = 0; release < releasedFeatureCount; release += 1) {
+        metrics.beginFeatureReleaseWindow();
+      }
       daysPlayed += 1;
       metrics.recordCash(engine.snapshot.cash);
       metrics.recordIncidentIds(engine.snapshot.incidents.map(({ id }) => id));
