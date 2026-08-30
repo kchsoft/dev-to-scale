@@ -17,10 +17,11 @@ import {
   operationalPressuresForNode,
   primaryOperationalPressureForNode,
 } from '../core/operational-pressure';
+import type { CommunityFeatureId } from '../core/progression';
 import type { ResourceRole } from '../core/service-topology';
 import { TECHNOLOGIES, type BuildableTechnologyId } from '../core/technology';
 import type { InfrastructureNodeId, InfrastructureNodeKind } from '../core/topology';
-import { V1ServiceTopologyFactory } from '../core/v1-topology';
+import { V1RouteBlueprintAdapter, V1ServiceTopologyFactory } from '../core/v1-topology';
 import type { SimulationAction } from './balance-action';
 
 export type ObservationCeiling = 'BASIC' | 'METRICS' | 'APM' | 'ORACLE';
@@ -61,6 +62,12 @@ export interface RequiredDependencyGapObservation {
   readonly candidateTechnologyIds: readonly BuildableTechnologyId[];
 }
 
+export interface PendingFeatureObservation {
+  readonly id: CommunityFeatureId;
+  readonly estimatedRemainingDays: number;
+  readonly requiredResourceRoles: readonly ResourceRole[];
+}
+
 export interface BalanceResourceLoadObservation {
   readonly nodeId: InfrastructureNodeId;
   readonly nodeKind: InfrastructureNodeKind;
@@ -86,6 +93,8 @@ export interface CommonBalanceObservation {
   readonly monthlyInfrastructureCost: number;
   readonly failureRate: number;
   readonly requiredDependencyGaps: readonly RequiredDependencyGapObservation[];
+  readonly pendingFeature: PendingFeatureObservation | null;
+  readonly upcomingRequiredDependencyGaps: readonly RequiredDependencyGapObservation[];
   readonly serviceHealth: 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
   readonly growthEvent: null | {
     readonly type: 'VIRAL' | 'NEGATIVE_BUZZ';
@@ -170,6 +179,24 @@ function activeFeatures(engine: GameEngine): readonly FeatureDefinition[] {
   return [COMMUNITY_BOOTSTRAP, ...completed];
 }
 
+function pendingFeatureDefinition(engine: GameEngine): FeatureDefinition | null {
+  const current = engine.snapshot.currentFeature;
+  if (!current || current.id === COMMUNITY_BOOTSTRAP.id) return null;
+  const feature = (COMMUNITY_FEATURES as Record<string, FeatureDefinition>)[current.id];
+  if (!feature) throw new Error(`Unknown pending community feature: ${current.id}`);
+  return feature;
+}
+
+function explicitRequiredResourceRoles(feature: FeatureDefinition): readonly ResourceRole[] {
+  const blueprint = V1RouteBlueprintAdapter.fromFeature(feature);
+  const roles = feature.requestRoute.flatMap((step, index) => (
+    step.requirement === 'REQUIRED' && blueprint.steps[index]
+      ? [blueprint.steps[index].role]
+      : []
+  ));
+  return Object.freeze([...new Set(roles)].sort());
+}
+
 function copiedBottleneck(bottleneck: BottleneckView | null): BottleneckView | null {
   return bottleneck ? Object.freeze({ ...bottleneck }) : null;
 }
@@ -199,6 +226,19 @@ function requiredDependencyGaps(load: LoadSnapshot): readonly RequiredDependency
       workloadIds: Object.freeze([...workloadIds].sort()),
       candidateTechnologyIds: Object.freeze([...(REQUIRED_DEPENDENCY_TECHNOLOGIES[role] ?? [])]),
     })));
+}
+
+function upcomingRequiredDependencyGaps(
+  engine: GameEngine,
+  feature: FeatureDefinition | null,
+): readonly RequiredDependencyGapObservation[] {
+  if (!feature) return Object.freeze([]);
+  return Object.freeze(requiredDependencyGaps(engine.previewLoadWithFeature(feature))
+    .map((gap) => Object.freeze({
+      ...gap,
+      workloadIds: Object.freeze(gap.workloadIds.filter((workloadId) => workloadId === feature.id)),
+    }))
+    .filter((gap) => gap.workloadIds.length > 0));
 }
 
 function resourceObservations(engine: GameEngine): readonly BalanceResourceLoadObservation[] {
@@ -269,6 +309,7 @@ function commonObservation(
   const snapshot = engine.snapshot;
   const topology = V1ServiceTopologyFactory.create(engine.infrastructure, activeFeatures(engine));
   const service = OperationalViewProjector.project(snapshot, engine.developer, topology);
+  const pendingFeature = pendingFeatureDefinition(engine);
 
   return Object.freeze({
     level,
@@ -280,6 +321,14 @@ function commonObservation(
     monthlyInfrastructureCost: engine.infrastructure.monthlyCost,
     failureRate: snapshot.load.failureRate,
     requiredDependencyGaps: requiredDependencyGaps(snapshot.load),
+    pendingFeature: pendingFeature && snapshot.currentFeature
+      ? Object.freeze({
+        id: pendingFeature.id as CommunityFeatureId,
+        estimatedRemainingDays: snapshot.currentFeature.estimatedRemainingDays,
+        requiredResourceRoles: explicitRequiredResourceRoles(pendingFeature),
+      })
+      : null,
+    upcomingRequiredDependencyGaps: upcomingRequiredDependencyGaps(engine, pendingFeature),
     serviceHealth: service.health.status,
     growthEvent: snapshot.growthEvent ? Object.freeze({
       type: snapshot.growthEvent.type,
