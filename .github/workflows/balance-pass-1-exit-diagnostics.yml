@@ -1,0 +1,80 @@
+name: Balance Pass 1 Exit Diagnostics
+
+on:
+  pull_request:
+    branches: [feature/playable-mvp]
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'feature/deterministic-balance-simulation-harness'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Measure post-finish settlements with exit disabled
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          mkdir -p artifacts/exit-diagnostics artifacts/balance
+          sed -i 's/EXIT_MONTHLY_REVENUE_TARGET = 143_000_000/EXIT_MONTHLY_REVENUE_TARGET = 1_000_000_000/' src/core/finance.ts
+          : > artifacts/exit-diagnostics/diagnostics.jsonl
+          for SEED in 5 8 17 23 29; do
+            for STRATEGY in ORACLE APM_AWARE METRICS_AWARE REACTIVE_BASIC YOLO_SCALE CHEAPSKATE; do
+              TRACE="artifacts/exit-diagnostics/trace-${SEED}-${STRATEGY}.log"
+              npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$SEED" --strategy "$STRATEGY" --trace > "$TRACE"
+              node - "$FRAMEWORK" "$DATABASE" "$SEED" "$STRATEGY" "$TRACE" <<'NODE' >> artifacts/exit-diagnostics/diagnostics.jsonl
+          const fs = require('fs');
+          const [frameworkId, databaseId, seedText, strategyId, tracePath] = process.argv.slice(2);
+          const seed = Number(seedText);
+          const entries = fs.readFileSync(tracePath, 'utf8')
+            .split('\n')
+            .filter((line) => line.startsWith('[trace] '))
+            .map((line) => JSON.parse(line.slice('[trace] '.length)));
+          const firstFinished = entries.find((entry) => entry.completedFeatureCount === 10);
+          if (!firstFinished) {
+            console.log(JSON.stringify({ frameworkId, databaseId, seed, strategyId, completionDay: null, postFinishedSettlements: [] }));
+            process.exit(0);
+          }
+          const baselineMonth = firstFinished.lastSettlementMonth ?? 0;
+          const settlements = new Map();
+          for (const entry of entries) {
+            if (entry.completedFeatureCount !== 10) continue;
+            if (entry.lastSettlementMonth === null || entry.lastSettlementMonth <= baselineMonth) continue;
+            if (!settlements.has(entry.lastSettlementMonth)) {
+              settlements.set(entry.lastSettlementMonth, entry.lastSettlementRevenue);
+            }
+          }
+          console.log(JSON.stringify({
+            frameworkId,
+            databaseId,
+            seed,
+            strategyId,
+            completionDay: firstFinished.day,
+            baselineSettlementMonth: baselineMonth,
+            postFinishedSettlements: [...settlements.entries()]
+              .sort((a, b) => a[0] - b[0])
+              .map(([month, revenue]) => ({ month, revenue })),
+          }));
+          NODE
+            done
+          done
+          node - <<'NODE'
+          const fs = require('fs');
+          const rows = fs.readFileSync('artifacts/exit-diagnostics/diagnostics.jsonl', 'utf8').trim().split('\n').filter(Boolean);
+          if (rows.length !== 30) throw new Error(`expected 30 diagnostic rows, got ${rows.length}`);
+          for (const row of rows) JSON.parse(row);
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-exit-diagnostics-${{ matrix.framework }}-${{ matrix.database }}
+          path: artifacts/exit-diagnostics/
+          if-no-files-found: error
