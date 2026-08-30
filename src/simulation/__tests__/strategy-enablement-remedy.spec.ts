@@ -58,6 +58,7 @@ const observation: MetricsBalanceObservation = Object.freeze({
       status: 'OVERLOAD',
     }),
   ]),
+  releasePreview: null,
 });
 
 describe('resource-aware scale-out enablement', () => {
