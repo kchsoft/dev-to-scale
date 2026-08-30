@@ -66,6 +66,10 @@ function baseApm(nodes: readonly BalanceNodeObservation[]): ApmBalanceObservatio
 }
 
 const context = Object.freeze({ protectedLearningReserve: 0 });
+const activeContext = Object.freeze({
+  protectedLearningReserve: 0,
+  postReleaseStabilityWindowActive: true,
+});
 
 describe('APM release readiness', () => {
   it('uses projected diagnosis and chooses its cheapest affordable supported remedy', () => {
@@ -105,6 +109,95 @@ describe('APM release readiness', () => {
       type: 'SCALE_OUT_NODE',
       nodeId: 'db',
       intent: 'RELEASE_READINESS_CAPACITY',
+    });
+  });
+
+  it('stabilizes a live diagnosed bottleneck at 70 percent during the release window', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 70,
+      effectivePercent: 70,
+      status: 'WARNING',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      resourceLoads: Object.freeze([
+        Object.freeze({
+          nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
+          percent: 70, effectivePercent: 70, hardLimitPercent: 100, status: 'WARNING' as const,
+        }),
+      ]),
+      diagnosis: Object.freeze({
+        topBottleneck: Object.freeze({
+          nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.7,
+          effectiveRatio: 0.7, percent: 70, effectivePercent: 70, hardLimitPercent: 100,
+          capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
+        }),
+        text: 'Live PostgreSQL I/O bottleneck',
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'SCALE_OUT_NODE',
+      nodeId: 'db',
+      intent: 'POST_RELEASE_STABILITY_CAPACITY',
+    });
+  });
+
+  it('does not stabilize a diagnosed live bottleneck below 70 percent', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 69,
+      effectivePercent: 69,
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      diagnosis: Object.freeze({
+        topBottleneck: Object.freeze({
+          nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.69,
+          effectiveRatio: 0.69, percent: 69, effectivePercent: 69, hardLimitPercent: 100,
+          capacityFailurePercent: 0, status: 'NORMAL', label: 'PostgreSQL I/O',
+        }),
+        text: 'Live PostgreSQL I/O bottleneck',
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'NO_OP',
+    });
+  });
+
+  it('falls back to live METRICS resource pressure when APM has no diagnosis', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 70,
+      effectivePercent: 70,
+      status: 'WARNING',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      resourceLoads: Object.freeze([
+        Object.freeze({
+          nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
+          percent: 70, effectivePercent: 70, hardLimitPercent: 100, status: 'WARNING' as const,
+        }),
+      ]),
+      diagnosis: Object.freeze({ topBottleneck: null, text: null }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'START_TECHNOLOGY_BUILD',
+      technologyId: 'REDIS',
+      intent: 'POST_RELEASE_STABILITY_CAPACITY',
     });
   });
 
