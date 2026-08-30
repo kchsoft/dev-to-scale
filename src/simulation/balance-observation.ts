@@ -92,6 +92,21 @@ export interface ApmReleasePreviewObservation extends MetricsReleasePreviewObser
   readonly diagnosis: BalanceDiagnosisObservation;
 }
 
+export interface OracleExactPressure {
+  readonly nodeId: InfrastructureNodeId;
+  readonly nodeKind: InfrastructureNodeKind;
+  readonly resourceKind: NodeResourceKind;
+  readonly demand: number;
+  readonly nominalCapacity: number;
+  readonly effectiveCapacity: number;
+  readonly nominalRatio: number;
+  readonly effectiveRatio: number;
+}
+
+export interface OracleReleasePreviewObservation extends ApmReleasePreviewObservation {
+  readonly exactPressures: readonly OracleExactPressure[];
+}
+
 export interface CommonBalanceObservation {
   readonly level: ObservationCeiling;
   readonly frameworkId: FrameworkId;
@@ -135,21 +150,11 @@ export interface ApmBalanceObservation extends CommonBalanceObservation {
   readonly releasePreview: ApmReleasePreviewObservation | null;
 }
 
-export interface OracleExactPressure {
-  readonly nodeId: InfrastructureNodeId;
-  readonly nodeKind: InfrastructureNodeKind;
-  readonly resourceKind: NodeResourceKind;
-  readonly demand: number;
-  readonly nominalCapacity: number;
-  readonly effectiveCapacity: number;
-  readonly nominalRatio: number;
-  readonly effectiveRatio: number;
-}
-
 export interface OraclePreviewPort {
   previewTechnology(id: BuildableTechnologyId): LoadSnapshot;
   previewResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadSnapshot;
   previewScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot;
+  previewReleaseAction(action: SimulationAction): LoadSnapshot;
   projectedMonthlyCost(action: SimulationAction): number;
 }
 
@@ -159,6 +164,7 @@ export interface OracleBalanceObservation extends CommonBalanceObservation {
   readonly diagnosis: BalanceDiagnosisObservation;
   readonly exactPressures: readonly OracleExactPressure[];
   readonly workloadTags: readonly FeatureTag[];
+  readonly releasePreview: OracleReleasePreviewObservation | null;
   readonly previewPort: OraclePreviewPort;
 }
 
@@ -261,6 +267,19 @@ function resourceObservationsFromLoad(load: LoadSnapshot): readonly BalanceResou
     effectivePercent: percent(pressure.effectiveRatio),
     hardLimitPercent: hardLimitPercent(pressure),
     status: capacityStatus(pressure.nominalRatio, pressure.effectiveRatio),
+  })));
+}
+
+function exactPressuresFromLoad(load: LoadSnapshot): readonly OracleExactPressure[] {
+  return Object.freeze(operationalPressures(load).map((pressure) => Object.freeze({
+    nodeId: pressure.nodeId,
+    nodeKind: pressure.nodeKind,
+    resourceKind: pressure.resourceKind,
+    demand: pressure.demand,
+    nominalCapacity: pressure.nominalCapacity,
+    effectiveCapacity: pressure.effectiveCapacity,
+    nominalRatio: pressure.nominalRatio,
+    effectiveRatio: pressure.effectiveRatio,
   })));
 }
 
@@ -415,6 +434,19 @@ function apmReleasePreview(engine: GameEngine): ApmReleasePreviewObservation | n
   });
 }
 
+function oracleReleasePreview(engine: GameEngine): OracleReleasePreviewObservation | null {
+  const feature = pendingFeatureDefinition(engine);
+  if (!feature) return null;
+  const load = engine.previewLoadWithFeature(feature);
+  const resourceLoads = resourceObservationsFromLoad(load);
+  return Object.freeze({
+    resourceLoads,
+    maxEffectivePercent: Math.max(0, ...resourceLoads.map(({ effectivePercent }) => effectivePercent)),
+    diagnosis: projectedDiagnosisObservation(engine, feature, load),
+    exactPressures: exactPressuresFromLoad(load),
+  });
+}
+
 function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
   return Object.freeze({
     previewTechnology: (id: BuildableTechnologyId) => engine.previewLoadWithTechnology(id),
@@ -422,6 +454,21 @@ function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
       engine.previewLoadWithNodeResize(nodeId, size)
     ),
     previewScaleOut: (nodeId: InfrastructureNodeId) => engine.previewLoadWithNodeScaleOut(nodeId),
+    previewReleaseAction: (action: SimulationAction) => {
+      const feature = pendingFeatureDefinition(engine);
+      if (!feature) throw new Error('No pending feature to preview');
+      switch (action.type) {
+        case 'RESIZE_NODE':
+          return engine.previewLoadWithFeatureAndNodeResize(feature, action.nodeId, action.size);
+        case 'SCALE_OUT_NODE':
+          return engine.previewLoadWithFeatureAndNodeScaleOut(feature, action.nodeId);
+        case 'START_TECHNOLOGY_BUILD':
+          return engine.previewLoadWithFeatureAndTechnology(feature, action.technologyId);
+        case 'NO_OP':
+        case 'RESPOND_TRAFFIC_SPIKE':
+          return engine.previewLoadWithFeature(feature);
+      }
+    },
     projectedMonthlyCost: (action: SimulationAction) => {
       const infrastructure = engine.infrastructure.clone();
       switch (action.type) {
@@ -463,23 +510,14 @@ export function observeForStrategy(
     for (const feature of activeFeatures(engine)) {
       for (const tag of feature.tags) tags.add(tag);
     }
-    const exactPressures = Object.freeze(operationalPressures(snapshot.load).map((pressure) => Object.freeze({
-      nodeId: pressure.nodeId,
-      nodeKind: pressure.nodeKind,
-      resourceKind: pressure.resourceKind,
-      demand: pressure.demand,
-      nominalCapacity: pressure.nominalCapacity,
-      effectiveCapacity: pressure.effectiveCapacity,
-      nominalRatio: pressure.nominalRatio,
-      effectiveRatio: pressure.effectiveRatio,
-    })));
     return Object.freeze({
       ...commonObservation(engine, 'ORACLE'),
       level: 'ORACLE' as const,
       resourceLoads: resourceObservations(engine),
       diagnosis: diagnosisObservation(engine),
-      exactPressures,
+      exactPressures: exactPressuresFromLoad(snapshot.load),
       workloadTags: Object.freeze([...tags].sort()),
+      releasePreview: oracleReleasePreview(engine),
       previewPort: createOraclePreviewPort(engine),
     });
   }
