@@ -1,0 +1,49 @@
+name: Balance Pass 1 Final Threshold Sweep
+
+on:
+  pull_request:
+    branches: [feature/playable-mvp]
+
+jobs:
+  sweep:
+    if: github.head_ref == 'feature/deterministic-balance-simulation-harness'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+        threshold:
+          - value: '3_500_000'
+            label: 3_5m
+          - value: '4_000_000'
+            label: 4m
+          - value: '4_500_000'
+            label: 4_5m
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run 180-scenario threshold shard
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+          FINAL_THRESHOLD: ${{ matrix.threshold.value }}
+        run: |
+          mkdir -p artifacts/balance
+          sed -i "s/dauThreshold: 3_000_000/dauThreshold: ${FINAL_THRESHOLD}/" src/core/progression.ts
+          npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" > artifacts/balance/console.log
+          node - <<'NODE'
+          const fs = require('fs');
+          const rows = fs.readFileSync('artifacts/balance/runs.csv', 'utf8').trimEnd().split('\n').length - 1;
+          if (rows !== 180) throw new Error(`expected 180 rows, got ${rows}`);
+          const summary = JSON.parse(fs.readFileSync('artifacts/balance/summary.json', 'utf8'));
+          if (summary.runCount !== 180) throw new Error(`expected runCount=180, got ${summary.runCount}`);
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-final-threshold-${{ matrix.threshold.label }}-${{ matrix.framework }}-${{ matrix.database }}
+          path: artifacts/balance/
+          if-no-files-found: error
