@@ -83,6 +83,15 @@ export interface BalanceDiagnosisObservation {
   readonly text: string | null;
 }
 
+export interface MetricsReleasePreviewObservation {
+  readonly resourceLoads: readonly BalanceResourceLoadObservation[];
+  readonly maxEffectivePercent: number;
+}
+
+export interface ApmReleasePreviewObservation extends MetricsReleasePreviewObservation {
+  readonly diagnosis: BalanceDiagnosisObservation;
+}
+
 export interface CommonBalanceObservation {
   readonly level: ObservationCeiling;
   readonly frameworkId: FrameworkId;
@@ -116,12 +125,14 @@ export interface BasicBalanceObservation extends CommonBalanceObservation {
 export interface MetricsBalanceObservation extends CommonBalanceObservation {
   readonly level: 'METRICS';
   readonly resourceLoads: readonly BalanceResourceLoadObservation[];
+  readonly releasePreview: MetricsReleasePreviewObservation | null;
 }
 
 export interface ApmBalanceObservation extends CommonBalanceObservation {
   readonly level: 'APM';
   readonly resourceLoads: readonly BalanceResourceLoadObservation[];
   readonly diagnosis: BalanceDiagnosisObservation;
+  readonly releasePreview: ApmReleasePreviewObservation | null;
 }
 
 export interface OracleExactPressure {
@@ -241,8 +252,8 @@ function upcomingRequiredDependencyGaps(
     .filter((gap) => gap.workloadIds.length > 0));
 }
 
-function resourceObservations(engine: GameEngine): readonly BalanceResourceLoadObservation[] {
-  return Object.freeze(operationalPressures(engine.snapshot.load).map((pressure) => Object.freeze({
+function resourceObservationsFromLoad(load: LoadSnapshot): readonly BalanceResourceLoadObservation[] {
+  return Object.freeze(operationalPressures(load).map((pressure) => Object.freeze({
     nodeId: pressure.nodeId,
     nodeKind: pressure.nodeKind,
     resourceKind: pressure.resourceKind,
@@ -251,6 +262,10 @@ function resourceObservations(engine: GameEngine): readonly BalanceResourceLoadO
     hardLimitPercent: hardLimitPercent(pressure),
     status: capacityStatus(pressure.nominalRatio, pressure.effectiveRatio),
   })));
+}
+
+function resourceObservations(engine: GameEngine): readonly BalanceResourceLoadObservation[] {
+  return resourceObservationsFromLoad(engine.snapshot.load);
 }
 
 function nodeObservations(engine: GameEngine): readonly BalanceNodeObservation[] {
@@ -357,6 +372,49 @@ function diagnosisObservation(engine: GameEngine): BalanceDiagnosisObservation {
   });
 }
 
+function projectedDiagnosisObservation(
+  engine: GameEngine,
+  feature: FeatureDefinition,
+  load: LoadSnapshot,
+): BalanceDiagnosisObservation {
+  const snapshot = Object.freeze({ ...engine.snapshot, load });
+  const topology = V1ServiceTopologyFactory.create(
+    engine.infrastructure,
+    [...activeFeatures(engine), feature],
+  );
+  const service = OperationalViewProjector.project(snapshot, engine.developer, topology);
+  const bottleneck = copiedBottleneck(service.health.bottleneck);
+  return Object.freeze({
+    topBottleneck: bottleneck,
+    text: bottleneck
+      ? OperationalViewProjector.diagnosisText(bottleneck.nodeId, snapshot, engine.developer, topology)
+      : null,
+  });
+}
+
+function metricsReleasePreview(engine: GameEngine): MetricsReleasePreviewObservation | null {
+  const feature = pendingFeatureDefinition(engine);
+  if (!feature) return null;
+  const load = engine.previewLoadWithFeature(feature);
+  const resourceLoads = resourceObservationsFromLoad(load);
+  return Object.freeze({
+    resourceLoads,
+    maxEffectivePercent: Math.max(0, ...resourceLoads.map(({ effectivePercent }) => effectivePercent)),
+  });
+}
+
+function apmReleasePreview(engine: GameEngine): ApmReleasePreviewObservation | null {
+  const feature = pendingFeatureDefinition(engine);
+  if (!feature) return null;
+  const load = engine.previewLoadWithFeature(feature);
+  const resourceLoads = resourceObservationsFromLoad(load);
+  return Object.freeze({
+    resourceLoads,
+    maxEffectivePercent: Math.max(0, ...resourceLoads.map(({ effectivePercent }) => effectivePercent)),
+    diagnosis: projectedDiagnosisObservation(engine, feature, load),
+  });
+}
+
 function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
   return Object.freeze({
     previewTechnology: (id: BuildableTechnologyId) => engine.previewLoadWithTechnology(id),
@@ -438,6 +496,7 @@ export function observeForStrategy(
       ...commonObservation(engine, 'METRICS'),
       level: 'METRICS' as const,
       resourceLoads: resourceObservations(engine),
+      releasePreview: metricsReleasePreview(engine),
     });
   }
   return Object.freeze({
@@ -445,5 +504,6 @@ export function observeForStrategy(
     level: 'APM' as const,
     resourceLoads: resourceObservations(engine),
     diagnosis: diagnosisObservation(engine),
+    releasePreview: apmReleasePreview(engine),
   });
 }
