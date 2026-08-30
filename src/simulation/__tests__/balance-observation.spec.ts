@@ -110,6 +110,33 @@ describe('balance observation boundaries', () => {
     expect('releasePreview' in observation).toBe(false);
   });
 
+  it('projects pending release resource pressure at METRICS without diagnosis', () => {
+    const game = gameWithPendingRequiredQueue();
+    game.developer.get(skillRef.fundamental('OS_RUNTIME')).setLevel(2);
+
+    const observation = observeForStrategy(game, 'METRICS');
+
+    expect(observation.level).toBe('METRICS');
+    if (observation.level !== 'METRICS') throw new Error('Expected METRICS');
+    expect(observation.releasePreview?.resourceLoads.length).toBeGreaterThan(0);
+    expect(observation.releasePreview?.maxEffectivePercent).toBeGreaterThanOrEqual(0);
+    expect('diagnosis' in (observation.releasePreview ?? {})).toBe(false);
+    expect('exactPressures' in (observation.releasePreview ?? {})).toBe(false);
+  });
+
+  it('adds projected diagnosis at APM without exact ORACLE internals', () => {
+    const game = gameWithPendingRequiredQueue();
+    unlockApm(game);
+
+    const observation = observeForStrategy(game, 'APM');
+
+    expect(observation.level).toBe('APM');
+    if (observation.level !== 'APM') throw new Error('Expected APM');
+    expect(observation.releasePreview?.resourceLoads.length).toBeGreaterThan(0);
+    expect(observation.releasePreview?.diagnosis).toBeDefined();
+    expect('exactPressures' in (observation.releasePreview ?? {})).toBe(false);
+  });
+
   it('copies player-visible technology availability without leaking the developer profile', () => {
     const game = launchedGame();
     let observation = observeForStrategy(game, 'BASIC');
