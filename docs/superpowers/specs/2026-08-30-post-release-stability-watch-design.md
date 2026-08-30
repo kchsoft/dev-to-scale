@@ -98,6 +98,36 @@ For informed strategies:
 
 This ordering prevents a projected next-feature action from displacing protection of a currently live release window.
 
+## Implementation verification
+
+Normal CI run `33317599608` passed after the three informed strategies were wired to the live stability watch:
+
+- 396 tests;
+- typecheck;
+- production build;
+- balance CLI smoke;
+- deterministic rerun evidence;
+- representative strategy traces;
+- generated-artifact hygiene.
+
+Targeted paired trace run `33317801535` compared the watch against restored-85 baseline commit `161af3532aaa1a082536f77b13b1118d729372e3` and passed all causal assertions.
+
+The previously harmful pre-release divergence points remain unchanged:
+
+- METRICS_AWARE, ASP.NET Core/MongoDB/seed 5, day 283: live app I/O 60%, both policies `NO_OP`.
+- APM_AWARE, ASP.NET Core/MySQL/seed 5, day 283: live app I/O 60%, both policies `NO_OP`.
+- ORACLE, ASP.NET Core/MySQL/seed 29, day 362: live MySQL I/O 60%, both policies `NO_OP`.
+
+The first watch-specific divergences occur only after an actual release and at live pressure above the new floor:
+
+- METRICS_AWARE: day 284, live ASP.NET Core I/O 73%, baseline `NO_OP`, watch resizes app server.
+- APM_AWARE: day 284, live diagnosed ASP.NET Core I/O 73%, baseline `NO_OP`, watch resizes app server.
+- ORACLE: day 459, live exact MySQL I/O 0.75x, baseline `NO_OP`, watch starts Redis.
+
+Every `stabilize live` action in the three traces occurred inside a computed seven-day release window and at a parsed live pressure >=70%. All three representative scenarios remained `WON` under both baseline and watch policies.
+
+Additional observed boundary examples include APM acting at exactly 70% and METRICS acting at 71% after release, while the earlier 60% live-load speculative actions from the rejected pre-release experiment no longer occur.
+
 ## Acceptance path
 
 1. RED unit tests for active-window boundary and no-action outside window / below 70%.
@@ -106,6 +136,8 @@ This ordering prevents a projected next-feature action from displacing protectio
 4. Paired 450-scenario pilot over the same 15 stacks and seeds `[5,8,17,23,29]`.
 5. Reject immediately if premature capacity actions or low-utilization expanded-node days reproduce the 70% pre-release regression.
 6. Only if the pilot improves post-release overload without material strategy-economy regression, run the exact 2,700-scenario full matrix.
+
+Steps 1-3 are complete. The next gate is the paired 450-scenario pilot.
 
 ## Merge rule
 
