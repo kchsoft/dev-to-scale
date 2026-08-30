@@ -45,7 +45,7 @@ export function decideMetricsPostReleaseStability(
   if (!context.postReleaseStabilityWindowActive) return null;
 
   const resource = hottestResource(observation);
-  if (!resource || resource.effectivePercent < 70) return null;
+  if (!resource || resource.effectivePercent <= 70) return null;
 
   const node = nodeFor(observation, resource.nodeId);
   if (!node) return null;
