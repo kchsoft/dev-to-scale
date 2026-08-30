@@ -30,61 +30,68 @@ jobs:
           import { mkdir, writeFile } from 'node:fs/promises';
           import { buildBalanceScenarios, parseBalanceArgs, runBalanceScenario } from './src/simulation';
 
-          const framework = process.env.FRAMEWORK;
-          const database = process.env.DATABASE;
-          if (!framework || !database) throw new Error('FRAMEWORK and DATABASE are required');
+          async function main(): Promise<void> {
+            const framework = process.env.FRAMEWORK;
+            const database = process.env.DATABASE;
+            if (!framework || !database) throw new Error('FRAMEWORK and DATABASE are required');
 
-          const options = parseBalanceArgs(['--framework', framework, '--db', database]);
-          const scenarios = buildBalanceScenarios({
-            frameworkId: options.frameworkId,
-            databaseId: options.databaseId,
-          });
-          if (scenarios.length !== 180) throw new Error(`expected 180 scenarios, got ${scenarios.length}`);
+            const options = parseBalanceArgs(['--framework', framework, '--db', database]);
+            const scenarios = buildBalanceScenarios({
+              frameworkId: options.frameworkId,
+              databaseId: options.databaseId,
+            });
+            if (scenarios.length !== 180) throw new Error(`expected 180 scenarios, got ${scenarios.length}`);
 
-          const lines: string[] = [];
-          for (const scenario of scenarios) {
-            const traced = runBalanceScenario(scenario, { trace: true });
-            const firstFinished = traced.trace.find((entry) => entry.completedFeatureCount === 10);
-            if (!firstFinished) {
+            const lines: string[] = [];
+            for (const scenario of scenarios) {
+              const traced = runBalanceScenario(scenario, { trace: true });
+              const firstFinished = traced.trace.find((entry) => entry.completedFeatureCount === 10);
+              if (!firstFinished) {
+                lines.push(JSON.stringify({
+                  frameworkId: scenario.frameworkId,
+                  databaseId: scenario.databaseId,
+                  seed: scenario.seed,
+                  strategyId: scenario.strategyId,
+                  terminalStatus: traced.result.terminalStatus,
+                  completionDay: null,
+                  postFinishedSettlements: [],
+                }));
+                continue;
+              }
+
+              const baselineMonth = firstFinished.lastSettlementMonth ?? 0;
+              const settlements = new Map<number, number>();
+              for (const entry of traced.trace) {
+                if (entry.completedFeatureCount !== 10) continue;
+                if (entry.lastSettlementMonth === null || entry.lastSettlementMonth <= baselineMonth) continue;
+                if (entry.lastSettlementRevenue === null) continue;
+                if (!settlements.has(entry.lastSettlementMonth)) {
+                  settlements.set(entry.lastSettlementMonth, entry.lastSettlementRevenue);
+                }
+              }
+
               lines.push(JSON.stringify({
                 frameworkId: scenario.frameworkId,
                 databaseId: scenario.databaseId,
                 seed: scenario.seed,
                 strategyId: scenario.strategyId,
                 terminalStatus: traced.result.terminalStatus,
-                completionDay: null,
-                postFinishedSettlements: [],
+                completionDay: firstFinished.day,
+                baselineSettlementMonth: baselineMonth,
+                postFinishedSettlements: [...settlements.entries()]
+                  .sort((a, b) => a[0] - b[0])
+                  .map(([month, revenue]) => ({ month, revenue })),
               }));
-              continue;
             }
 
-            const baselineMonth = firstFinished.lastSettlementMonth ?? 0;
-            const settlements = new Map<number, number>();
-            for (const entry of traced.trace) {
-              if (entry.completedFeatureCount !== 10) continue;
-              if (entry.lastSettlementMonth === null || entry.lastSettlementMonth <= baselineMonth) continue;
-              if (entry.lastSettlementRevenue === null) continue;
-              if (!settlements.has(entry.lastSettlementMonth)) {
-                settlements.set(entry.lastSettlementMonth, entry.lastSettlementRevenue);
-              }
-            }
-
-            lines.push(JSON.stringify({
-              frameworkId: scenario.frameworkId,
-              databaseId: scenario.databaseId,
-              seed: scenario.seed,
-              strategyId: scenario.strategyId,
-              terminalStatus: traced.result.terminalStatus,
-              completionDay: firstFinished.day,
-              baselineSettlementMonth: baselineMonth,
-              postFinishedSettlements: [...settlements.entries()]
-                .sort((a, b) => a[0] - b[0])
-                .map(([month, revenue]) => ({ month, revenue })),
-            }));
+            await mkdir('artifacts/exit-diagnostics', { recursive: true });
+            await writeFile('artifacts/exit-diagnostics/diagnostics.jsonl', `${lines.join('\n')}\n`, 'utf8');
           }
 
-          await mkdir('artifacts/exit-diagnostics', { recursive: true });
-          await writeFile('artifacts/exit-diagnostics/diagnostics.jsonl', `${lines.join('\n')}\n`, 'utf8');
+          main().catch((error: unknown) => {
+            console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+            process.exitCode = 1;
+          });
           TS
           npx tsx .tmp-exit-diagnostics.ts
           node - <<'NODE'
