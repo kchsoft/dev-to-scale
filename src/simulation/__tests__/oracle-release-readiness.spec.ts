@@ -68,8 +68,10 @@ function load(ratio: number) {
 function oracleObservation(
   previewReleaseAction: (action: SimulationAction) => ReturnType<typeof load>,
   projectedMonthlyCost: (action: SimulationAction) => number,
+  releaseRatio = 1.1,
 ): OracleBalanceObservation {
   const db = dbNode();
+  const releasePercent = Math.round(releaseRatio * 100);
   return Object.freeze({
     level: 'ORACLE',
     frameworkId: 'SPRING_BOOT',
@@ -101,14 +103,14 @@ function oracleObservation(
         nodeId: 'db',
         nodeKind: 'DATABASE',
         resourceKind: 'IO',
-        percent: 110,
-        effectivePercent: 110,
+        percent: releasePercent,
+        effectivePercent: releasePercent,
         hardLimitPercent: 100,
-        status: 'OVERLOAD',
+        status: releaseRatio > 1 ? 'OVERLOAD' : 'WARNING',
       })]),
-      maxEffectivePercent: 110,
+      maxEffectivePercent: releasePercent,
       diagnosis: Object.freeze({ topBottleneck: null, text: null }),
-      exactPressures: Object.freeze([exactDbIo(1.1)]),
+      exactPressures: Object.freeze([exactDbIo(releaseRatio)]),
     }),
     previewPort: Object.freeze({
       previewTechnology: () => load(0.4),
@@ -142,16 +144,17 @@ describe('ORACLE release readiness', () => {
   it('uses relief per one-month cost and deterministic candidate order when no action clears 0.85', () => {
     const observation = oracleObservation(
       (action) => {
-        if (action.type === 'START_TECHNOLOGY_BUILD' && action.technologyId === 'REDIS') return load(0.9);
-        if (action.type === 'SCALE_OUT_NODE') return load(1.05);
-        if (action.type === 'RESIZE_NODE') return load(1.09);
-        return load(1.1);
+        if (action.type === 'START_TECHNOLOGY_BUILD' && action.technologyId === 'REDIS') return load(0.875);
+        if (action.type === 'SCALE_OUT_NODE') return load(0.96875);
+        if (action.type === 'RESIZE_NODE') return load(0.984375);
+        return load(1);
       },
       (action) => {
         if (action.type === 'START_TECHNOLOGY_BUILD') return 200_000;
         if (action.type === 'SCALE_OUT_NODE') return 200_000;
         return 180_000;
       },
+      1,
     );
 
     expect(BALANCE_STRATEGIES.ORACLE.decide(observation, context)).toMatchObject({
