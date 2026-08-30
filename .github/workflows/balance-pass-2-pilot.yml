@@ -1,0 +1,104 @@
+name: Balance Pass 2 Pilot
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  pilot:
+    name: ${{ matrix.framework }} / ${{ matrix.database }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    env:
+      FRAMEWORK: ${{ matrix.framework }}
+      DATABASE: ${{ matrix.database }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Run fixed five-seed pilot shard
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/pilot
+          OUT="artifacts/pilot/${FRAMEWORK}-${DATABASE}.csv"
+          rm -f "$OUT"
+          for seed in 5 8 17 23 29; do
+            npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed" > "artifacts/pilot/${FRAMEWORK}-${DATABASE}-seed-${seed}.log"
+            if [ ! -f "$OUT" ]; then
+              cp artifacts/balance/runs.csv "$OUT"
+            else
+              tail -n +2 artifacts/balance/runs.csv >> "$OUT"
+            fi
+          done
+
+      - name: Validate shard integrity
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const framework = process.env.FRAMEWORK;
+          const database = process.env.DATABASE;
+          const path = `artifacts/pilot/${framework}-${database}.csv`;
+          const lines = fs.readFileSync(path, 'utf8').trimEnd().split('\n');
+          const header = lines.shift().split(',');
+          const required = [
+            'frameworkId', 'databaseId', 'seed', 'strategyId', 'terminalStatus',
+            'missingRequiredDependencyDays', 'preventativeDependencyBuildCount',
+            'preventativeCapacityActionCount', 'postReleaseOverloadDays',
+            'featuresReleasedIntoOverload', 'infrastructureCostExposure', 'endingCash',
+          ];
+          for (const column of required) {
+            if (!header.includes(column)) throw new Error(`missing required pilot column ${column}`);
+          }
+          if (lines.length !== 30) throw new Error(`expected 30 data rows, got ${lines.length}`);
+          const index = Object.fromEntries(header.map((name, i) => [name, i]));
+          const seedCounts = new Map();
+          const keys = new Set();
+          for (const line of lines) {
+            const cells = line.split(',');
+            const rowFramework = cells[index.frameworkId];
+            const rowDatabase = cells[index.databaseId];
+            const seed = Number(cells[index.seed]);
+            const strategy = cells[index.strategyId];
+            if (rowFramework !== framework) throw new Error(`unexpected framework ${rowFramework}`);
+            if (rowDatabase !== database) throw new Error(`unexpected database ${rowDatabase}`);
+            seedCounts.set(seed, (seedCounts.get(seed) ?? 0) + 1);
+            const key = `${rowFramework}|${rowDatabase}|${seed}|${strategy}`;
+            if (keys.has(key)) throw new Error(`duplicate scenario ${key}`);
+            keys.add(key);
+          }
+          const expectedSeeds = [5, 8, 17, 23, 29];
+          for (const seed of expectedSeeds) {
+            if (seedCounts.get(seed) !== 6) throw new Error(`seed ${seed} expected 6 rows, got ${seedCounts.get(seed) ?? 0}`);
+          }
+          if (seedCounts.size !== expectedSeeds.length) {
+            throw new Error(`unexpected seed set ${JSON.stringify([...seedCounts.keys()].sort((a, b) => a - b))}`);
+          }
+          const evidence = {
+            framework,
+            database,
+            rows: lines.length,
+            uniqueScenarioKeys: keys.size,
+            seedCounts: Object.fromEntries([...seedCounts.entries()].sort(([a], [b]) => a - b)),
+          };
+          fs.writeFileSync(
+            `artifacts/pilot/${framework}-${database}-integrity.json`,
+            JSON.stringify(evidence, null, 2) + '\n',
+          );
+          console.log(JSON.stringify(evidence));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-pass-2-pilot-${{ matrix.framework }}-${{ matrix.database }}
+          path: |
+            artifacts/pilot/${{ matrix.framework }}-${{ matrix.database }}.csv
+            artifacts/pilot/${{ matrix.framework }}-${{ matrix.database }}-integrity.json
+          if-no-files-found: error
