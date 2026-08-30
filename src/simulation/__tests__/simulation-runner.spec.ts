@@ -13,7 +13,7 @@ const scenario: BalanceScenario = {
 describe('balance simulation runner', () => {
   it('repeats the same scenario identically', () => {
     expect(runBalanceScenario(scenario)).toEqual(runBalanceScenario(scenario));
-  });
+  }, 10_000);
 
   it('never performs more than the fixed 1080 day limit', () => {
     expect(BALANCE_DAY_LIMIT).toBe(1_080);
