@@ -107,7 +107,7 @@ export function decideApmPostReleaseStability(
   if (!bottleneck) {
     return decideMetricsPostReleaseStability(observation, context, 'APM_AWARE');
   }
-  if (bottleneck.effectiveRatio < 0.70) return null;
+  if (observation.serviceHealth === 'HEALTHY' || bottleneck.effectiveRatio < 0.70) return null;
 
   const node = nodeFor(observation, bottleneck.nodeId);
   if (!node) return null;
