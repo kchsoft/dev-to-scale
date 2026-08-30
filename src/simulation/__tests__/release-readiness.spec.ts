@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ServerSize } from '../../core/infrastructure';
 import * as balanceAction from '../balance-action';
-import type { BalanceTechnologyOption, BasicBalanceObservation } from '../balance-observation';
+import type {
+  BalanceTechnologyOption,
+  BasicBalanceObservation,
+  MetricsBalanceObservation,
+} from '../balance-observation';
 import * as releaseReadiness from '../release-readiness';
 
 interface ReleaseReadinessActionModule {
@@ -14,6 +18,11 @@ interface ReleaseReadinessActionModule {
 interface ReleaseReadinessPolicyModule {
   preventativeDependencyAction?: (
     observation: BasicBalanceObservation,
+    context: { readonly protectedLearningReserve: number },
+    strategyId: 'METRICS_AWARE',
+  ) => balanceAction.SimulationAction | null;
+  decideMetricsReleaseReadiness?: (
+    observation: BasicBalanceObservation | MetricsBalanceObservation,
     context: { readonly protectedLearningReserve: number },
     strategyId: 'METRICS_AWARE',
   ) => balanceAction.SimulationAction | null;
@@ -58,6 +67,52 @@ function observation(overrides: Partial<BasicBalanceObservation> = {}): BasicBal
     technologyOptions: TECHNOLOGY_OPTIONS,
     nodes: Object.freeze([]),
     ...overrides,
+  });
+}
+
+function metricsObservation(projectedEffectivePercent: number): MetricsBalanceObservation {
+  const dbNode = Object.freeze({
+    nodeId: 'v1:database:POSTGRESQL',
+    kind: 'DATABASE' as const,
+    productId: 'POSTGRESQL',
+    size: ServerSize.SMALL,
+    monthlyCost: 120_000,
+    aggregatePercent: 40,
+    effectivePercent: 40,
+    hardLimitPercent: 100,
+    status: 'NORMAL' as const,
+    scaleOut: Object.freeze({
+      kind: 'READ_REPLICA' as const,
+      count: 0,
+      maxCount: 3,
+      available: true,
+      reason: null,
+    }),
+  });
+  const projectedDbIo = Object.freeze({
+    nodeId: dbNode.nodeId,
+    nodeKind: 'DATABASE' as const,
+    resourceKind: 'IO' as const,
+    percent: projectedEffectivePercent,
+    effectivePercent: projectedEffectivePercent,
+    hardLimitPercent: 100,
+    status: projectedEffectivePercent >= 100 ? 'OVERLOAD' as const : 'WARNING' as const,
+  });
+  return Object.freeze({
+    ...observation({
+      level: 'BASIC',
+      upcomingRequiredDependencyGaps: Object.freeze([]),
+      nodes: Object.freeze([dbNode]),
+      technologyOptions: Object.freeze(TECHNOLOGY_OPTIONS.map((option) => (
+        option.id === 'REDIS' ? { ...option, available: true } : option
+      ))),
+    }),
+    level: 'METRICS' as const,
+    resourceLoads: Object.freeze([]),
+    releasePreview: Object.freeze({
+      resourceLoads: Object.freeze([projectedDbIo]),
+      maxEffectivePercent: projectedEffectivePercent,
+    }),
   });
 }
 
@@ -113,6 +168,53 @@ describe('release readiness actions', () => {
     )).toBeNull();
     expect(preventativeDependencyAction(
       observation({ cash: 0 }),
+      { protectedLearningReserve: 0 },
+      'METRICS_AWARE',
+    )).toBeNull();
+  });
+
+  it('prioritizes an upcoming dependency before projected capacity readiness', () => {
+    const decideMetricsReleaseReadiness = (releaseReadiness as ReleaseReadinessPolicyModule)
+      .decideMetricsReleaseReadiness;
+    expect(typeof decideMetricsReleaseReadiness).toBe('function');
+    if (!decideMetricsReleaseReadiness) return;
+
+    expect(decideMetricsReleaseReadiness(
+      observation(),
+      { protectedLearningReserve: 0 },
+      'METRICS_AWARE',
+    )).toMatchObject({
+      type: 'START_TECHNOLOGY_BUILD',
+      technologyId: 'SQS',
+      intent: 'RELEASE_READINESS_DEPENDENCY',
+    });
+  });
+
+  it('prepares the hottest projected DB IO resource at 85 percent or above', () => {
+    const decideMetricsReleaseReadiness = (releaseReadiness as ReleaseReadinessPolicyModule)
+      .decideMetricsReleaseReadiness;
+    expect(typeof decideMetricsReleaseReadiness).toBe('function');
+    if (!decideMetricsReleaseReadiness) return;
+
+    expect(decideMetricsReleaseReadiness(
+      metricsObservation(90),
+      { protectedLearningReserve: 0 },
+      'METRICS_AWARE',
+    )).toMatchObject({
+      type: 'START_TECHNOLOGY_BUILD',
+      technologyId: 'REDIS',
+      intent: 'RELEASE_READINESS_CAPACITY',
+    });
+  });
+
+  it('does not prepare projected capacity below the 85 percent threshold', () => {
+    const decideMetricsReleaseReadiness = (releaseReadiness as ReleaseReadinessPolicyModule)
+      .decideMetricsReleaseReadiness;
+    expect(typeof decideMetricsReleaseReadiness).toBe('function');
+    if (!decideMetricsReleaseReadiness) return;
+
+    expect(decideMetricsReleaseReadiness(
+      metricsObservation(84),
       { protectedLearningReserve: 0 },
       'METRICS_AWARE',
     )).toBeNull();
