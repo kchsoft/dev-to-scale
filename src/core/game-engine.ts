@@ -121,6 +121,7 @@ export class GameEngine {
   private _lastMonthlyRevenue = 0;
   private _lastSettlement: LastMonthlySettlement | null = null;
   private _load: LoadSnapshot;
+  private _growthReferenceLoad: LoadSnapshot;
 
   constructor(readonly config: GameEngineConfig) {
     this.random = config.random ?? new SeededRandomSource(config.seed ^ 0x9e3779b9);
@@ -130,6 +131,7 @@ export class GameEngine {
     this.finance = new FinanceAccount(config.startingCash ?? 3_000_000);
     this.featureTask = this.createFeatureTask(COMMUNITY_BOOTSTRAP);
     this._load = this.calculateCurrentLoad();
+    this._growthReferenceLoad = this._load;
   }
 
   get day(): number { return this._day; }
@@ -240,6 +242,7 @@ export class GameEngine {
     this.settleMonthIfEnding();
     if (this._status !== 'RUNNING') {
       this.refreshLoad();
+      this._growthReferenceLoad = this._load;
       this._day += 1;
       return this.snapshot;
     }
@@ -265,6 +268,7 @@ export class GameEngine {
 
     if (this.growthEvent?.active) this.growthEvent.advanceDay();
     this.refreshLoad();
+    this._growthReferenceLoad = this._load;
     this._day += 1;
     return this.snapshot;
   }
@@ -427,7 +431,7 @@ export class GameEngine {
   private advanceGrowth(): void {
     this.growthEvent = GrowthPolicy.maybeStartEvent(this.growthEvent, this.random);
     const phase = this.progression.finished ? 3 : this.progression.currentRequirement.phase;
-    const maxLoadRatio = primaryOperationalPressure(this._load)?.ratio ?? 0;
+    const maxLoadRatio = primaryOperationalPressure(this._growthReferenceLoad)?.ratio ?? 0;
     const result = GrowthPolicy.calculate({
       phase,
       completedFeatureGrowthBonus: this.completedFeatureDefinitions.reduce(
@@ -436,7 +440,7 @@ export class GameEngine {
       ),
       event: this.growthEvent,
       incidents: this.incidents.severities,
-      failureRate: this._load.failureRate,
+      failureRate: this._growthReferenceLoad.failureRate,
       maxLoadRatio,
       random: this.random,
     });
