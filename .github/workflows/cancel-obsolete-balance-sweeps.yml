@@ -1,0 +1,23 @@
+name: Cancel Obsolete Balance Sweeps
+
+on:
+  pull_request:
+    branches: [feature/playable-mvp]
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  cancel-obsolete:
+    if: github.head_ref == 'feature/deterministic-balance-simulation-harness'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel superseded threshold sweep runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for RUN_ID in 33289853750 33289899182 33289907748 33289970569; do
+            echo "Cancelling obsolete run $RUN_ID"
+            gh run cancel "$RUN_ID" --repo "$GITHUB_REPOSITORY" || true
+          done
