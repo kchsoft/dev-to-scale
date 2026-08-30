@@ -5,7 +5,8 @@ import type { InfrastructureNodeId } from '../core/topology';
 
 export type SimulationActionIntent =
   | 'RELEASE_READINESS_DEPENDENCY'
-  | 'RELEASE_READINESS_CAPACITY';
+  | 'RELEASE_READINESS_CAPACITY'
+  | 'POST_RELEASE_STABILITY_CAPACITY';
 
 interface SimulationActionMetadata {
   readonly intent?: SimulationActionIntent;
