@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ServerSize } from '../../core/infrastructure';
 import * as balanceAction from '../balance-action';
 import type { BalanceTechnologyOption, BasicBalanceObservation } from '../balance-observation';
-import * as strategyHelpers from '../strategy-helpers';
+import * as releaseReadiness from '../release-readiness';
 
 interface ReleaseReadinessActionModule {
   withReleaseReadinessIntent?: (
@@ -11,7 +11,7 @@ interface ReleaseReadinessActionModule {
   ) => balanceAction.SimulationAction;
 }
 
-interface ReleaseReadinessStrategyHelpers {
+interface ReleaseReadinessPolicyModule {
   preventativeDependencyAction?: (
     observation: BasicBalanceObservation,
     context: { readonly protectedLearningReserve: number },
@@ -84,7 +84,7 @@ describe('release readiness actions', () => {
   });
 
   it('builds the cheapest affordable upcoming EVENT_BUS dependency before release', () => {
-    const preventativeDependencyAction = (strategyHelpers as ReleaseReadinessStrategyHelpers)
+    const preventativeDependencyAction = (releaseReadiness as ReleaseReadinessPolicyModule)
       .preventativeDependencyAction;
     expect(typeof preventativeDependencyAction).toBe('function');
     if (!preventativeDependencyAction) return;
@@ -101,7 +101,7 @@ describe('release readiness actions', () => {
   });
 
   it('does not create dependency readiness without a gap or affordable candidate', () => {
-    const preventativeDependencyAction = (strategyHelpers as ReleaseReadinessStrategyHelpers)
+    const preventativeDependencyAction = (releaseReadiness as ReleaseReadinessPolicyModule)
       .preventativeDependencyAction;
     expect(typeof preventativeDependencyAction).toBe('function');
     if (!preventativeDependencyAction) return;
