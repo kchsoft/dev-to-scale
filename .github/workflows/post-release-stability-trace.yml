@@ -1,0 +1,133 @@
+name: Post Release Stability Trace
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout watch policy
+        uses: actions/checkout@v4
+        with:
+          path: watch
+      - name: Checkout restored 85 percent baseline
+        uses: actions/checkout@v4
+        with:
+          ref: 161af3532aaa1a082536f77b13b1118d729372e3
+          path: baseline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: |
+          (cd watch && npm install)
+          (cd baseline && npm install)
+      - name: Run paired traces
+        run: |
+          set -euo pipefail
+          mkdir -p traces
+          run_trace() {
+            local root="$1"
+            local label="$2"
+            local framework="$3"
+            local database="$4"
+            local seed="$5"
+            local strategy="$6"
+            (cd "$root" && npm run balance -- --framework "$framework" --db "$database" --seed "$seed" --strategy "$strategy" --trace) \
+              > "traces/${label}-${framework}-${database}-${seed}-${strategy}.log"
+          }
+          for policy in baseline watch; do
+            run_trace "$policy" "$policy" ASPNET_CORE MONGODB 5 METRICS_AWARE
+            run_trace "$policy" "$policy" ASPNET_CORE MYSQL 5 APM_AWARE
+            run_trace "$policy" "$policy" ASPNET_CORE MYSQL 29 ORACLE
+          done
+      - name: Validate causal trace behavior
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const dir = 'traces';
+          function parse(name) {
+            const text = fs.readFileSync(path.join(dir, name), 'utf8');
+            const trace = text.split('\n')
+              .filter(line => line.startsWith('[trace] '))
+              .map(line => JSON.parse(line.slice(8)));
+            const terminal = text.split('\n').find(line => line.startsWith('[balance] terminal ')) ?? '';
+            return { trace, terminal };
+          }
+          function activeReleaseDays(trace) {
+            const days = new Set();
+            for (let i = 1; i < trace.length; i += 1) {
+              if (trace[i].completedFeatureCount <= trace[i - 1].completedFeatureCount) continue;
+              for (let offset = 0; offset < 7 && i + offset < trace.length; offset += 1) {
+                days.add(trace[i + offset].day);
+              }
+            }
+            return days;
+          }
+          function thresholdFromReason(reason) {
+            const percent = reason.match(/at (\d+(?:\.\d+)?)%$/);
+            if (percent) return Number(percent[1]) / 100;
+            const ratio = reason.match(/([0-9]+(?:\.[0-9]+)?)x after release$/);
+            if (ratio) return Number(ratio[1]);
+            return null;
+          }
+          const scenarios = [
+            { key: 'ASPNET_CORE-MONGODB-5-METRICS_AWARE', guardDay: 283 },
+            { key: 'ASPNET_CORE-MYSQL-5-APM_AWARE', guardDay: 283 },
+            { key: 'ASPNET_CORE-MYSQL-29-ORACLE', guardDay: 362 },
+          ];
+          const summary = [];
+          for (const scenario of scenarios) {
+            const baseline = parse(`baseline-${scenario.key}.log`);
+            const watch = parse(`watch-${scenario.key}.log`);
+            const baselineGuard = baseline.trace.find(entry => entry.day === scenario.guardDay);
+            const watchGuard = watch.trace.find(entry => entry.day === scenario.guardDay);
+            if (!baselineGuard || !watchGuard) throw new Error(`${scenario.key}: missing guard day ${scenario.guardDay}`);
+            if (baselineGuard.actionId !== watchGuard.actionId || baselineGuard.actionReason !== watchGuard.actionReason) {
+              throw new Error(`${scenario.key}: pre-release guard diverged at day ${scenario.guardDay}`);
+            }
+
+            const activeDays = activeReleaseDays(watch.trace);
+            const stabilityActions = watch.trace.filter(entry => entry.actionReason.startsWith('stabilize live'));
+            if (stabilityActions.length === 0) throw new Error(`${scenario.key}: expected at least one live stability action`);
+            for (const action of stabilityActions) {
+              if (!activeDays.has(action.day)) throw new Error(`${scenario.key}: stability action outside release window on day ${action.day}`);
+              const threshold = thresholdFromReason(action.actionReason);
+              if (threshold === null || threshold < 0.70) {
+                throw new Error(`${scenario.key}: stability action below 70% live boundary on day ${action.day}: ${action.actionReason}`);
+              }
+            }
+
+            const firstDifferenceIndex = (() => {
+              const length = Math.min(baseline.trace.length, watch.trace.length);
+              for (let i = 0; i < length; i += 1) {
+                if (baseline.trace[i].day !== watch.trace[i].day
+                  || baseline.trace[i].actionId !== watch.trace[i].actionId
+                  || baseline.trace[i].actionReason !== watch.trace[i].actionReason) return i;
+              }
+              return null;
+            })();
+            summary.push({
+              scenario: scenario.key,
+              guardDay: scenario.guardDay,
+              guardAction: watchGuard,
+              baselineTerminal: baseline.terminal,
+              watchTerminal: watch.terminal,
+              firstDifference: firstDifferenceIndex === null ? null : {
+                baseline: baseline.trace[firstDifferenceIndex],
+                watch: watch.trace[firstDifferenceIndex],
+              },
+              stabilityActions,
+            });
+          }
+          fs.writeFileSync(path.join(dir, 'summary.json'), JSON.stringify(summary, null, 2));
+          console.log(JSON.stringify(summary, null, 2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: post-release-stability-trace
+          path: traces/
+          if-no-files-found: error
