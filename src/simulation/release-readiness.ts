@@ -93,6 +93,36 @@ export function decideMetricsReleaseReadiness(
     : null;
 }
 
+export function decideApmPostReleaseStability(
+  observation: BalanceObservation,
+  context: StrategyDecisionContext,
+): SimulationAction | null {
+  if (!context.postReleaseStabilityWindowActive) return null;
+
+  if (observation.level !== 'APM' && observation.level !== 'ORACLE') {
+    return decideMetricsPostReleaseStability(observation, context, 'APM_AWARE');
+  }
+
+  const bottleneck = observation.diagnosis.topBottleneck;
+  if (!bottleneck) {
+    return decideMetricsPostReleaseStability(observation, context, 'APM_AWARE');
+  }
+  if (bottleneck.effectivePercent < 70) return null;
+
+  const node = nodeFor(observation, bottleneck.nodeId);
+  if (!node) return null;
+  const reason = `stabilize live APM diagnosis ${bottleneck.label} after release at ${bottleneck.effectivePercent}%`;
+  const action = cheapestAffordable(
+    observation,
+    context,
+    'APM_AWARE',
+    resourceRemedyCandidates(observation, node, bottleneck.resourceKind, reason),
+  );
+  return action
+    ? withReleaseReadinessIntent(action, 'POST_RELEASE_STABILITY_CAPACITY')
+    : null;
+}
+
 export function decideApmReleaseReadiness(
   observation: BalanceObservation,
   context: StrategyDecisionContext,
