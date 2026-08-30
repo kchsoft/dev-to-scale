@@ -63,3 +63,33 @@ export function decideMetricsReleaseReadiness(
     ? withReleaseReadinessIntent(action, 'RELEASE_READINESS_CAPACITY')
     : null;
 }
+
+export function decideApmReleaseReadiness(
+  observation: BalanceObservation,
+  context: StrategyDecisionContext,
+): SimulationAction | null {
+  const dependency = preventativeDependencyAction(observation, context, 'APM_AWARE');
+  if (dependency) return dependency;
+
+  if (observation.level !== 'APM' && observation.level !== 'ORACLE') {
+    return decideMetricsReleaseReadiness(observation, context, 'APM_AWARE');
+  }
+
+  const preview = observation.releasePreview;
+  if (!preview || preview.maxEffectivePercent < 85) return null;
+  const bottleneck = preview.diagnosis.topBottleneck;
+  if (!bottleneck || bottleneck.effectivePercent < 85) return null;
+
+  const node = nodeFor(observation, bottleneck.nodeId);
+  if (!node) return null;
+  const reason = `prepare APM diagnosis ${bottleneck.label} for release at ${bottleneck.effectivePercent}%`;
+  const action = cheapestAffordable(
+    observation,
+    context,
+    'APM_AWARE',
+    resourceRemedyCandidates(observation, node, bottleneck.resourceKind, reason),
+  );
+  return action
+    ? withReleaseReadinessIntent(action, 'RELEASE_READINESS_CAPACITY')
+    : null;
+}
