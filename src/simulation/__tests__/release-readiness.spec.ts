@@ -26,6 +26,14 @@ interface ReleaseReadinessPolicyModule {
     context: { readonly protectedLearningReserve: number },
     strategyId: 'METRICS_AWARE',
   ) => balanceAction.SimulationAction | null;
+  decideMetricsPostReleaseStability?: (
+    observation: BasicBalanceObservation | MetricsBalanceObservation,
+    context: {
+      readonly protectedLearningReserve: number;
+      readonly postReleaseStabilityWindowActive?: boolean;
+    },
+    strategyId: 'METRICS_AWARE',
+  ) => balanceAction.SimulationAction | null;
 }
 
 const TECHNOLOGY_OPTIONS: readonly BalanceTechnologyOption[] = Object.freeze([
@@ -70,17 +78,20 @@ function observation(overrides: Partial<BasicBalanceObservation> = {}): BasicBal
   });
 }
 
-function metricsObservation(projectedEffectivePercent: number): MetricsBalanceObservation {
+function metricsObservation(
+  projectedEffectivePercent: number,
+  liveEffectivePercent = 40,
+): MetricsBalanceObservation {
   const dbNode = Object.freeze({
     nodeId: 'v1:database:POSTGRESQL',
     kind: 'DATABASE' as const,
     productId: 'POSTGRESQL',
     size: ServerSize.SMALL,
     monthlyCost: 120_000,
-    aggregatePercent: 40,
-    effectivePercent: 40,
+    aggregatePercent: liveEffectivePercent,
+    effectivePercent: liveEffectivePercent,
     hardLimitPercent: 100,
-    status: 'NORMAL' as const,
+    status: liveEffectivePercent >= 100 ? 'OVERLOAD' as const : liveEffectivePercent >= 70 ? 'WARNING' as const : 'NORMAL' as const,
     scaleOut: Object.freeze({
       kind: 'READ_REPLICA' as const,
       count: 0,
@@ -98,6 +109,15 @@ function metricsObservation(projectedEffectivePercent: number): MetricsBalanceOb
     hardLimitPercent: 100,
     status: projectedEffectivePercent >= 100 ? 'OVERLOAD' as const : 'WARNING' as const,
   });
+  const liveDbIo = Object.freeze({
+    nodeId: dbNode.nodeId,
+    nodeKind: 'DATABASE' as const,
+    resourceKind: 'IO' as const,
+    percent: liveEffectivePercent,
+    effectivePercent: liveEffectivePercent,
+    hardLimitPercent: 100,
+    status: liveEffectivePercent >= 100 ? 'OVERLOAD' as const : liveEffectivePercent >= 70 ? 'WARNING' as const : 'NORMAL' as const,
+  });
   return Object.freeze({
     ...observation({
       level: 'BASIC',
@@ -108,7 +128,7 @@ function metricsObservation(projectedEffectivePercent: number): MetricsBalanceOb
       ))),
     }),
     level: 'METRICS' as const,
-    resourceLoads: Object.freeze([]),
+    resourceLoads: Object.freeze([liveDbIo]),
     releasePreview: Object.freeze({
       resourceLoads: Object.freeze([projectedDbIo]),
       maxEffectivePercent: projectedEffectivePercent,
@@ -216,6 +236,42 @@ describe('release readiness actions', () => {
     expect(decideMetricsReleaseReadiness(
       metricsObservation(84),
       { protectedLearningReserve: 0 },
+      'METRICS_AWARE',
+    )).toBeNull();
+  });
+
+  it('stabilizes live DB IO at 70 percent during an active post-release window', () => {
+    const decideMetricsPostReleaseStability = (releaseReadiness as ReleaseReadinessPolicyModule)
+      .decideMetricsPostReleaseStability;
+    expect(typeof decideMetricsPostReleaseStability).toBe('function');
+    if (!decideMetricsPostReleaseStability) return;
+
+    expect(decideMetricsPostReleaseStability(
+      metricsObservation(40, 70),
+      { protectedLearningReserve: 0, postReleaseStabilityWindowActive: true },
+      'METRICS_AWARE',
+    )).toMatchObject({
+      type: 'START_TECHNOLOGY_BUILD',
+      technologyId: 'REDIS',
+      intent: 'POST_RELEASE_STABILITY_CAPACITY',
+    });
+  });
+
+  it('does not use the live 70 percent watch outside the release window or below its boundary', () => {
+    const decideMetricsPostReleaseStability = (releaseReadiness as ReleaseReadinessPolicyModule)
+      .decideMetricsPostReleaseStability;
+    expect(typeof decideMetricsPostReleaseStability).toBe('function');
+    if (!decideMetricsPostReleaseStability) return;
+
+    expect(decideMetricsPostReleaseStability(
+      metricsObservation(95, 90),
+      { protectedLearningReserve: 0, postReleaseStabilityWindowActive: false },
+      'METRICS_AWARE',
+    )).toBeNull();
+
+    expect(decideMetricsPostReleaseStability(
+      metricsObservation(95, 69),
+      { protectedLearningReserve: 0, postReleaseStabilityWindowActive: true },
       'METRICS_AWARE',
     )).toBeNull();
   });
