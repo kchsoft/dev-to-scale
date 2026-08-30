@@ -68,9 +68,9 @@ jobs:
             return days;
           }
           function thresholdFromReason(reason) {
-            const percent = reason.match(/at (\d+(?:\.\d+)?)%$/);
+            const percent = reason.match(/at (\d+(?:\.\d+)?)%(?:;|$)/);
             if (percent) return Number(percent[1]) / 100;
-            const ratio = reason.match(/([0-9]+(?:\.[0-9]+)?)x after release$/);
+            const ratio = reason.match(/([0-9]+(?:\.[0-9]+)?)x after release(?:;|$)/);
             if (ratio) return Number(ratio[1]);
             return null;
           }
