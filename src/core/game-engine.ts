@@ -16,7 +16,7 @@ import {
 } from './infrastructure';
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
 import { operationalPressures, primaryOperationalPressure } from './operational-pressure';
-import { OperationalSloWindow } from './operational-slo';
+import { OperationalSloWindow, type OperationalSloStatus } from './operational-slo';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
 import { trafficHealthForSeverity } from './request-trace';
@@ -96,6 +96,13 @@ export interface GameSnapshot {
   }[];
   lastMonthlyRevenue: number;
   lastSettlement: LastMonthlySettlement | null;
+  exitReadiness: {
+    monthlyRevenueTarget: number;
+    lastSettledMonthlyRevenue: number;
+    progressionComplete: boolean;
+    slo: OperationalSloStatus;
+    qualified: boolean;
+  };
 }
 
 export class GameEngine {
@@ -160,6 +167,13 @@ export class GameEngine {
       && this.featureTask.feature.id !== COMMUNITY_BOOTSTRAP.id
       && this.techDebt.canFastTrack(this.featureTask.feature.id),
     );
+    const slo = this.operationalSlo.status;
+    const progressionComplete = this.progression.finished;
+    const lastSettledMonthlyRevenue = this._lastSettlement?.revenue ?? 0;
+    const qualified = progressionComplete
+      && lastSettledMonthlyRevenue >= RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET
+      && slo.passes;
+
     return {
       day: this._day,
       status: this._status,
@@ -218,6 +232,13 @@ export class GameEngine {
       })),
       lastMonthlyRevenue: this._lastMonthlyRevenue,
       lastSettlement: this._lastSettlement,
+      exitReadiness: {
+        monthlyRevenueTarget: RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET,
+        lastSettledMonthlyRevenue,
+        progressionComplete,
+        slo,
+        qualified,
+      },
     };
   }
 
@@ -552,7 +573,11 @@ export class GameEngine {
       this._status = 'BANKRUPT';
       return;
     }
-    if (this.progression.finished && month.revenue >= RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET) {
+    if (
+      this.progression.finished
+      && month.revenue >= RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET
+      && this.operationalSlo.status.passes
+    ) {
       this._status = 'WON';
     }
   }
