@@ -1,0 +1,364 @@
+/* Living System Board — durable UI layer. Imported last so it is the canonical visual adapter. */
+:root {
+  --bg: #080B0F;
+  --bg-2: #0C1117;
+  --panel: #10161D;
+  --panel-2: #151D26;
+  --panel-3: #1A242F;
+  --line: #26313C;
+  --line-strong: #354555;
+  --text: #EDF4FA;
+  --muted: #93A2B1;
+  --muted-2: #657484;
+  --green: #58D68D;
+  --blue: #4CA7FF;
+  --cyan: #64D8D5;
+  --amber: #F4B860;
+  --red: #FF6577;
+  --violet: #A98BFA;
+  --font-display: Bahnschrift, "DIN Alternate", "Arial Narrow", ui-sans-serif, system-ui, sans-serif;
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-data: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+html,
+body,
+.game-screen {
+  background: var(--bg);
+}
+
+body {
+  font-family: var(--font-body);
+}
+
+/* Primary game HUD: survival state first, finance second. */
+.hud {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: auto;
+  min-height: 108px;
+  display: grid;
+  grid-template-columns: minmax(540px, 1fr) auto auto;
+  grid-template-rows: minmax(66px, auto) 34px;
+  align-items: stretch;
+  gap: 6px;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid var(--steel, var(--line));
+  background: rgba(8, 11, 15, .96);
+  backdrop-filter: blur(18px);
+}
+
+.hud-primary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 1.15fr) repeat(3, minmax(105px, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.hud-primary > * {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+
+.hud-primary > *:last-child {
+  border-right: 0;
+}
+
+.hud-status {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 13px;
+}
+
+.hud-status strong {
+  font: 750 11px/1.15 var(--font-display);
+  letter-spacing: .035em;
+}
+
+.hud-status small {
+  color: var(--muted);
+  font: 700 8px/1 var(--font-data);
+  letter-spacing: .07em;
+}
+
+.hud-vital {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 12px;
+}
+
+.hud-vital > span,
+.hud-finance > span,
+.service-pulse-copy > span {
+  color: var(--muted);
+  font: 800 8px/1 var(--font-data);
+  letter-spacing: .12em;
+}
+
+.hud-vital strong {
+  overflow: hidden;
+  color: var(--text);
+  font: 750 16px/1.1 var(--font-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-vital small {
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.hud-finance {
+  min-width: 246px;
+  display: grid;
+  grid-template-columns: auto repeat(3, minmax(56px, auto));
+  align-items: center;
+  gap: 5px 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.hud-finance > span {
+  grid-column: 1 / -1;
+}
+
+.hud-finance > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hud-finance small {
+  color: var(--muted-2);
+  font: 750 7px/1 var(--font-data);
+}
+
+.hud-finance b,
+.hud-finance strong {
+  color: var(--text);
+  font: 800 10px/1.05 var(--font-data);
+  white-space: nowrap;
+}
+
+.hud-finance.positive div:last-child strong { color: var(--green); }
+.hud-finance.negative div:last-child strong { color: var(--red); }
+
+.clock-controls {
+  align-self: stretch;
+  padding: 5px;
+  border-color: var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.clock-controls button {
+  min-width: 42px;
+  height: 100%;
+  min-height: 42px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.clock-controls button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.clock-controls button.active,
+.clock-controls button[aria-pressed="true"] {
+  border-color: rgba(76, 167, 255, .55);
+  background: var(--panel-2);
+  color: #CBE6FF;
+  box-shadow: inset 0 -2px 0 var(--blue);
+}
+
+.service-pulse {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(210px, 440px) minmax(140px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 10px;
+  border: 1px solid rgba(76, 167, 255, .22);
+  border-radius: 9px;
+  background: linear-gradient(90deg, rgba(76, 167, 255, .075), rgba(16, 22, 29, .72) 38%, var(--panel));
+}
+
+.service-pulse-copy {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.service-pulse-copy > span {
+  color: var(--blue);
+}
+
+.service-pulse-copy > strong {
+  overflow: hidden;
+  font: 750 11px/1.15 var(--font-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-pulse-copy > small {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-pulse .day-progress-shell {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #1B2630;
+  box-shadow: none;
+}
+
+.service-pulse .day-progress-shell > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--blue), var(--cyan));
+  box-shadow: 0 0 8px rgba(76, 167, 255, .28);
+  transition: width 100ms linear;
+}
+
+.service-pulse-time {
+  color: var(--muted);
+  font: 800 8px/1 var(--font-data);
+  letter-spacing: .08em;
+  white-space: nowrap;
+}
+
+@media (min-width: 601px) {
+  .main-shell {
+    min-height: calc(100vh - 108px);
+  }
+
+  .side-nav {
+    top: 108px;
+    height: calc(100vh - 108px);
+  }
+}
+
+.side-nav button.active {
+  color: #D4EAFF;
+  border-color: rgba(76, 167, 255, .28);
+  background: var(--panel);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.side-nav button small {
+  font: 750 8px/1 var(--font-display);
+  letter-spacing: .035em;
+}
+
+@media (max-width: 1000px) and (min-width: 601px) {
+  .hud {
+    grid-template-columns: minmax(480px, 1fr) auto;
+  }
+
+  .hud-finance {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .hud {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    padding: max(6px, env(safe-area-inset-top)) 6px 6px;
+    gap: 5px;
+  }
+
+  .hud-primary {
+    grid-column: 1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-radius: 9px;
+  }
+
+  .hud-primary .hud-status {
+    display: none;
+  }
+
+  .hud-vital {
+    min-height: 48px;
+    padding: 6px 7px;
+  }
+
+  .hud-vital > span { font-size: 7px; }
+  .hud-vital strong { font-size: 12px; }
+  .hud-vital small { display: none; }
+
+  .hud-finance {
+    display: none;
+  }
+
+  .clock-controls {
+    min-width: 0;
+    padding: 3px;
+    gap: 2px;
+  }
+
+  .clock-controls button {
+    width: 36px;
+    min-width: 36px;
+    min-height: 44px;
+    height: 44px;
+    padding: 0;
+  }
+
+  .service-pulse {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) 72px;
+    gap: 8px;
+    padding: 6px 8px;
+  }
+
+  .service-pulse-copy {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .service-pulse-copy > small,
+  .service-pulse-time {
+    display: none;
+  }
+
+  .service-pulse .day-progress-shell {
+    height: 5px;
+  }
+
+  .side-nav button.active {
+    box-shadow: inset 0 -3px 0 var(--blue);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .service-pulse .day-progress-shell > span {
+    transition: none;
+    box-shadow: none;
+  }
+}
