@@ -11,6 +11,7 @@ import { GameEngine } from '../core/game-engine';
 import type { TrafficSpikeResponseState } from '../core/growth';
 import type { HorizontalScaleKind, LoadSnapshot, TechnologyId } from '../core/infrastructure';
 import { ServerSize } from '../core/infrastructure';
+import { skillRef } from '../core/learning';
 import type { NodeResourceKind } from '../core/node-load';
 import {
   operationalPressures,
@@ -19,7 +20,7 @@ import {
 } from '../core/operational-pressure';
 import type { CommunityFeatureId } from '../core/progression';
 import type { ResourceRole } from '../core/service-topology';
-import { TECHNOLOGIES, type BuildableTechnologyId } from '../core/technology';
+import { TECHNOLOGIES, TechnologyBuildTask, type BuildableTechnologyId } from '../core/technology';
 import type { InfrastructureNodeId, InfrastructureNodeKind } from '../core/topology';
 import { V1RouteBlueprintAdapter, V1ServiceTopologyFactory } from '../core/v1-topology';
 import type { SimulationAction } from './balance-action';
@@ -447,6 +448,14 @@ function oracleReleasePreview(engine: GameEngine): OracleReleasePreviewObservati
   });
 }
 
+function freshTechnologyBuildDays(engine: GameEngine, id: BuildableTechnologyId): number {
+  const technologyLevel = engine.developer.get(skillRef.technology(id)).level;
+  return new TechnologyBuildTask(TECHNOLOGIES[id]).estimatedRemainingDays(
+    technologyLevel,
+    engine.incidents.developmentModifier,
+  );
+}
+
 function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
   return Object.freeze({
     previewTechnology: (id: BuildableTechnologyId) => engine.previewLoadWithTechnology(id),
@@ -462,8 +471,14 @@ function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
           return engine.previewLoadWithFeatureAndNodeResize(feature, action.nodeId, action.size);
         case 'SCALE_OUT_NODE':
           return engine.previewLoadWithFeatureAndNodeScaleOut(feature, action.nodeId);
-        case 'START_TECHNOLOGY_BUILD':
+        case 'START_TECHNOLOGY_BUILD': {
+          const featureRemainingDays = engine.snapshot.currentFeature?.estimatedRemainingDays;
+          if (featureRemainingDays === undefined) throw new Error('No pending feature timing to preview');
+          if (freshTechnologyBuildDays(engine, action.technologyId) > featureRemainingDays) {
+            return engine.previewLoadWithFeature(feature);
+          }
           return engine.previewLoadWithFeatureAndTechnology(feature, action.technologyId);
+        }
         case 'NO_OP':
         case 'RESPOND_TRAFFIC_SPIKE':
           return engine.previewLoadWithFeature(feature);
