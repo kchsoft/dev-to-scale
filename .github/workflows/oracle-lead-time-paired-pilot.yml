@@ -1,0 +1,155 @@
+name: Oracle Lead Time Paired Pilot
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run paired ORACLE lead-time pilot
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+          BASELINE_SHA: a49b42640c6e0a809c18f43a49e2962f69c5b0d1
+          CURRENT_SHA: 9b8a7158b7aa75570e8ec08b28d9d71d3cbb94ea
+        run: |
+          set -euo pipefail
+          mkdir -p paired
+          seeds=(1 4 7 10 13 16 19 22 25 28)
+          run_version() {
+            local label="$1"
+            local sha="$2"
+            local aggregate="paired/${FRAMEWORK}-${DATABASE}-${label}.csv"
+            git checkout --detach "$sha"
+            : > "$aggregate"
+            local first=1
+            for seed in "${seeds[@]}"; do
+              npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed" --strategy ORACLE > /dev/null
+              if [ "$first" -eq 1 ]; then
+                cat artifacts/balance/runs.csv > "$aggregate"
+                first=0
+              else
+                tail -n +2 artifacts/balance/runs.csv >> "$aggregate"
+              fi
+            done
+          }
+          run_version baseline "$BASELINE_SHA"
+          run_version current "$CURRENT_SHA"
+      - name: Validate shard
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          for (const label of ['baseline','current']) {
+            const file = `paired/${process.env.FRAMEWORK}-${process.env.DATABASE}-${label}.csv`;
+            const lines = fs.readFileSync(file, 'utf8').trimEnd().split('\n');
+            if (lines.length !== 11) throw new Error(`${label}: expected header + 10 rows, got ${lines.length}`);
+            const header = lines[0].split(',');
+            const strategyIndex = header.indexOf('strategyId');
+            if (lines.slice(1).some(line => line.split(',')[strategyIndex] !== 'ORACLE')) throw new Error(`${label}: non-ORACLE row`);
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oracle-lead-time-${{ matrix.framework }}-${{ matrix.database }}
+          path: paired/*.csv
+          if-no-files-found: error
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: shard
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: oracle-lead-time-*
+          path: all
+          merge-multiple: true
+      - name: Aggregate paired ORACLE lead-time pilot
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const files = fs.readdirSync('all').filter(f => f.endsWith('.csv')).sort();
+          if (files.length !== 30) throw new Error(`expected 30 csv files, got ${files.length}`);
+          function parse(file) {
+            const lines = fs.readFileSync(path.join('all', file),'utf8').trimEnd().split('\n');
+            const h = lines[0].split(',');
+            return lines.slice(1).map(line => Object.fromEntries(h.map((k,i)=>[k,line.split(',')[i]])));
+          }
+          const baseline = files.filter(f=>f.endsWith('-baseline.csv')).flatMap(parse);
+          const current = files.filter(f=>f.endsWith('-current.csv')).flatMap(parse);
+          if (baseline.length !== 150 || current.length !== 150) throw new Error(`expected 150 rows/version, got ${baseline.length}/${current.length}`);
+          const key = r => `${r.frameworkId}|${r.databaseId}|${r.seed}`;
+          const bm = new Map(baseline.map(r=>[key(r),r]));
+          const cm = new Map(current.map(r=>[key(r),r]));
+          if (bm.size !== 150 || cm.size !== 150) throw new Error('duplicate paired keys');
+          const mean=(rs,k)=>rs.reduce((s,r)=>s+Number(r[k]),0)/rs.length;
+          const summary=rs=>({
+            wins: rs.filter(r=>r.terminalStatus==='WON').length,
+            bankrupt: rs.filter(r=>r.terminalStatus==='BANKRUPT').length,
+            timeout: rs.filter(r=>r.terminalStatus==='TIMEOUT').length,
+            winRate: rs.filter(r=>r.terminalStatus==='WON').length/rs.length,
+            meanDaysPlayed: mean(rs,'daysPlayed'),
+            meanFinalDau: mean(rs,'finalDau'),
+            meanFailureDays: mean(rs,'failureDays'),
+            meanSevereFailureDays: mean(rs,'severeFailureDays'),
+            meanCumulativeFailureBurden: mean(rs,'cumulativeFailureBurden'),
+            meanOverloadDays: mean(rs,'overloadDays'),
+            meanPostReleaseOverloadDays: mean(rs,'postReleaseOverloadDays'),
+            meanMissingDependencyDays: mean(rs,'missingRequiredDependencyDays'),
+            meanInfrastructureExposure: mean(rs,'infrastructureCostExposure'),
+            meanPrematureCapacityActions: mean(rs,'prematureCapacityActions'),
+            meanLowUtilizationExpandedNodeDays: mean(rs,'lowUtilizationExpandedNodeDays'),
+            meanViralBurstCount: mean(rs,'viralBurstCount'),
+            meanViralThrottleCount: mean(rs,'viralThrottleCount'),
+          });
+          const transitions={};
+          const perStack={};
+          for (const [k,b] of bm) {
+            const c=cm.get(k); if(!c) throw new Error(`missing ${k}`);
+            const t=`${b.terminalStatus}->${c.terminalStatus}`;
+            transitions[t]=(transitions[t]??0)+1;
+            const stack=`${b.frameworkId}|${b.databaseId}`;
+            perStack[stack]??={winsBefore:0,winsAfter:0};
+            if(b.terminalStatus==='WON') perStack[stack].winsBefore++;
+            if(c.terminalStatus==='WON') perStack[stack].winsAfter++;
+          }
+          const b=summary(baseline), c=summary(current);
+          const report={baseline:b,current:c,delta:{
+            winRate:c.winRate-b.winRate,
+            failureDays:c.meanFailureDays-b.meanFailureDays,
+            severeFailureDays:c.meanSevereFailureDays-b.meanSevereFailureDays,
+            failureBurden:c.meanCumulativeFailureBurden-b.meanCumulativeFailureBurden,
+            overloadDays:c.meanOverloadDays-b.meanOverloadDays,
+            postReleaseOverloadDays:c.meanPostReleaseOverloadDays-b.meanPostReleaseOverloadDays,
+            missingDependencyDays:c.meanMissingDependencyDays-b.meanMissingDependencyDays,
+            infrastructureExposure:c.meanInfrastructureExposure-b.meanInfrastructureExposure,
+            prematureCapacityActions:c.meanPrematureCapacityActions-b.meanPrematureCapacityActions,
+            lowUtilizationExpandedNodeDays:c.meanLowUtilizationExpandedNodeDays-b.meanLowUtilizationExpandedNodeDays,
+            burstCount:c.meanViralBurstCount-b.meanViralBurstCount,
+            throttleCount:c.meanViralThrottleCount-b.meanViralThrottleCount,
+          },transitions,perStack};
+          fs.writeFileSync('oracle-lead-time-paired-summary.json',JSON.stringify(report,null,2));
+          console.log(JSON.stringify(report,null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oracle-lead-time-paired-summary
+          path: oracle-lead-time-paired-summary.json
+          if-no-files-found: error
