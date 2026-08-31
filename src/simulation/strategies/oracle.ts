@@ -104,7 +104,8 @@ export const oracleStrategy: BalanceStrategy = {
   decideViral(observation, context) {
     const burst = { type: 'RESPOND_TRAFFIC_SPIKE' as const, response: 'BURST' as const, reason: 'ORACLE burst protection' };
     const pressure = hottestEffectiveNode(observation)?.effectivePercent ?? 0;
+    if (pressure > 100) return 'THROTTLE';
     if (pressure >= 85 && affordable(observation, context, this.id, burst)) return 'BURST';
-    return pressure > 100 ? 'THROTTLE' : 'RIDE';
+    return 'RIDE';
   },
 };
