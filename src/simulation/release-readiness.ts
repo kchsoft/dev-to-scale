@@ -253,7 +253,11 @@ function oracleReleaseCandidates(observation: OracleBalanceObservation): readonl
     node,
     pressure.resourceKind,
     `prepare ORACLE ${pressure.nodeKind} ${pressure.resourceKind} ${pressure.effectiveRatio.toFixed(2)}x for release`,
-  ).filter((candidate): candidate is SimulationAction => candidate !== null);
+  ).filter((candidate): candidate is SimulationAction => {
+    if (!candidate) return false;
+    if (candidate.type !== 'START_TECHNOLOGY_BUILD') return true;
+    return observation.previewPort.technologyReadyForRelease?.(candidate.technologyId) !== false;
+  });
 }
 
 export function decideOracleReleaseReadiness(
