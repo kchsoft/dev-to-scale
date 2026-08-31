@@ -21,6 +21,11 @@ function run(overrides: Partial<BalanceRunResult> = {}): BalanceRunResult {
     completedFeatureCount: 10,
     missingRequiredDependencyDays: 4,
     peakMonthlyRevenue: 950_000_000,
+    revenueTargetMetButSloFailedSettlements: 2,
+    finalSloSampleCount: 30,
+    finalSloHealthyDays: 28,
+    finalSloAverageFailureRate: 0.01,
+    finalSloMissingRequiredDependencyDays: 0,
     endingCash: 10_000_000,
     minimumCash: 500_000,
     failureDays: 4,
@@ -141,7 +146,7 @@ describe('balance report', () => {
     const lines = csv.trimEnd().split('\n');
 
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toBe('frameworkId,databaseId,seed,strategyId,terminalStatus,daysPlayed,finalDau,peakDau,completedFeatureCount,missingRequiredDependencyDays,peakMonthlyRevenue,endingCash,minimumCash,failureDays,severeFailureDays,cumulativeFailureBurden,overloadDays,preventativeDependencyBuildCount,preventativeCapacityActionCount,postReleaseOverloadDays,featuresReleasedIntoOverload,incidentCount,technologyBuildSpend,learningSpend,burstSpend,settledInfrastructureSpend,infrastructureCostExposure,resizeCount,appScaleOutCount,dbReplicaActionCount,prematureCapacityActions,lowUtilizationExpandedNodeDays,viralRideCount,viralThrottleCount,viralBurstCount');
+    expect(lines[0]).toBe('frameworkId,databaseId,seed,strategyId,terminalStatus,daysPlayed,finalDau,peakDau,completedFeatureCount,missingRequiredDependencyDays,peakMonthlyRevenue,revenueTargetMetButSloFailedSettlements,finalSloSampleCount,finalSloHealthyDays,finalSloAverageFailureRate,finalSloMissingRequiredDependencyDays,endingCash,minimumCash,failureDays,severeFailureDays,cumulativeFailureBurden,overloadDays,preventativeDependencyBuildCount,preventativeCapacityActionCount,postReleaseOverloadDays,featuresReleasedIntoOverload,incidentCount,technologyBuildSpend,learningSpend,burstSpend,settledInfrastructureSpend,infrastructureCostExposure,resizeCount,appScaleOutCount,dbReplicaActionCount,prematureCapacityActions,lowUtilizationExpandedNodeDays,viralRideCount,viralThrottleCount,viralBurstCount');
     expect(lines[1]).toContain(',10,2,3,4,5,3,');
   });
 
