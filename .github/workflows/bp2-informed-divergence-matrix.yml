@@ -1,0 +1,100 @@
+name: BP2 Informed Divergence Matrix
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Trace informed strategies
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          set -euo pipefail
+          mkdir -p traces
+          for seed in 5 8 17 23 29; do
+            for strategy in METRICS_AWARE APM_AWARE ORACLE; do
+              npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed" --strategy "$strategy" --trace > "traces/${seed}-${strategy}.log"
+            done
+          done
+          node <<'NODE'
+          const fs=require('fs');
+          const framework=process.env.FRAMEWORK, database=process.env.DATABASE;
+          const seeds=[5,8,17,23,29];
+          function read(seed,strategy){
+            const text=fs.readFileSync(`traces/${seed}-${strategy}.log`,'utf8');
+            const trace=text.split('\n').filter(l=>l.startsWith('[trace] ')).map(l=>JSON.parse(l.slice(8)));
+            const terminalLine=text.split('\n').find(l=>l.startsWith('[balance] terminal ')) ?? '';
+            const terminal=terminalLine.includes('WON=100.0%')?'WON':terminalLine.includes('BANKRUPT=100.0%')?'BANKRUPT':'TIMEOUT';
+            return {trace,terminal};
+          }
+          const rows=[];
+          for(const seed of seeds){
+            const metric=read(seed,'METRICS_AWARE');
+            for(const otherId of ['APM_AWARE','ORACLE']){
+              const other=read(seed,otherId);
+              const n=Math.min(metric.trace.length,other.trace.length);
+              let idx=-1;
+              for(let i=0;i<n;i++){
+                const m=metric.trace[i], o=other.trace[i];
+                if(m.actionId!==o.actionId || m.viralControl!==o.viralControl){idx=i;break;}
+              }
+              const m=idx>=0?metric.trace[idx]:null, o=idx>=0?other.trace[idx]:null;
+              rows.push({framework,database,seed,otherId,metricTerminal:metric.terminal,otherTerminal:other.terminal,firstDivergenceDay:m?.day??null,metricAction:m?.actionId??null,otherAction:o?.actionId??null,metricReason:m?.actionReason??null,otherReason:o?.actionReason??null,metricSignal:m?.hottestVisibleSignal??null,otherSignal:o?.hottestVisibleSignal??null,metricFeatureCount:m?.completedFeatureCount??null,otherFeatureCount:o?.completedFeatureCount??null,metricCash:m?.cash??null,otherCash:o?.cash??null,metricDau:m?.dau??null,otherDau:o?.dau??null,metricViral:m?.viralControl??null,otherViral:o?.viralControl??null});
+            }
+          }
+          fs.writeFileSync(`divergence-${framework}-${database}.json`,JSON.stringify(rows,null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: divergence-${{ matrix.framework }}-${{ matrix.database }}
+          path: divergence-*.json
+          if-no-files-found: error
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: shard
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: divergence-*
+          path: all
+          merge-multiple: true
+      - name: Summarize divergence classes
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const files=fs.readdirSync('all').filter(f=>f.endsWith('.json'));
+          const rows=files.flatMap(f=>JSON.parse(fs.readFileSync(`all/${f}`,'utf8')));
+          if(rows.length!==150) throw new Error(`expected 150 comparisons, got ${rows.length}`);
+          const transition=r=>`${r.metricTerminal}->${r.otherTerminal}`;
+          const pair=r=>`${r.metricAction} || ${r.otherAction}`;
+          function counts(xs,key){const m={};for(const x of xs){const k=key(x);m[k]=(m[k]||0)+1;}return Object.fromEntries(Object.entries(m).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])));}
+          const report={rows:rows.length,byOther:{}};
+          for(const otherId of ['APM_AWARE','ORACLE']){
+            const xs=rows.filter(r=>r.otherId===otherId);
+            const metricBetter=xs.filter(r=>r.metricTerminal==='WON'&&r.otherTerminal!=='WON');
+            const otherBetter=xs.filter(r=>r.metricTerminal!=='WON'&&r.otherTerminal==='WON');
+            report.byOther[otherId]={transitions:counts(xs,transition),firstDivergencePairs:counts(xs,pair),metricBetterPairs:counts(metricBetter,pair),otherBetterPairs:counts(otherBetter,pair),metricBetterRows:metricBetter,otherBetterRows:otherBetter};
+          }
+          fs.writeFileSync('informed-divergence-matrix.json',JSON.stringify(report,null,2));
+          console.log(JSON.stringify(report,null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: informed-divergence-matrix
+          path: informed-divergence-matrix.json
+          if-no-files-found: error
