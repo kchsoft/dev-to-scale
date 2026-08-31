@@ -7,6 +7,7 @@ import "./dense-ui.css";
 import "./development-workbench.css";
 import "./development-workbench-accessibility.css";
 import "./mobile.css";
+import "./living-system-board.css";
 
 export const metadata: Metadata = {
   title: "Dev to Scale",
