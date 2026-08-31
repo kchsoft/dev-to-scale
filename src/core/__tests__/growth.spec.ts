@@ -178,6 +178,25 @@ describe('growth', () => {
     expect(severelyOverloaded.capacityModifier).toBe(-0.3);
   });
 
+  it('uses absolute DAU changes at 30 DAU and below', () => {
+    expect(GrowthPolicy.nextDau(5, 0.05)).toBe(7);
+    expect(GrowthPolicy.nextDau(5, -0.05)).toBe(3);
+    expect(GrowthPolicy.nextDau(30, 0.1)).toBe(33);
+  });
+
+  it('moves low DAU by at least one when the modifier is non-zero', () => {
+    expect(GrowthPolicy.nextDau(5, 0.01)).toBe(6);
+    expect(GrowthPolicy.nextDau(5, -0.01)).toBe(4);
+  });
+
+  it('keeps percentage growth above the low-DAU threshold', () => {
+    expect(GrowthPolicy.nextDau(31, 0.1)).toBe(34);
+  });
+
+  it('never lets an absolute low-DAU decrease go below zero', () => {
+    expect(GrowthPolicy.nextDau(1, -0.3)).toBe(0);
+  });
+
   it('rounds DAU to an integer', () => {
     expect(GrowthPolicy.nextDau(101, 0.015)).toBe(103);
   });
