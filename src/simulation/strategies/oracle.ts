@@ -27,6 +27,10 @@ function previewMax(observation: OracleBalanceObservation, action: SimulationAct
   }
 }
 
+function purposeBuiltRemedyPriority(action: SimulationAction): number {
+  return action.type === 'START_TECHNOLOGY_BUILD' && action.technologyId === 'OBJECT_STORAGE' ? 0 : 1;
+}
+
 function oracleCandidates(observation: OracleBalanceObservation): readonly SimulationAction[] {
   const pressure = [...observation.exactPressures].sort((left, right) => (
     right.effectiveRatio - left.effectiveRatio
@@ -73,7 +77,8 @@ function decideOracle(observation: OracleBalanceObservation, context: StrategyDe
   const target = ranked.filter(({ nextMax }) => nextMax <= 0.85);
   if (target.length > 0) {
     target.sort((left, right) => (
-      left.oneMonthCost - right.oneMonthCost
+      purposeBuiltRemedyPriority(left.action) - purposeBuiltRemedyPriority(right.action)
+      || left.oneMonthCost - right.oneMonthCost
       || left.order - right.order
       || simulationActionId(left.action).localeCompare(simulationActionId(right.action))
     ));
