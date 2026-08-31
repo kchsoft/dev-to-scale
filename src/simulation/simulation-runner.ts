@@ -1,4 +1,5 @@
 import type { GameEngine } from '../core/game-engine';
+import { RevenuePolicy } from '../core/finance';
 import { operationalPressures, primaryOperationalPressureForNode } from '../core/operational-pressure';
 import { simulationActionId, type SimulationAction } from './balance-action';
 import { observeForStrategy, type BalanceObservation } from './balance-observation';
@@ -82,10 +83,16 @@ function recordProgression(engine: GameEngine, metrics: SimulationMetricsCollect
 }
 
 function recordSettlement(engine: GameEngine, metrics: SimulationMetricsCollector): void {
-  const settlement = engine.snapshot.lastSettlement;
+  const snapshot = engine.snapshot;
+  const settlement = snapshot.lastSettlement;
   if (!settlement) return;
   metrics.recordMonthlyRevenue(settlement.revenue);
   metrics.recordSettlement(settlement.month, settlement.infrastructureCost);
+  metrics.recordExitQualificationSettlement({
+    month: settlement.month,
+    revenueTargetMet: settlement.revenue >= RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET,
+    sloPassed: snapshot.exitReadiness.slo.passes,
+  });
 }
 
 function targetEffectiveRatio(engine: GameEngine, action: SimulationAction): number | null {
@@ -234,6 +241,7 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
     }
   }
 
+  const finalSnapshot = engine.snapshot;
   const result = metrics.result({
     frameworkId: scenario.frameworkId,
     databaseId: scenario.databaseId,
@@ -242,7 +250,8 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
     terminalStatus: terminalStatus(engine),
     daysPlayed,
     finalDau: engine.dau,
-    endingCash: engine.snapshot.cash,
+    endingCash: finalSnapshot.cash,
+    finalSlo: finalSnapshot.exitReadiness.slo,
   });
   return { result, trace: Object.freeze(trace) };
 }
