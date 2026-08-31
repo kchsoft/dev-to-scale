@@ -474,10 +474,12 @@ export class GameEngine {
       phase,
       completedFeatureGrowthBonus: this.progression.finished
         ? 0
-        : this.completedFeatureDefinitions.reduce(
-            (sum, feature) => sum + feature.growthBonus,
-            0,
-          ),
+        : this.completedFeatureDefinitions.reduce((sum, feature) => {
+            const successRatio = this._growthReferenceLoad.requestTraces.find(
+              (trace) => trace.workloadId === feature.id,
+            )?.successRatio ?? 1;
+            return sum + feature.growthBonus * successRatio;
+          }, 0),
       event: this.growthEvent,
       incidents: this.incidents.severities,
       failureRate: this._growthReferenceLoad.failureRate,
