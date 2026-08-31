@@ -141,6 +141,16 @@ describe('game engine operational growth pressure', () => {
     expect(corrected.dau).toBe(810);
   });
 
+  it('does not let a same-day capacity correction erase the previously observed SLO overload', () => {
+    const corrected = engineWithLoad(operationalLoad({ alb: 1.2 }));
+
+    corrected.resizeInfrastructureNode('v1:app:SPRING_BOOT', ServerSize.MEDIUM);
+    corrected.advanceDay();
+
+    expect(corrected.operationalSlo.status.sampleCount).toBe(1);
+    expect(corrected.operationalSlo.status.healthyDays).toBe(0);
+  });
+
   it('uses incidentRandom for incident rolls when configured', () => {
     const growth = new CountingRandom();
     const incidents = new CountingRandom();
