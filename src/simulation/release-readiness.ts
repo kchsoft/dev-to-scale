@@ -72,11 +72,20 @@ export function decideMetricsPostReleaseStability(
   const node = nodeFor(observation, resource.nodeId);
   if (!node) return null;
   const reason = `stabilize live ${resource.nodeKind} ${resource.resourceKind} after release at ${resource.effectivePercent}%`;
+  const remedies = resourceRemedyCandidates(observation, node, resource.resourceKind, reason);
+  const immediateRemedies = remedies.filter((candidate) => (
+    candidate?.type === 'RESIZE_NODE' || candidate?.type === 'SCALE_OUT_NODE'
+  ));
   const action = firstAffordable(
     observation,
     context,
     strategyId,
-    resourceRemedyCandidates(observation, node, resource.resourceKind, reason),
+    immediateRemedies,
+  ) ?? firstAffordable(
+    observation,
+    context,
+    strategyId,
+    remedies,
   );
   return action
     ? withReleaseReadinessIntent(action, 'POST_RELEASE_STABILITY_CAPACITY')
