@@ -1,0 +1,122 @@
+/* Living System Board — operating report uses the same semantic hierarchy as the game board. */
+.operating-report {
+  max-width: 1240px;
+  margin: 0 auto;
+}
+
+.operating-report .page-heading {
+  padding: 10px 2px 18px;
+  border-bottom: 0;
+}
+
+.operating-report .page-heading > span {
+  color: var(--blue);
+  font: 850 8px/1 var(--font-data);
+  letter-spacing: .14em;
+}
+
+.operating-report .page-heading h2 {
+  margin-top: 7px;
+  font: 780 clamp(25px, 2.8vw, 38px)/.98 var(--font-display);
+  letter-spacing: -.025em;
+}
+
+.operating-report .page-heading p {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.report-section {
+  margin-bottom: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(16, 22, 29, .72);
+}
+
+.report-section-heading {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.report-section-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-section-heading span {
+  color: var(--blue);
+  font: 850 8px/1 var(--font-data);
+  letter-spacing: .13em;
+}
+
+.report-system .report-section-heading span { color: var(--cyan); }
+.report-section-heading strong { font: 750 14px/1.05 var(--font-display); }
+.report-section-heading > small { color: var(--muted); font: 800 8px/1 var(--font-data); letter-spacing: .08em; }
+
+.operating-report .report-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+}
+
+.operating-report .report-grid article {
+  min-height: 118px;
+  position: relative;
+  padding: 18px 16px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.operating-report .report-grid article:last-child { border-right: 0; }
+.operating-report .report-grid article > span { color: var(--muted); font: 800 8px/1 var(--font-data); letter-spacing: .1em; }
+.operating-report .report-grid article > strong { display: block; margin-top: 12px; font: 780 22px/1 var(--font-display); }
+.operating-report .report-grid article > small { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.operating-report .report-grid article > i { position: absolute; left: 16px; bottom: 12px; width: 28px; height: 2px; background: var(--line-strong); }
+.operating-report .report-grid article:last-child > i { background: var(--blue); }
+
+.report-settlement,
+.report-observability {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: rgba(8, 11, 15, .28);
+}
+
+.operating-report .resource-report-loads {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 7px;
+  padding: 12px 14px;
+}
+
+.operating-report .resource-report-loads .load-mini {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(8, 11, 15, .34);
+}
+
+@media (max-width: 760px) {
+  .operating-report .report-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .operating-report .report-grid article:nth-child(2) { border-right: 0; }
+  .operating-report .report-grid article:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+}
+
+@media (max-width: 600px) {
+  .operating-report .page-heading { padding: 8px 2px 12px; }
+  .report-section-heading { min-height: 52px; padding: 9px 10px; }
+  .operating-report .report-grid article { min-height: 106px; padding: 14px 12px; }
+  .operating-report .report-grid article > strong { font-size: 18px; }
+  .operating-report .resource-report-loads { grid-template-columns: 1fr; padding: 8px; }
+}
