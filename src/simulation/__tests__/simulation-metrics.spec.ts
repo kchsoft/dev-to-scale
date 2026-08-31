@@ -120,4 +120,42 @@ describe('simulation metrics', () => {
     expect(metrics.postReleaseOverloadDays).toBe(1);
     expect(metrics.featuresReleasedIntoOverload).toBe(2);
   });
+
+  it('counts each revenue-qualified but SLO-failed settlement month only once', () => {
+    const metrics = new SimulationMetricsCollector(1_000_000);
+
+    metrics.recordExitQualificationSettlement({ month: 1, revenueTargetMet: true, sloPassed: false });
+    metrics.recordExitQualificationSettlement({ month: 1, revenueTargetMet: true, sloPassed: false });
+    metrics.recordExitQualificationSettlement({ month: 2, revenueTargetMet: false, sloPassed: false });
+    metrics.recordExitQualificationSettlement({ month: 3, revenueTargetMet: true, sloPassed: true });
+
+    expect(metrics.revenueTargetMetButSloFailedSettlements).toBe(1);
+  });
+
+  it('copies final core SLO truth into the balance result without recalculating it', () => {
+    const metrics = new SimulationMetricsCollector(1_000_000);
+    const result = metrics.result({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 1,
+      strategyId: 'METRICS_AWARE',
+      terminalStatus: 'TIMEOUT',
+      daysPlayed: 10,
+      finalDau: 100,
+      endingCash: 900_000,
+      finalSlo: {
+        sampleCount: 30,
+        healthyDays: 28,
+        unhealthyDays: 2,
+        averageFailureRate: 0.0125,
+        missingRequiredDependencyDays: 0,
+        passes: true,
+      },
+    });
+
+    expect(result.finalSloSampleCount).toBe(30);
+    expect(result.finalSloHealthyDays).toBe(28);
+    expect(result.finalSloAverageFailureRate).toBe(0.0125);
+    expect(result.finalSloMissingRequiredDependencyDays).toBe(0);
+  });
 });
