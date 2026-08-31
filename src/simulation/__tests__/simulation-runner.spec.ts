@@ -47,4 +47,16 @@ describe('balance simulation runner', () => {
       beginReleaseWindow.mockRestore();
     }
   });
+
+  it('returns final SLO qualification diagnostics from the core exit-readiness state', () => {
+    const result = runBalanceScenario(scenario);
+
+    expect(result.finalSloSampleCount).toBe(30);
+    expect(result.finalSloHealthyDays).toBeGreaterThanOrEqual(0);
+    expect(result.finalSloHealthyDays).toBeLessThanOrEqual(result.finalSloSampleCount);
+    expect(result.finalSloAverageFailureRate).toBeGreaterThanOrEqual(0);
+    expect(result.finalSloAverageFailureRate).toBeLessThanOrEqual(1);
+    expect(result.finalSloMissingRequiredDependencyDays).toBeGreaterThanOrEqual(0);
+    expect(result.revenueTargetMetButSloFailedSettlements).toBeGreaterThanOrEqual(0);
+  });
 });
