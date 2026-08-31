@@ -60,6 +60,8 @@ const POSITIVE_PROBABILITY: Record<1 | 2 | 3, number> = {
   3: 0.58,
 };
 
+const LOW_DAU_ABSOLUTE_THRESHOLD = 30;
+
 export interface DailyGrowthInput {
   phase: 1 | 2 | 3;
   completedFeatureGrowthBonus: number;
@@ -129,6 +131,15 @@ export class GrowthPolicy {
   }
 
   static nextDau(currentDau: number, modifier: number): number {
+    if (currentDau <= LOW_DAU_ABSOLUTE_THRESHOLD && modifier !== 0) {
+      const deltaMagnitude = Math.max(
+        1,
+        Math.round(LOW_DAU_ABSOLUTE_THRESHOLD * Math.abs(modifier)),
+      );
+      const delta = modifier > 0 ? deltaMagnitude : -deltaMagnitude;
+      return Math.max(0, currentDau + delta);
+    }
+
     return Math.max(0, Math.round(currentDau * (1 + modifier)));
   }
 
