@@ -54,6 +54,7 @@ export class GameOverviewProjector {
       lastSettlement: snapshot.lastSettlement,
       status: snapshot.status,
       launched: snapshot.launched,
+      exitReadiness: snapshot.exitReadiness,
     };
   }
 
