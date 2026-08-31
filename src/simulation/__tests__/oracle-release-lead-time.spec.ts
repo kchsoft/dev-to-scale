@@ -10,14 +10,23 @@ class ConstantRandom implements RandomSource {
   next(): number { return 0.99; }
 }
 
-function gameWithPendingFeature(
-  predicate: (remainingDays: number) => boolean,
-): GameEngine {
+class GrowthRandom implements RandomSource {
+  private index = 0;
+  private readonly values = [0.99, 0.99, 0] as const;
+
+  next(): number {
+    const value = this.values[this.index % this.values.length];
+    this.index += 1;
+    return value;
+  }
+}
+
+function gameNearPendingRelease(): GameEngine {
   const game = new GameEngine({
     frameworkId: 'SPRING_BOOT',
     databaseId: 'POSTGRESQL',
-    seed: 73,
-    random: new ConstantRandom(),
+    seed: 2,
+    random: new GrowthRandom(),
     incidentRandom: new ConstantRandom(),
     startingCash: 100_000_000,
   });
@@ -29,13 +38,13 @@ function gameWithPendingFeature(
       game.launched
       && current
       && current.estimatedRemainingDays > 0
-      && predicate(current.estimatedRemainingDays)
+      && current.estimatedRemainingDays <= 3
     ) {
       return game;
     }
     game.advanceDay();
   }
-  throw new Error('Expected a pending post-launch feature matching the requested lead time');
+  throw new Error('Expected a pending post-launch feature within three days of release');
 }
 
 function releaseActionPreview(game: GameEngine, action: SimulationAction) {
@@ -56,11 +65,12 @@ const buildAlb: SimulationAction = Object.freeze({
 });
 
 describe('ORACLE release technology lead time', () => {
-  it('does not preview a technology as deployed when it cannot finish before the pending release', () => {
-    const game = gameWithPendingFeature((remainingDays) => remainingDays <= 3);
+  it('does not preview a slow technology as deployed when it cannot finish before the pending release', () => {
+    const game = gameNearPendingRelease();
     const observation = observeForStrategy(game, 'ORACLE');
     if (observation.level !== 'ORACLE') throw new Error('Expected ORACLE observation');
     expect(observation.pendingFeature?.estimatedRemainingDays).toBeLessThanOrEqual(3);
+    expect(game.developer.get(skillRef.technology('ALB')).level).toBe(1);
     expect(observation.technologyOptions.find(({ id }) => id === 'ALB')).toMatchObject({
       deployed: false,
       available: true,
@@ -74,8 +84,9 @@ describe('ORACLE release technology lead time', () => {
     expect(withLateAlb.nodeLoads.some(({ nodeId }) => nodeId === albNodeId)).toBe(false);
   });
 
-  it('still previews a technology deployment when enough feature lead time remains', () => {
-    const game = gameWithPendingFeature((remainingDays) => remainingDays >= 10);
+  it('still previews the same technology when skill makes it finish within the release lead time', () => {
+    const game = gameNearPendingRelease();
+    game.developer.get(skillRef.technology('ALB')).setLevel(10);
     const withoutAction = releaseActionPreview(game, noOp);
     const withAlb = releaseActionPreview(game, buildAlb);
     const albNodeId = v1NodeIdForTechnology('ALB');
