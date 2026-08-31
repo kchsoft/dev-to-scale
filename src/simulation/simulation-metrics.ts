@@ -1,5 +1,6 @@
 import type { DatabaseId } from '../core/database';
 import type { FrameworkId } from '../core/feature';
+import type { OperationalSloStatus } from '../core/operational-slo';
 import type { SimulationActionIntent } from './balance-action';
 import type { BalanceStrategyId } from './balance-scenario';
 
@@ -17,6 +18,11 @@ export interface BalanceRunResult {
   completedFeatureCount: number;
   missingRequiredDependencyDays: number;
   peakMonthlyRevenue: number;
+  revenueTargetMetButSloFailedSettlements: number;
+  finalSloSampleCount: number;
+  finalSloHealthyDays: number;
+  finalSloAverageFailureRate: number;
+  finalSloMissingRequiredDependencyDays: number;
   endingCash: number;
   minimumCash: number;
   failureDays: number;
@@ -49,6 +55,7 @@ export class SimulationMetricsCollector {
   completedFeatureCount = 0;
   missingRequiredDependencyDays = 0;
   peakMonthlyRevenue = 0;
+  revenueTargetMetButSloFailedSettlements = 0;
   failureDays = 0;
   severeFailureDays = 0;
   cumulativeFailureBurden = 0;
@@ -74,6 +81,7 @@ export class SimulationMetricsCollector {
 
   private readonly seenIncidentIds = new Set<string>();
   private readonly seenSettlementMonths = new Set<number>();
+  private readonly seenExitQualificationSettlementMonths = new Set<number>();
   private releaseWindows: { remainingDays: number; overloaded: boolean }[] = [];
 
   constructor(initialCash: number) {
@@ -96,6 +104,18 @@ export class SimulationMetricsCollector {
 
   recordMonthlyRevenue(revenue: number): void {
     this.peakMonthlyRevenue = Math.max(this.peakMonthlyRevenue, revenue);
+  }
+
+  recordExitQualificationSettlement(input: {
+    month: number;
+    revenueTargetMet: boolean;
+    sloPassed: boolean;
+  }): void {
+    if (this.seenExitQualificationSettlementMonths.has(input.month)) return;
+    this.seenExitQualificationSettlementMonths.add(input.month);
+    if (input.revenueTargetMet && !input.sloPassed) {
+      this.revenueTargetMetButSloFailedSettlements += 1;
+    }
   }
 
   beginFeatureReleaseWindow(): void {
@@ -204,13 +224,20 @@ export class SimulationMetricsCollector {
     daysPlayed: number;
     finalDau: number;
     endingCash: number;
+    finalSlo: OperationalSloStatus;
   }): BalanceRunResult {
+    const { finalSlo, ...base } = input;
     return {
-      ...input,
+      ...base,
       peakDau: this.peakDau,
       completedFeatureCount: this.completedFeatureCount,
       missingRequiredDependencyDays: this.missingRequiredDependencyDays,
       peakMonthlyRevenue: this.peakMonthlyRevenue,
+      revenueTargetMetButSloFailedSettlements: this.revenueTargetMetButSloFailedSettlements,
+      finalSloSampleCount: finalSlo.sampleCount,
+      finalSloHealthyDays: finalSlo.healthyDays,
+      finalSloAverageFailureRate: finalSlo.averageFailureRate,
+      finalSloMissingRequiredDependencyDays: finalSlo.missingRequiredDependencyDays,
       minimumCash: this.minimumCash,
       failureDays: this.failureDays,
       severeFailureDays: this.severeFailureDays,
