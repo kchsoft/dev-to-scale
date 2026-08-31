@@ -1,0 +1,223 @@
+name: Time Axis Paired Pilot
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run paired ten-seed stack pilot
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+          BASELINE_SHA: 895c73aed63140388e1dcc73303613d635e43e7f
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p paired
+          seeds=(1 4 7 10 13 16 19 22 25 28)
+
+          run_version() {
+            local label="$1"
+            local sha="$2"
+            local aggregate="paired/${FRAMEWORK}-${DATABASE}-${label}.csv"
+            git checkout --detach "$sha"
+            : > "$aggregate"
+            local first=1
+            for seed in "${seeds[@]}"; do
+              npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed" > /dev/null
+              if [ "$first" -eq 1 ]; then
+                cat artifacts/balance/runs.csv > "$aggregate"
+                first=0
+              else
+                tail -n +2 artifacts/balance/runs.csv >> "$aggregate"
+              fi
+            done
+          }
+
+          run_version baseline "$BASELINE_SHA"
+          run_version current "$CURRENT_SHA"
+
+      - name: Validate paired shard
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const expectedStrategies = ['REACTIVE_BASIC','METRICS_AWARE','APM_AWARE','ORACLE','YOLO_SCALE','CHEAPSKATE'];
+          const expectedSeeds = [1,4,7,10,13,16,19,22,25,28];
+          for (const label of ['baseline','current']) {
+            const file = `paired/${process.env.FRAMEWORK}-${process.env.DATABASE}-${label}.csv`;
+            const lines = fs.readFileSync(file, 'utf8').trimEnd().split('\n');
+            if (lines.length !== 61) throw new Error(`${label}: expected header + 60 rows, got ${lines.length}`);
+            const header = lines[0].split(',');
+            const strategyIndex = header.indexOf('strategyId');
+            const seedIndex = header.indexOf('seed');
+            const seen = new Set(lines.slice(1).map(line => {
+              const values = line.split(',');
+              return `${values[seedIndex]}|${values[strategyIndex]}`;
+            }));
+            if (seen.size !== 60) throw new Error(`${label}: expected 60 unique seed-strategy keys, got ${seen.size}`);
+            for (const seed of expectedSeeds) {
+              for (const strategy of expectedStrategies) {
+                if (!seen.has(`${seed}|${strategy}`)) throw new Error(`${label}: missing ${seed}|${strategy}`);
+              }
+            }
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: time-axis-${{ matrix.framework }}-${{ matrix.database }}
+          path: paired/*.csv
+          if-no-files-found: error
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: shard
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: time-axis-*
+          path: paired-all
+          merge-multiple: true
+      - name: Aggregate paired pilot
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = 'paired-all';
+          const files = fs.readdirSync(root).filter(name => name.endsWith('.csv')).sort();
+          if (files.length !== 30) throw new Error(`expected 30 CSVs, got ${files.length}`);
+
+          function parseCsv(file) {
+            const lines = fs.readFileSync(path.join(root, file), 'utf8').trimEnd().split('\n');
+            const header = lines[0].split(',');
+            return lines.slice(1).map(line => {
+              const values = line.split(',');
+              return Object.fromEntries(header.map((key, index) => [key, values[index]]));
+            });
+          }
+          const baseline = files.filter(name => name.endsWith('-baseline.csv')).flatMap(parseCsv);
+          const current = files.filter(name => name.endsWith('-current.csv')).flatMap(parseCsv);
+          if (baseline.length !== 900 || current.length !== 900) {
+            throw new Error(`expected 900 rows/version, got baseline=${baseline.length}, current=${current.length}`);
+          }
+
+          const strategies = ['REACTIVE_BASIC','METRICS_AWARE','APM_AWARE','ORACLE','YOLO_SCALE','CHEAPSKATE'];
+          const informed = new Set(['METRICS_AWARE','APM_AWARE','ORACLE']);
+          const riskier = new Set(['REACTIVE_BASIC','YOLO_SCALE','CHEAPSKATE']);
+          const key = row => `${row.frameworkId}|${row.databaseId}|${row.seed}|${row.strategyId}`;
+          const baselineMap = new Map(baseline.map(row => [key(row), row]));
+          const currentMap = new Map(current.map(row => [key(row), row]));
+          if (baselineMap.size !== 900 || currentMap.size !== 900) throw new Error('duplicate paired keys');
+          for (const k of baselineMap.keys()) if (!currentMap.has(k)) throw new Error(`current missing ${k}`);
+
+          const mean = xs => xs.reduce((a,b) => a+b, 0) / xs.length;
+          const median = xs => {
+            if (!xs.length) return null;
+            const sorted = [...xs].sort((a,b) => a-b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
+          };
+          const num = (rows, field) => rows.map(row => Number(row[field]));
+          function summarize(rows) {
+            const wins = rows.filter(row => row.terminalStatus === 'WON');
+            const bankrupt = rows.filter(row => row.terminalStatus === 'BANKRUPT');
+            const timeout = rows.filter(row => row.terminalStatus === 'TIMEOUT');
+            return {
+              runs: rows.length,
+              wins: wins.length,
+              bankrupt: bankrupt.length,
+              timeout: timeout.length,
+              winRate: wins.length / rows.length,
+              bankruptcyRate: bankrupt.length / rows.length,
+              timeoutRate: timeout.length / rows.length,
+              winnerDayMedian: median(num(wins, 'daysPlayed')),
+              meanDaysPlayed: mean(num(rows, 'daysPlayed')),
+              meanFinalDau: mean(num(rows, 'finalDau')),
+              meanFailureDays: mean(num(rows, 'failureDays')),
+              meanOverloadDays: mean(num(rows, 'overloadDays')),
+              meanPostReleaseOverloadDays: mean(num(rows, 'postReleaseOverloadDays')),
+              meanMissingDependencyDays: mean(num(rows, 'missingRequiredDependencyDays')),
+              meanInfrastructureExposure: mean(num(rows, 'infrastructureCostExposure')),
+              meanPrematureCapacityActions: mean(num(rows, 'prematureCapacityActions')),
+              meanLowUtilizationExpandedNodeDays: mean(num(rows, 'lowUtilizationExpandedNodeDays')),
+            };
+          }
+          function cohort(rows) {
+            const informedRows = rows.filter(row => informed.has(row.strategyId));
+            const riskierRows = rows.filter(row => riskier.has(row.strategyId));
+            const left = summarize(informedRows);
+            const right = summarize(riskierRows);
+            return {
+              informed: left,
+              riskier: right,
+              winDelta: left.winRate - right.winRate,
+              postReleaseRatio: right.meanPostReleaseOverloadDays === 0 ? null : left.meanPostReleaseOverloadDays / right.meanPostReleaseOverloadDays,
+            };
+          }
+          function version(rows) {
+            const overall = summarize(rows);
+            return {
+              overall,
+              cohort: cohort(rows),
+              perStrategy: Object.fromEntries(strategies.map(strategy => [strategy, summarize(rows.filter(row => row.strategyId === strategy))])),
+            };
+          }
+
+          const transitions = {};
+          const transitionsByStrategy = Object.fromEntries(strategies.map(s => [s, {}]));
+          for (const [k, before] of baselineMap) {
+            const after = currentMap.get(k);
+            const transition = `${before.terminalStatus}->${after.terminalStatus}`;
+            transitions[transition] = (transitions[transition] ?? 0) + 1;
+            const bucket = transitionsByStrategy[before.strategyId];
+            bucket[transition] = (bucket[transition] ?? 0) + 1;
+          }
+
+          const baselineSummary = version(baseline);
+          const currentSummary = version(current);
+          const report = {
+            rowCount: { baseline: baseline.length, current: current.length },
+            baseline: baselineSummary,
+            current: currentSummary,
+            delta: {
+              overallWinRate: currentSummary.overall.winRate - baselineSummary.overall.winRate,
+              overallBankruptcyRate: currentSummary.overall.bankruptcyRate - baselineSummary.overall.bankruptcyRate,
+              informedWinRate: currentSummary.cohort.informed.winRate - baselineSummary.cohort.informed.winRate,
+              riskierWinRate: currentSummary.cohort.riskier.winRate - baselineSummary.cohort.riskier.winRate,
+              cohortWinDelta: currentSummary.cohort.winDelta - baselineSummary.cohort.winDelta,
+            },
+            transitions,
+            transitionsByStrategy,
+            diagnosticGate: {
+              currentOverallWinBand: currentSummary.overall.winRate >= 0.15 && currentSummary.overall.winRate <= 0.45,
+              currentBankruptcyBand: currentSummary.overall.bankruptcyRate >= 0.10 && currentSummary.overall.bankruptcyRate <= 0.35,
+              currentTimeoutNonZero: currentSummary.overall.timeout > 0,
+              currentWinnerMedian500To1000: currentSummary.overall.winnerDayMedian !== null && currentSummary.overall.winnerDayMedian >= 500 && currentSummary.overall.winnerDayMedian <= 1000,
+              cohortAdvantageImproved: currentSummary.cohort.winDelta > baselineSummary.cohort.winDelta,
+            },
+          };
+          fs.writeFileSync('time-axis-paired-pilot-summary.json', JSON.stringify(report, null, 2));
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: time-axis-paired-pilot-summary
+          path: time-axis-paired-pilot-summary.json
+          if-no-files-found: error
