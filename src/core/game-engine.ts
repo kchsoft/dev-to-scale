@@ -472,10 +472,12 @@ export class GameEngine {
     const maxLoadRatio = primaryOperationalPressure(this._growthReferenceLoad)?.ratio ?? 0;
     const result = GrowthPolicy.calculate({
       phase,
-      completedFeatureGrowthBonus: this.completedFeatureDefinitions.reduce(
-        (sum, feature) => sum + feature.growthBonus,
-        0,
-      ),
+      completedFeatureGrowthBonus: this.progression.finished
+        ? 0
+        : this.completedFeatureDefinitions.reduce(
+            (sum, feature) => sum + feature.growthBonus,
+            0,
+          ),
       event: this.growthEvent,
       incidents: this.incidents.severities,
       failureRate: this._growthReferenceLoad.failureRate,
