@@ -236,7 +236,7 @@ describe('APM release readiness', () => {
     });
   });
 
-  it('falls back to live METRICS resource pressure when APM has no diagnosis', () => {
+  it('falls back to live METRICS resource pressure and uses immediate capacity when APM has no diagnosis', () => {
     const db = node({
       nodeId: 'db',
       kind: 'DATABASE',
@@ -258,8 +258,8 @@ describe('APM release readiness', () => {
     });
 
     expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
-      type: 'START_TECHNOLOGY_BUILD',
-      technologyId: 'REDIS',
+      type: 'SCALE_OUT_NODE',
+      nodeId: 'db',
       intent: 'POST_RELEASE_STABILITY_CAPACITY',
     });
   });
