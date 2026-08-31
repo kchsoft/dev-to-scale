@@ -1,0 +1,241 @@
+name: Balance Pass 2 Final Matrix
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run exact 30-seed stack matrix
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          set -euo pipefail
+          mkdir -p final-matrix
+          aggregate="final-matrix/${FRAMEWORK}-${DATABASE}.csv"
+          : > "$aggregate"
+          first=1
+          for seed in $(seq 1 30); do
+            npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed" > /dev/null
+            if [ "$first" -eq 1 ]; then
+              cat artifacts/balance/runs.csv > "$aggregate"
+              first=0
+            else
+              tail -n +2 artifacts/balance/runs.csv >> "$aggregate"
+            fi
+          done
+      - name: Validate exact stack shard
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const file = `final-matrix/${process.env.FRAMEWORK}-${process.env.DATABASE}.csv`;
+          const lines = fs.readFileSync(file, 'utf8').trimEnd().split('\n');
+          if (lines.length !== 181) throw new Error(`expected header + 180 rows, got ${lines.length}`);
+          const header = lines[0].split(',');
+          const seedIndex = header.indexOf('seed');
+          const strategyIndex = header.indexOf('strategyId');
+          const frameworkIndex = header.indexOf('frameworkId');
+          const databaseIndex = header.indexOf('databaseId');
+          const strategies = ['REACTIVE_BASIC','METRICS_AWARE','APM_AWARE','ORACLE','YOLO_SCALE','CHEAPSKATE'];
+          const seen = new Set();
+          for (const line of lines.slice(1)) {
+            const values = line.split(',');
+            if (values[frameworkIndex] !== process.env.FRAMEWORK || values[databaseIndex] !== process.env.DATABASE) {
+              throw new Error(`wrong stack row: ${line}`);
+            }
+            seen.add(`${values[seedIndex]}|${values[strategyIndex]}`);
+          }
+          if (seen.size !== 180) throw new Error(`expected 180 unique seed-strategy keys, got ${seen.size}`);
+          for (let seed = 1; seed <= 30; seed += 1) {
+            for (const strategy of strategies) {
+              if (!seen.has(`${seed}|${strategy}`)) throw new Error(`missing ${seed}|${strategy}`);
+            }
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-pass-2-${{ matrix.framework }}-${{ matrix.database }}
+          path: final-matrix/*.csv
+          if-no-files-found: error
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: shard
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: balance-pass-2-*
+          path: final-all
+          merge-multiple: true
+      - name: Aggregate exact 2,700-run evidence
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = 'final-all';
+          const files = fs.readdirSync(root).filter(name => name.endsWith('.csv')).sort();
+          if (files.length !== 15) throw new Error(`expected 15 stack CSVs, got ${files.length}`);
+
+          function parseCsv(file) {
+            const lines = fs.readFileSync(path.join(root, file), 'utf8').trimEnd().split('\n');
+            const header = lines[0].split(',');
+            return lines.slice(1).map(line => {
+              const values = line.split(',');
+              return Object.fromEntries(header.map((key, index) => [key, values[index]]));
+            });
+          }
+
+          const rows = files.flatMap(parseCsv);
+          const strategies = ['REACTIVE_BASIC','METRICS_AWARE','APM_AWARE','ORACLE','YOLO_SCALE','CHEAPSKATE'];
+          const informed = new Set(['METRICS_AWARE','APM_AWARE','ORACLE']);
+          const riskier = new Set(['REACTIVE_BASIC','YOLO_SCALE','CHEAPSKATE']);
+          const key = row => `${row.frameworkId}|${row.databaseId}|${row.seed}|${row.strategyId}`;
+          const keys = new Set(rows.map(key));
+          if (rows.length !== 2700) throw new Error(`expected exactly 2700 rows, got ${rows.length}`);
+          if (keys.size !== 2700) throw new Error(`expected exactly 2700 unique scenario keys, got ${keys.size}`);
+
+          const stackCounts = {};
+          const strategyCounts = {};
+          for (const row of rows) {
+            const stack = `${row.frameworkId}|${row.databaseId}`;
+            stackCounts[stack] = (stackCounts[stack] ?? 0) + 1;
+            strategyCounts[row.strategyId] = (strategyCounts[row.strategyId] ?? 0) + 1;
+          }
+          if (Object.keys(stackCounts).length !== 15 || Object.values(stackCounts).some(count => count !== 180)) {
+            throw new Error(`invalid stack counts: ${JSON.stringify(stackCounts)}`);
+          }
+          if (strategies.some(strategy => strategyCounts[strategy] !== 450)) {
+            throw new Error(`invalid strategy counts: ${JSON.stringify(strategyCounts)}`);
+          }
+
+          const num = (rows, field) => rows.map(row => Number(row[field]));
+          const mean = values => values.reduce((sum, value) => sum + value, 0) / values.length;
+          const median = values => {
+            if (!values.length) return null;
+            const sorted = [...values].sort((a,b) => a-b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+          };
+          function summarize(subset) {
+            const wins = subset.filter(row => row.terminalStatus === 'WON');
+            const bankrupt = subset.filter(row => row.terminalStatus === 'BANKRUPT');
+            const timeout = subset.filter(row => row.terminalStatus === 'TIMEOUT');
+            return {
+              runs: subset.length,
+              wins: wins.length,
+              bankrupt: bankrupt.length,
+              timeout: timeout.length,
+              winRate: wins.length / subset.length,
+              bankruptcyRate: bankrupt.length / subset.length,
+              timeoutRate: timeout.length / subset.length,
+              winnerDayMedian: median(num(wins, 'daysPlayed')),
+              winsBeforeDay365: wins.filter(row => Number(row.daysPlayed) < 365).length,
+              meanDaysPlayed: mean(num(subset, 'daysPlayed')),
+              meanFailureDays: mean(num(subset, 'failureDays')),
+              meanSevereFailureDays: mean(num(subset, 'severeFailureDays')),
+              meanOverloadDays: mean(num(subset, 'overloadDays')),
+              meanPostReleaseOverloadDays: mean(num(subset, 'postReleaseOverloadDays')),
+              meanMissingDependencyDays: mean(num(subset, 'missingRequiredDependencyDays')),
+              medianInfrastructureExposure: median(num(subset, 'infrastructureCostExposure')),
+              meanInfrastructureExposure: mean(num(subset, 'infrastructureCostExposure')),
+              meanPrematureCapacityActions: mean(num(subset, 'prematureCapacityActions')),
+              meanLowUtilizationExpandedNodeDays: mean(num(subset, 'lowUtilizationExpandedNodeDays')),
+            };
+          }
+
+          const overall = summarize(rows);
+          const informedRows = rows.filter(row => informed.has(row.strategyId));
+          const riskierRows = rows.filter(row => riskier.has(row.strategyId));
+          const informedSummary = summarize(informedRows);
+          const riskierSummary = summarize(riskierRows);
+          const perStrategy = Object.fromEntries(strategies.map(strategy => [
+            strategy,
+            summarize(rows.filter(row => row.strategyId === strategy)),
+          ]));
+          const perStack = Object.fromEntries(Object.keys(stackCounts).sort().map(stack => {
+            const [frameworkId, databaseId] = stack.split('|');
+            const stackRows = rows.filter(row => row.frameworkId === frameworkId && row.databaseId === databaseId);
+            const stackInformed = summarize(stackRows.filter(row => informed.has(row.strategyId)));
+            const stackRiskier = summarize(stackRows.filter(row => riskier.has(row.strategyId)));
+            return [stack, {
+              overall: summarize(stackRows),
+              informed: stackInformed,
+              riskier: stackRiskier,
+              winDelta: stackInformed.winRate - stackRiskier.winRate,
+              postReleaseRatio: stackRiskier.meanPostReleaseOverloadDays === 0 ? null : stackInformed.meanPostReleaseOverloadDays / stackRiskier.meanPostReleaseOverloadDays,
+              missingDependencyRatio: stackRiskier.meanMissingDependencyDays === 0 ? null : stackInformed.meanMissingDependencyDays / stackRiskier.meanMissingDependencyDays,
+            }];
+          }));
+
+          const cohort = {
+            informed: informedSummary,
+            riskier: riskierSummary,
+            winDelta: informedSummary.winRate - riskierSummary.winRate,
+            postReleaseRatio: riskierSummary.meanPostReleaseOverloadDays === 0 ? null : informedSummary.meanPostReleaseOverloadDays / riskierSummary.meanPostReleaseOverloadDays,
+            missingDependencyRatio: riskierSummary.meanMissingDependencyDays === 0 ? null : informedSummary.meanMissingDependencyDays / riskierSummary.meanMissingDependencyDays,
+          };
+          const hardGate = {
+            overallWinRate15To45: overall.winRate >= 0.15 && overall.winRate <= 0.45,
+            bankruptcyRate10To35: overall.bankruptcyRate >= 0.10 && overall.bankruptcyRate <= 0.35,
+            timeoutNonZero: overall.timeout > 0,
+            atLeastFourStrategiesWin: strategies.filter(strategy => perStrategy[strategy].wins > 0).length >= 4,
+            noStrategyAbove80PercentWin: strategies.every(strategy => perStrategy[strategy].winRate <= 0.80),
+            informedWinAdvantageAtLeast10pp: cohort.winDelta >= 0.10,
+            informedPostReleaseOverloadAtLeast20PercentLower: cohort.postReleaseRatio !== null && cohort.postReleaseRatio <= 0.80,
+            informedMissingDependencyAtLeast50PercentLower: cohort.missingDependencyRatio !== null && cohort.missingDependencyRatio <= 0.50,
+            winnerDayMedian500To1000: overall.winnerDayMedian !== null && overall.winnerDayMedian >= 500 && overall.winnerDayMedian <= 1000,
+          };
+          const reviewSignals = {
+            informedInfrastructureMedianOver50PercentHigher: informedSummary.medianInfrastructureExposure > riskierSummary.medianInfrastructureExposure * 1.5,
+            informedBankruptcyRateExceedsRiskier: informedSummary.bankruptcyRate > riskierSummary.bankruptcyRate,
+            earlyWinCountBeforeDay365: overall.winsBeforeDay365,
+            earlyWinShareOfWins: overall.wins === 0 ? null : overall.winsBeforeDay365 / overall.wins,
+          };
+          const report = {
+            rowCount: rows.length,
+            uniqueScenarioKeys: keys.size,
+            stackCounts,
+            strategyCounts,
+            overall,
+            cohort,
+            perStrategy,
+            perStack,
+            hardGate,
+            hardGatePassed: Object.values(hardGate).every(Boolean),
+            reviewSignals,
+          };
+          fs.writeFileSync('balance-pass-2-final-summary.json', JSON.stringify(report, null, 2));
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-pass-2-final-summary
+          path: balance-pass-2-final-summary.json
+          if-no-files-found: error
+      - name: Enforce hard acceptance criteria
+        run: |
+          node <<'NODE'
+          const report = require('./balance-pass-2-final-summary.json');
+          const failed = Object.entries(report.hardGate).filter(([, passed]) => !passed).map(([name]) => name);
+          if (failed.length) {
+            console.error(`Balance Pass 2 hard gate failed: ${failed.join(', ')}`);
+            process.exit(1);
+          }
+          console.log('Balance Pass 2 hard gate passed.');
+          NODE
