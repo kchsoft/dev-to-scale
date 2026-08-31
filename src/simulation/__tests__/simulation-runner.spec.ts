@@ -30,6 +30,9 @@ describe('balance simulation runner', () => {
       completedFeatureCount: expect.any(Number),
       lastSettlementMonth: null,
       lastSettlementRevenue: null,
+      sloPassed: expect.any(Boolean),
+      sloHealthyDays: expect.any(Number),
+      sloAverageFailureRate: expect.any(Number),
     }));
   });
 
