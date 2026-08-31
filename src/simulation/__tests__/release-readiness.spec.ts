@@ -19,7 +19,7 @@ interface ReleaseReadinessPolicyModule {
   preventativeDependencyAction?: (
     observation: BasicBalanceObservation,
     context: { readonly protectedLearningReserve: number },
-    strategyId: 'METRICS_AWARE',
+    strategyId: 'METRICS_AWARE' | 'APM_AWARE' | 'ORACLE',
   ) => balanceAction.SimulationAction | null;
   decideMetricsReleaseReadiness?: (
     observation: BasicBalanceObservation | MetricsBalanceObservation,
@@ -173,6 +173,25 @@ describe('release readiness actions', () => {
       technologyId: 'SQS',
       intent: 'RELEASE_READINESS_DEPENDENCY',
     });
+  });
+
+  it('does not let conservative runway policy block a required release dependency', () => {
+    const preventativeDependencyAction = (releaseReadiness as ReleaseReadinessPolicyModule)
+      .preventativeDependencyAction;
+    expect(typeof preventativeDependencyAction).toBe('function');
+    if (!preventativeDependencyAction) return;
+
+    for (const strategyId of ['APM_AWARE', 'ORACLE'] as const) {
+      expect(preventativeDependencyAction(
+        observation({ cash: 500_000 }),
+        { protectedLearningReserve: 100_000 },
+        strategyId,
+      )).toMatchObject({
+        type: 'START_TECHNOLOGY_BUILD',
+        technologyId: 'SQS',
+        intent: 'RELEASE_READINESS_DEPENDENCY',
+      });
+    }
   });
 
   it('does not create dependency readiness without a gap or affordable candidate', () => {
