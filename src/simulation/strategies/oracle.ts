@@ -1,6 +1,7 @@
 import { simulationActionId, type SimulationAction } from '../balance-action';
 import type { OracleBalanceObservation } from '../balance-observation';
 import type { BalanceStrategy, StrategyDecisionContext } from '../balance-strategy';
+import { decideOraclePostReleaseStability, decideOracleReleaseReadiness } from '../release-readiness';
 import {
   affordable,
   hottestEffectiveNode,
@@ -24,6 +25,10 @@ function previewMax(observation: OracleBalanceObservation, action: SimulationAct
     case 'RESPOND_TRAFFIC_SPIKE':
       return Math.max(0, ...observation.exactPressures.map(({ effectiveRatio }) => effectiveRatio));
   }
+}
+
+function purposeBuiltRemedyPriority(action: SimulationAction): number {
+  return action.type === 'START_TECHNOLOGY_BUILD' && action.technologyId === 'OBJECT_STORAGE' ? 0 : 1;
 }
 
 function oracleCandidates(observation: OracleBalanceObservation): readonly SimulationAction[] {
@@ -72,7 +77,8 @@ function decideOracle(observation: OracleBalanceObservation, context: StrategyDe
   const target = ranked.filter(({ nextMax }) => nextMax <= 0.85);
   if (target.length > 0) {
     target.sort((left, right) => (
-      left.oneMonthCost - right.oneMonthCost
+      purposeBuiltRemedyPriority(left.action) - purposeBuiltRemedyPriority(right.action)
+      || left.oneMonthCost - right.oneMonthCost
       || left.order - right.order
       || simulationActionId(left.action).localeCompare(simulationActionId(right.action))
     ));
@@ -94,12 +100,17 @@ export const oracleStrategy: BalanceStrategy = {
   ceiling: 'ORACLE',
   decide(observation, context) {
     if (observation.level !== 'ORACLE') return noOp('ORACLE observation unavailable');
+    const stability = decideOraclePostReleaseStability(observation, context);
+    if (stability) return stability;
+    const readiness = decideOracleReleaseReadiness(observation, context);
+    if (readiness) return readiness;
     return decideOracle(observation, context);
   },
   decideViral(observation, context) {
     const burst = { type: 'RESPOND_TRAFFIC_SPIKE' as const, response: 'BURST' as const, reason: 'ORACLE burst protection' };
     const pressure = hottestEffectiveNode(observation)?.effectivePercent ?? 0;
+    if (pressure > 100) return 'THROTTLE';
     if (pressure >= 85 && affordable(observation, context, this.id, burst)) return 'BURST';
-    return pressure > 100 ? 'THROTTLE' : 'RIDE';
+    return 'RIDE';
   },
 };

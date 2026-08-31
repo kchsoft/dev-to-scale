@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { FeatureDefinition } from '../feature';
 import { GameEngine } from '../game-engine';
 import { RandomSource } from '../growth';
-import { LoadSnapshot } from '../infrastructure';
+import { LoadSnapshot, ServerSize } from '../infrastructure';
 import { createNodeLoadSnapshot, createNodeResourceLoad } from '../node-load';
 
 class StablePositiveRandom implements RandomSource {
@@ -37,11 +38,13 @@ function engineWithLoad(load: LoadSnapshot): GameEngine {
     _launched: boolean;
     _dau: number;
     _load: LoadSnapshot;
+    _growthReferenceLoad: LoadSnapshot;
     advanceGrowth: () => void;
   };
   state._launched = true;
   state._dau = 1_000;
   state._load = load;
+  state._growthReferenceLoad = load;
   return engine;
 }
 
@@ -78,6 +81,19 @@ function operationalLoad(options: {
   };
 }
 
+function loadWithFeatureSuccess(successRatio: number): LoadSnapshot {
+  return {
+    ...operationalLoad({ alb: 0.8 }),
+    requestTraces: Object.freeze([Object.freeze({
+      workloadId: 'TEST_GROWTH',
+      nodes: Object.freeze([]),
+      edges: Object.freeze([]),
+      successRatio,
+      failureNodeId: null,
+    })]),
+  };
+}
+
 function loadWithDualPressure(nominalRatio: number, effectiveRatio: number): LoadSnapshot {
   const nominalCapacity = 1;
   const demand = nominalRatio;
@@ -96,6 +112,23 @@ function loadWithDualPressure(nominalRatio: number, effectiveRatio: number): Loa
 function advanceGrowth(engine: GameEngine): number {
   (engine as unknown as { advanceGrowth: () => void }).advanceGrowth();
   return engine.dau;
+}
+
+function addCompletedGrowthFeature(engine: GameEngine, growthBonus: number): void {
+  const state = engine as unknown as { completedFeatureDefinitions: FeatureDefinition[] };
+  state.completedFeatureDefinitions.push(new FeatureDefinition({
+    id: 'TEST_GROWTH',
+    name: 'Test Growth',
+    baseWork: 1,
+    complexity: 'SIMPLE',
+    load: { app: 0, db: 0, async: 0, storage: 0 },
+    growthBonus,
+  }));
+}
+
+function markRoadmapFinished(engine: GameEngine): void {
+  const progression = engine.progression as unknown as { completedCount: number; featureOrder: readonly string[] };
+  progression.completedCount = progression.featureOrder.length;
 }
 
 describe('game engine operational growth pressure', () => {
@@ -125,6 +158,49 @@ describe('game engine operational growth pressure', () => {
     const overloadedExternal = engineWithLoad(operationalLoad({ external: 9.99 }));
 
     expect(advanceGrowth(overloadedExternal)).toBe(advanceGrowth(baseline));
+  });
+
+  it('stops permanent feature acquisition growth once the roadmap is complete', () => {
+    const stillShipping = engineWithLoad(operationalLoad({ alb: 0.8 }));
+    const stableScale = engineWithLoad(operationalLoad({ alb: 0.8 }));
+    addCompletedGrowthFeature(stillShipping, 0.05);
+    addCompletedGrowthFeature(stableScale, 0.05);
+    markRoadmapFinished(stableScale);
+
+    expect(advanceGrowth(stillShipping)).toBe(1_060);
+    expect(advanceGrowth(stableScale)).toBe(1_010);
+  });
+
+  it('does not grant feature acquisition growth when that feature request path is unavailable', () => {
+    const healthy = engineWithLoad(loadWithFeatureSuccess(1));
+    const unavailable = engineWithLoad(loadWithFeatureSuccess(0));
+    addCompletedGrowthFeature(healthy, 0.05);
+    addCompletedGrowthFeature(unavailable, 0.05);
+
+    expect(advanceGrowth(healthy)).toBe(1_060);
+    expect(advanceGrowth(unavailable)).toBe(1_010);
+  });
+
+  it('does not let a same-day capacity correction erase the previously observed overload penalty', () => {
+    const untreated = engineWithLoad(operationalLoad({ alb: 1.2 }));
+    const corrected = engineWithLoad(operationalLoad({ alb: 1.2 }));
+
+    corrected.resizeInfrastructureNode('v1:app:SPRING_BOOT', ServerSize.MEDIUM);
+    untreated.advanceDay();
+    corrected.advanceDay();
+
+    expect(corrected.dau).toBe(untreated.dau);
+    expect(corrected.dau).toBe(810);
+  });
+
+  it('does not let a same-day capacity correction erase the previously observed SLO overload', () => {
+    const corrected = engineWithLoad(operationalLoad({ alb: 1.2 }));
+
+    corrected.resizeInfrastructureNode('v1:app:SPRING_BOOT', ServerSize.MEDIUM);
+    corrected.advanceDay();
+
+    expect(corrected.operationalSlo.status.sampleCount).toBe(1);
+    expect(corrected.operationalSlo.status.healthyDays).toBe(0);
   });
 
   it('uses incidentRandom for incident rolls when configured', () => {

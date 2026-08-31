@@ -30,6 +30,7 @@ export type {
   NodeResourceLoad,
 } from './node-load';
 export * from './operational-pressure';
+export * from './operational-slo';
 export * from './progression';
 export * from './random';
 export * from './request-route';

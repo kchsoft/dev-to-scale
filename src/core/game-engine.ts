@@ -15,7 +15,8 @@ import {
   TechnologyId,
 } from './infrastructure';
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
-import { primaryOperationalPressure } from './operational-pressure';
+import { operationalPressures, primaryOperationalPressure } from './operational-pressure';
+import { OperationalSloWindow, type OperationalSloStatus } from './operational-slo';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
 import { trafficHealthForSeverity } from './request-trace';
@@ -95,6 +96,13 @@ export interface GameSnapshot {
   }[];
   lastMonthlyRevenue: number;
   lastSettlement: LastMonthlySettlement | null;
+  exitReadiness: {
+    monthlyRevenueTarget: number;
+    lastSettledMonthlyRevenue: number;
+    progressionComplete: boolean;
+    slo: OperationalSloStatus;
+    qualified: boolean;
+  };
 }
 
 export class GameEngine {
@@ -105,6 +113,7 @@ export class GameEngine {
   readonly technologyBuild = new TechnologyBuildSlot();
   readonly incidents = new IncidentManager();
   readonly techDebt = new TechDebtState();
+  readonly operationalSlo = new OperationalSloWindow();
   readonly finance: FinanceAccount;
 
   private readonly random: RandomSource;
@@ -121,6 +130,7 @@ export class GameEngine {
   private _lastMonthlyRevenue = 0;
   private _lastSettlement: LastMonthlySettlement | null = null;
   private _load: LoadSnapshot;
+  private _growthReferenceLoad: LoadSnapshot;
 
   constructor(readonly config: GameEngineConfig) {
     this.random = config.random ?? new SeededRandomSource(config.seed ^ 0x9e3779b9);
@@ -130,6 +140,7 @@ export class GameEngine {
     this.finance = new FinanceAccount(config.startingCash ?? 3_000_000);
     this.featureTask = this.createFeatureTask(COMMUNITY_BOOTSTRAP);
     this._load = this.calculateCurrentLoad();
+    this._growthReferenceLoad = this._load;
   }
 
   get day(): number { return this._day; }
@@ -156,6 +167,13 @@ export class GameEngine {
       && this.featureTask.feature.id !== COMMUNITY_BOOTSTRAP.id
       && this.techDebt.canFastTrack(this.featureTask.feature.id),
     );
+    const slo = this.operationalSlo.status;
+    const progressionComplete = this.progression.finished;
+    const lastSettledMonthlyRevenue = this._lastSettlement?.revenue ?? 0;
+    const qualified = progressionComplete
+      && lastSettledMonthlyRevenue >= RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET
+      && slo.passes;
+
     return {
       day: this._day,
       status: this._status,
@@ -214,6 +232,13 @@ export class GameEngine {
       })),
       lastMonthlyRevenue: this._lastMonthlyRevenue,
       lastSettlement: this._lastSettlement,
+      exitReadiness: {
+        monthlyRevenueTarget: RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET,
+        lastSettledMonthlyRevenue,
+        progressionComplete,
+        slo,
+        qualified,
+      },
     };
   }
 
@@ -226,8 +251,11 @@ export class GameEngine {
       technologies: this.infrastructure.deployedTechnologies,
     });
 
-    // Growth uses the previous day's observed availability and capacity.
-    if (this._launched) this.advanceGrowth();
+    // Growth and SLO qualification use the previous day's observed availability and capacity.
+    if (this._launched) {
+      this.recordOperationalSloSample(this._growthReferenceLoad);
+      this.advanceGrowth();
+    }
     this.refreshLoad();
     if (this._launched) this.maybeGenerateIncident();
 
@@ -240,6 +268,7 @@ export class GameEngine {
     this.settleMonthIfEnding();
     if (this._status !== 'RUNNING') {
       this.refreshLoad();
+      this._growthReferenceLoad = this._load;
       this._day += 1;
       return this.snapshot;
     }
@@ -265,6 +294,7 @@ export class GameEngine {
 
     if (this.growthEvent?.active) this.growthEvent.advanceDay();
     this.refreshLoad();
+    this._growthReferenceLoad = this._load;
     this._day += 1;
     return this.snapshot;
   }
@@ -348,11 +378,7 @@ export class GameEngine {
    * The same proficiency, incidents, technologies and temporary traffic conditions are used.
    */
   previewLoadWithFeature(feature: FeatureDefinition): LoadSnapshot {
-    const active = this.activeFeaturesForLoad();
-    const projectedFeatures = active.some((candidate) => candidate.id === feature.id)
-      ? active
-      : [...active, feature];
-    return this.calculateCurrentLoad(this.infrastructure, projectedFeatures);
+    return this.calculateCurrentLoad(this.infrastructure, this.activeFeaturesIncluding(feature));
   }
 
   /**
@@ -372,11 +398,39 @@ export class GameEngine {
     );
   }
 
+  /** Preview a feature release together with one technology deployment without mutating live state. */
+  previewLoadWithFeatureAndTechnology(
+    feature: FeatureDefinition,
+    id: BuildableTechnologyId,
+  ): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    const retired = infrastructure.deployTechnology(id);
+    const ignoredIncidentNodeIds = new Set(
+      retired.map((technology) => v1NodeIdForTechnology(technology)),
+    );
+    return this.calculateCurrentLoad(
+      infrastructure,
+      this.activeFeaturesIncluding(feature),
+      ignoredIncidentNodeIds,
+    );
+  }
+
   /** Preview a node resize through the same load calculation without mutating live infrastructure. */
   previewLoadWithNodeResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadSnapshot {
     const infrastructure = this.infrastructure.clone();
     infrastructure.resizeNode(nodeId, size);
     return this.calculateCurrentLoad(infrastructure);
+  }
+
+  /** Preview a feature release together with one node resize without mutating live state. */
+  previewLoadWithFeatureAndNodeResize(
+    feature: FeatureDefinition,
+    nodeId: InfrastructureNodeId,
+    size: ServerSize,
+  ): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    infrastructure.resizeNode(nodeId, size);
+    return this.calculateCurrentLoad(infrastructure, this.activeFeaturesIncluding(feature));
   }
 
   /** Preview an APP/DB horizontal scale action while preserving live validation and state. */
@@ -386,23 +440,49 @@ export class GameEngine {
     return this.calculateCurrentLoad(infrastructure);
   }
 
+  /** Preview a feature release together with one APP/DB scale-out without mutating live state. */
+  previewLoadWithFeatureAndNodeScaleOut(
+    feature: FeatureDefinition,
+    nodeId: InfrastructureNodeId,
+  ): LoadSnapshot {
+    const infrastructure = this.infrastructure.clone();
+    infrastructure.scaleOutNode(nodeId);
+    return this.calculateCurrentLoad(infrastructure, this.activeFeaturesIncluding(feature));
+  }
+
   private ensureRunning(): void {
     if (this._status !== 'RUNNING') throw new Error(`Game is ${this._status}`);
+  }
+
+  private recordOperationalSloSample(load: LoadSnapshot): void {
+    const overloaded = operationalPressures(load).some(({ effectiveRatio }) => effectiveRatio > 1);
+    const missingRequiredDependency = load.requestTraces.some((trace) => (
+      trace.nodes.some((node) => node.requirement === 'REQUIRED' && node.status === 'MISSING')
+    ));
+    this.operationalSlo.record({
+      failureRate: load.failureRate,
+      overloaded,
+      missingRequiredDependency,
+    });
   }
 
   private advanceGrowth(): void {
     this.growthEvent = GrowthPolicy.maybeStartEvent(this.growthEvent, this.random);
     const phase = this.progression.finished ? 3 : this.progression.currentRequirement.phase;
-    const maxLoadRatio = primaryOperationalPressure(this._load)?.ratio ?? 0;
+    const maxLoadRatio = primaryOperationalPressure(this._growthReferenceLoad)?.ratio ?? 0;
     const result = GrowthPolicy.calculate({
       phase,
-      completedFeatureGrowthBonus: this.completedFeatureDefinitions.reduce(
-        (sum, feature) => sum + feature.growthBonus,
-        0,
-      ),
+      completedFeatureGrowthBonus: this.progression.finished
+        ? 0
+        : this.completedFeatureDefinitions.reduce((sum, feature) => {
+            const successRatio = this._growthReferenceLoad.requestTraces.find(
+              (trace) => trace.workloadId === feature.id,
+            )?.successRatio ?? 1;
+            return sum + feature.growthBonus * successRatio;
+          }, 0),
       event: this.growthEvent,
       incidents: this.incidents.severities,
-      failureRate: this._load.failureRate,
+      failureRate: this._growthReferenceLoad.failureRate,
       maxLoadRatio,
       random: this.random,
     });
@@ -434,6 +514,13 @@ export class GameEngine {
 
   private activeFeaturesForLoad(): FeatureDefinition[] {
     return this._launched ? [COMMUNITY_BOOTSTRAP, ...this.completedFeatureDefinitions] : [];
+  }
+
+  private activeFeaturesIncluding(feature: FeatureDefinition): FeatureDefinition[] {
+    const active = this.activeFeaturesForLoad();
+    return active.some((candidate) => candidate.id === feature.id)
+      ? active
+      : [...active, feature];
   }
 
   private finishFeatureIfComplete(): void {
@@ -490,7 +577,11 @@ export class GameEngine {
       this._status = 'BANKRUPT';
       return;
     }
-    if (this.progression.finished && month.revenue >= RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET) {
+    if (
+      this.progression.finished
+      && month.revenue >= RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET
+      && this.operationalSlo.status.passes
+    ) {
       this._status = 'WON';
     }
   }

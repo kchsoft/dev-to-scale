@@ -34,6 +34,21 @@ export interface MonthlySettlementView {
   readonly cashAfter: number;
 }
 
+export interface ExitReadinessView {
+  readonly monthlyRevenueTarget: number;
+  readonly lastSettledMonthlyRevenue: number;
+  readonly progressionComplete: boolean;
+  readonly slo: {
+    readonly sampleCount: number;
+    readonly healthyDays: number;
+    readonly unhealthyDays: number;
+    readonly averageFailureRate: number;
+    readonly missingRequiredDependencyDays: number;
+    readonly passes: boolean;
+  };
+  readonly qualified: boolean;
+}
+
 export interface GameEventView {
   readonly id: string;
   readonly kind: GameEventKind;
@@ -58,6 +73,7 @@ export interface HudView {
   readonly lastSettlement: MonthlySettlementView | null;
   readonly status: GameStatusView;
   readonly launched: boolean;
+  readonly exitReadiness: ExitReadinessView;
 }
 
 export interface WorkSlotView {

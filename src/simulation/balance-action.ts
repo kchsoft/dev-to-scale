@@ -3,7 +3,16 @@ import type { ServerSize } from '../core/infrastructure';
 import type { BuildableTechnologyId } from '../core/technology';
 import type { InfrastructureNodeId } from '../core/topology';
 
-export type SimulationAction =
+export type SimulationActionIntent =
+  | 'RELEASE_READINESS_DEPENDENCY'
+  | 'RELEASE_READINESS_CAPACITY'
+  | 'POST_RELEASE_STABILITY_CAPACITY';
+
+interface SimulationActionMetadata {
+  readonly intent?: SimulationActionIntent;
+}
+
+export type SimulationAction = (
   | { readonly type: 'NO_OP'; readonly reason: string }
   | {
       readonly type: 'RESIZE_NODE';
@@ -25,7 +34,15 @@ export type SimulationAction =
       readonly type: 'RESPOND_TRAFFIC_SPIKE';
       readonly response: TrafficSpikeResponse;
       readonly reason: string;
-    };
+    }
+) & SimulationActionMetadata;
+
+export function withReleaseReadinessIntent(
+  action: SimulationAction,
+  intent: SimulationActionIntent,
+): SimulationAction {
+  return Object.freeze({ ...action, intent }) as SimulationAction;
+}
 
 export function simulationActionId(action: SimulationAction): string {
   switch (action.type) {

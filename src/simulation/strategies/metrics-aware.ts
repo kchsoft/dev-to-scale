@@ -1,5 +1,6 @@
 import type { BalanceStrategy, StrategyDecisionContext } from '../balance-strategy';
 import type { BalanceObservation } from '../balance-observation';
+import { decideMetricsPostReleaseStability, decideMetricsReleaseReadiness } from '../release-readiness';
 import { firstAffordable, hottestAggregateNode, hottestResource, noOp, nodeFor, rawCapacityCandidates, resourceRemedyCandidates } from '../strategy-helpers';
 
 export function decideFromMetrics(observation: BalanceObservation, context: StrategyDecisionContext, strategyId: 'METRICS_AWARE' | 'APM_AWARE' | 'CHEAPSKATE') {
@@ -25,7 +26,9 @@ export const metricsAwareStrategy: BalanceStrategy = {
   id: 'METRICS_AWARE',
   ceiling: 'METRICS',
   decide(observation, context) {
-    return decideFromMetrics(observation, context, 'METRICS_AWARE');
+    return decideMetricsPostReleaseStability(observation, context, 'METRICS_AWARE')
+      ?? decideMetricsReleaseReadiness(observation, context, 'METRICS_AWARE')
+      ?? decideFromMetrics(observation, context, 'METRICS_AWARE');
   },
   decideViral(observation) {
     return (hottestResource(observation)?.effectivePercent ?? hottestAggregateNode(observation)?.aggregatePercent ?? 0) > 100

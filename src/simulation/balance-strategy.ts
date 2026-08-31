@@ -5,6 +5,7 @@ import type { BalanceStrategyId } from './balance-scenario';
 
 export interface StrategyDecisionContext {
   readonly protectedLearningReserve: number;
+  readonly postReleaseStabilityWindowActive?: boolean;
 }
 
 export interface BalanceStrategy {

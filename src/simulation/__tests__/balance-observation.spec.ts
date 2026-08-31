@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { GameEngine } from '../../core/game-engine';
 import type { RandomSource } from '../../core/growth';
+import { ServerSize, SERVER_SIZE_VALUES } from '../../core/infrastructure';
 import { skillRef } from '../../core/learning';
+import { operationalPressures } from '../../core/operational-pressure';
+import type { SimulationAction } from '../balance-action';
 import { observeForStrategy } from '../balance-observation';
 
 class ConstantRandom implements RandomSource {
@@ -30,6 +33,24 @@ function launchedGame(): GameEngine {
   for (let day = 0; day < 30 && !game.launched; day += 1) game.advanceDay();
   if (!game.launched) throw new Error('Expected launched game');
   return game;
+}
+
+function gameWithPendingRequiredQueue(): GameEngine {
+  const game = new GameEngine({
+    frameworkId: 'SPRING_BOOT',
+    databaseId: 'POSTGRESQL',
+    seed: 2,
+    random: new GrowthRandom(),
+    incidentRandom: new ConstantRandom(),
+    startingCash: 100_000_000,
+  });
+  const queueRequiredFeatures = new Set(['NOTIFICATION', 'AI_RECOMMENDATION', 'FOLLOW_FEED']);
+  for (let day = 0; day < 600; day += 1) {
+    game.advanceDay();
+    const current = game.snapshot.currentFeature;
+    if (current && queueRequiredFeatures.has(current.id)) return game;
+  }
+  throw new Error('Expected a queue-required feature to be under development');
 }
 
 function gameWithMissingRequiredQueue(): GameEngine {
@@ -68,6 +89,94 @@ describe('balance observation boundaries', () => {
     expect('rawLoad' in observation).toBe(false);
     expect('infrastructure' in observation).toBe(false);
     expect('developer' in observation).toBe(false);
+  });
+
+  it('exposes pending feature requirements before release without exposing projected load to BASIC', () => {
+    const game = gameWithPendingRequiredQueue();
+    const currentFeatureId = game.snapshot.currentFeature?.id;
+    if (!currentFeatureId) throw new Error('Expected pending feature');
+
+    const observation = observeForStrategy(game, 'BASIC');
+
+    expect(observation.pendingFeature).toMatchObject({
+      id: currentFeatureId,
+      requiredResourceRoles: ['EVENT_BUS'],
+    });
+    expect(observation.pendingFeature?.estimatedRemainingDays).toBeGreaterThan(0);
+    expect(observation.upcomingRequiredDependencyGaps).toEqual([
+      {
+        role: 'EVENT_BUS',
+        workloadIds: [currentFeatureId],
+        candidateTechnologyIds: ['SQS', 'RABBITMQ', 'KAFKA'],
+      },
+    ]);
+    expect('releasePreview' in observation).toBe(false);
+  });
+
+  it('projects pending release resource pressure at METRICS without diagnosis', () => {
+    const game = gameWithPendingRequiredQueue();
+    game.developer.get(skillRef.fundamental('OS_RUNTIME')).setLevel(2);
+
+    const observation = observeForStrategy(game, 'METRICS');
+
+    expect(observation.level).toBe('METRICS');
+    if (observation.level !== 'METRICS') throw new Error('Expected METRICS');
+    expect(observation.releasePreview?.resourceLoads.length).toBeGreaterThan(0);
+    expect(observation.releasePreview?.maxEffectivePercent).toBeGreaterThanOrEqual(0);
+    expect('diagnosis' in (observation.releasePreview ?? {})).toBe(false);
+    expect('exactPressures' in (observation.releasePreview ?? {})).toBe(false);
+  });
+
+  it('adds projected diagnosis at APM without exact ORACLE internals', () => {
+    const game = gameWithPendingRequiredQueue();
+    unlockApm(game);
+
+    const observation = observeForStrategy(game, 'APM');
+
+    expect(observation.level).toBe('APM');
+    if (observation.level !== 'APM') throw new Error('Expected APM');
+    expect(observation.releasePreview?.resourceLoads.length).toBeGreaterThan(0);
+    expect(observation.releasePreview?.diagnosis).toBeDefined();
+    expect('exactPressures' in (observation.releasePreview ?? {})).toBe(false);
+  });
+
+  it('gives ORACLE exact pending release pressures and combined action preview', () => {
+    const observation = observeForStrategy(gameWithPendingRequiredQueue(), 'ORACLE');
+
+    expect(observation.level).toBe('ORACLE');
+    if (observation.level !== 'ORACLE') throw new Error('Expected ORACLE');
+    expect(observation.releasePreview?.exactPressures.length).toBeGreaterThan(0);
+    expect(typeof observation.previewPort.previewReleaseAction).toBe('function');
+
+    const preview = observation.releasePreview;
+    if (!preview) throw new Error('Expected pending release preview');
+    const resizeTarget = [...preview.exactPressures]
+      .sort((left, right) => right.effectiveRatio - left.effectiveRatio)
+      .find((pressure) => {
+        const node = observation.nodes.find(({ nodeId }) => nodeId === pressure.nodeId);
+        return node && node.size !== ServerSize.XLARGE;
+      });
+    if (!resizeTarget) throw new Error('Expected a resizeable projected bottleneck');
+    const node = observation.nodes.find(({ nodeId }) => nodeId === resizeTarget.nodeId)!;
+    const nextSize = SERVER_SIZE_VALUES[SERVER_SIZE_VALUES.indexOf(node.size) + 1];
+    if (!nextSize) throw new Error('Expected next node size');
+    const action: SimulationAction = {
+      type: 'RESIZE_NODE',
+      nodeId: resizeTarget.nodeId,
+      size: nextSize,
+      reason: 'test projected release capacity',
+    };
+
+    const projectedAfter = observation.previewPort.previewReleaseAction(action);
+    const afterMax = Math.max(
+      0,
+      ...operationalPressures(projectedAfter).map(({ effectiveRatio }) => effectiveRatio),
+    );
+    const beforeMax = Math.max(
+      0,
+      ...preview.exactPressures.map(({ effectiveRatio }) => effectiveRatio),
+    );
+    expect(afterMax).toBeLessThan(beforeMax);
   });
 
   it('copies player-visible technology availability without leaking the developer profile', () => {

@@ -1,5 +1,7 @@
 import type { DatabaseId } from '../core/database';
 import type { FrameworkId } from '../core/feature';
+import type { OperationalSloStatus } from '../core/operational-slo';
+import type { SimulationActionIntent } from './balance-action';
 import type { BalanceStrategyId } from './balance-scenario';
 
 export type BalanceTerminalStatus = 'WON' | 'BANKRUPT' | 'TIMEOUT';
@@ -16,12 +18,21 @@ export interface BalanceRunResult {
   completedFeatureCount: number;
   missingRequiredDependencyDays: number;
   peakMonthlyRevenue: number;
+  revenueTargetMetButSloFailedSettlements: number;
+  finalSloSampleCount: number;
+  finalSloHealthyDays: number;
+  finalSloAverageFailureRate: number;
+  finalSloMissingRequiredDependencyDays: number;
   endingCash: number;
   minimumCash: number;
   failureDays: number;
   severeFailureDays: number;
   cumulativeFailureBurden: number;
   overloadDays: number;
+  preventativeDependencyBuildCount: number;
+  preventativeCapacityActionCount: number;
+  postReleaseOverloadDays: number;
+  featuresReleasedIntoOverload: number;
   incidentCount: number;
   technologyBuildSpend: number;
   learningSpend: number;
@@ -44,10 +55,15 @@ export class SimulationMetricsCollector {
   completedFeatureCount = 0;
   missingRequiredDependencyDays = 0;
   peakMonthlyRevenue = 0;
+  revenueTargetMetButSloFailedSettlements = 0;
   failureDays = 0;
   severeFailureDays = 0;
   cumulativeFailureBurden = 0;
   overloadDays = 0;
+  preventativeDependencyBuildCount = 0;
+  preventativeCapacityActionCount = 0;
+  postReleaseOverloadDays = 0;
+  featuresReleasedIntoOverload = 0;
   incidentCount = 0;
   technologyBuildSpend = 0;
   learningSpend = 0;
@@ -65,6 +81,8 @@ export class SimulationMetricsCollector {
 
   private readonly seenIncidentIds = new Set<string>();
   private readonly seenSettlementMonths = new Set<number>();
+  private readonly seenExitQualificationSettlementMonths = new Set<number>();
+  private releaseWindows: { remainingDays: number; overloaded: boolean }[] = [];
 
   constructor(initialCash: number) {
     this.minimumCash = initialCash;
@@ -88,6 +106,33 @@ export class SimulationMetricsCollector {
     this.peakMonthlyRevenue = Math.max(this.peakMonthlyRevenue, revenue);
   }
 
+  recordExitQualificationSettlement(input: {
+    month: number;
+    revenueTargetMet: boolean;
+    sloPassed: boolean;
+  }): void {
+    if (this.seenExitQualificationSettlementMonths.has(input.month)) return;
+    this.seenExitQualificationSettlementMonths.add(input.month);
+    if (input.revenueTargetMet && !input.sloPassed) {
+      this.revenueTargetMetButSloFailedSettlements += 1;
+    }
+  }
+
+  beginFeatureReleaseWindow(): void {
+    this.releaseWindows.push({ remainingDays: 7, overloaded: false });
+  }
+
+  hasActiveReleaseWindow(): boolean {
+    return this.releaseWindows.length > 0;
+  }
+
+  recordPreventativeAction(intent: SimulationActionIntent): void {
+    if (intent === 'RELEASE_READINESS_DEPENDENCY') this.preventativeDependencyBuildCount += 1;
+    if (intent === 'RELEASE_READINESS_CAPACITY' || intent === 'POST_RELEASE_STABILITY_CAPACITY') {
+      this.preventativeCapacityActionCount += 1;
+    }
+  }
+
   recordOperationalDay(input: {
     failureRate: number;
     effectiveRatios: readonly number[];
@@ -95,7 +140,21 @@ export class SimulationMetricsCollector {
     if (input.failureRate > 0) this.failureDays += 1;
     if (input.failureRate >= 0.10) this.severeFailureDays += 1;
     this.cumulativeFailureBurden += input.failureRate;
-    if (input.effectiveRatios.some((ratio) => ratio > 1)) this.overloadDays += 1;
+
+    const overloaded = input.effectiveRatios.some((ratio) => ratio > 1);
+    if (overloaded) this.overloadDays += 1;
+
+    if (this.releaseWindows.length > 0 && overloaded) {
+      this.postReleaseOverloadDays += 1;
+      for (const window of this.releaseWindows) {
+        if (window.overloaded) continue;
+        window.overloaded = true;
+        this.featuresReleasedIntoOverload += 1;
+      }
+    }
+
+    for (const window of this.releaseWindows) window.remainingDays -= 1;
+    this.releaseWindows = this.releaseWindows.filter(({ remainingDays }) => remainingDays > 0);
   }
 
   recordCapacityAction(input: {
@@ -165,18 +224,29 @@ export class SimulationMetricsCollector {
     daysPlayed: number;
     finalDau: number;
     endingCash: number;
+    finalSlo: OperationalSloStatus;
   }): BalanceRunResult {
+    const { finalSlo, ...base } = input;
     return {
-      ...input,
+      ...base,
       peakDau: this.peakDau,
       completedFeatureCount: this.completedFeatureCount,
       missingRequiredDependencyDays: this.missingRequiredDependencyDays,
       peakMonthlyRevenue: this.peakMonthlyRevenue,
+      revenueTargetMetButSloFailedSettlements: this.revenueTargetMetButSloFailedSettlements,
+      finalSloSampleCount: finalSlo.sampleCount,
+      finalSloHealthyDays: finalSlo.healthyDays,
+      finalSloAverageFailureRate: finalSlo.averageFailureRate,
+      finalSloMissingRequiredDependencyDays: finalSlo.missingRequiredDependencyDays,
       minimumCash: this.minimumCash,
       failureDays: this.failureDays,
       severeFailureDays: this.severeFailureDays,
       cumulativeFailureBurden: this.cumulativeFailureBurden,
       overloadDays: this.overloadDays,
+      preventativeDependencyBuildCount: this.preventativeDependencyBuildCount,
+      preventativeCapacityActionCount: this.preventativeCapacityActionCount,
+      postReleaseOverloadDays: this.postReleaseOverloadDays,
+      featuresReleasedIntoOverload: this.featuresReleasedIntoOverload,
       incidentCount: this.incidentCount,
       technologyBuildSpend: this.technologyBuildSpend,
       learningSpend: this.learningSpend,

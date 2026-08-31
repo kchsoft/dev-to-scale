@@ -1,4 +1,5 @@
 import type { GameEngine } from '../core/game-engine';
+import { RevenuePolicy } from '../core/finance';
 import { operationalPressures, primaryOperationalPressureForNode } from '../core/operational-pressure';
 import { simulationActionId, type SimulationAction } from './balance-action';
 import { observeForStrategy, type BalanceObservation } from './balance-observation';
@@ -20,6 +21,9 @@ export interface BalanceTraceEntry {
   readonly completedFeatureCount: number;
   readonly lastSettlementMonth: number | null;
   readonly lastSettlementRevenue: number | null;
+  readonly sloPassed: boolean;
+  readonly sloHealthyDays: number;
+  readonly sloAverageFailureRate: number;
   readonly hottestVisibleSignal: string;
   readonly incidentControl: string | null;
   readonly viralControl: 'RIDE' | 'THROTTLE' | 'BURST' | null;
@@ -82,10 +86,16 @@ function recordProgression(engine: GameEngine, metrics: SimulationMetricsCollect
 }
 
 function recordSettlement(engine: GameEngine, metrics: SimulationMetricsCollector): void {
-  const settlement = engine.snapshot.lastSettlement;
+  const snapshot = engine.snapshot;
+  const settlement = snapshot.lastSettlement;
   if (!settlement) return;
   metrics.recordMonthlyRevenue(settlement.revenue);
   metrics.recordSettlement(settlement.month, settlement.infrastructureCost);
+  metrics.recordExitQualificationSettlement({
+    month: settlement.month,
+    revenueTargetMet: settlement.revenue >= RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET,
+    sloPassed: snapshot.exitReadiness.slo.passes,
+  });
 }
 
 function targetEffectiveRatio(engine: GameEngine, action: SimulationAction): number | null {
@@ -146,6 +156,7 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
 
   while (engine.status === 'RUNNING' && daysPlayed < BALANCE_DAY_LIMIT) {
     try {
+      const postReleaseStabilityWindowActive = metrics.hasActiveReleaseWindow();
       observeDailyOperationalMetrics(engine, metrics);
 
       const incidentControl = executor.maybeStartIncidentResponse(engine);
@@ -157,7 +168,10 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
       metrics.recordCash(engine.snapshot.cash);
 
       const protectedLearningReserve = BaselineLearningController.protectedReserve(engine);
-      const decisionContext = { protectedLearningReserve } as const;
+      const decisionContext = {
+        protectedLearningReserve,
+        postReleaseStabilityWindowActive,
+      } as const;
       const observation = observeForStrategy(engine, strategy.ceiling);
 
       const viralCashBefore = engine.snapshot.cash;
@@ -175,6 +189,7 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
       executor.executeNormalInvestment(engine, action);
       const actionCashAfter = engine.snapshot.cash;
 
+      if (action.intent) metrics.recordPreventativeAction(action.intent);
       if (action.type === 'START_TECHNOLOGY_BUILD') {
         metrics.recordTechnologyBuildSpend(actionCashBefore - actionCashAfter);
       } else if (action.type === 'RESIZE_NODE' || action.type === 'SCALE_OUT_NODE') {
@@ -202,13 +217,21 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
           completedFeatureCount: traceSnapshot.completedFeatures.length,
           lastSettlementMonth: traceSnapshot.lastSettlement?.month ?? null,
           lastSettlementRevenue: traceSnapshot.lastSettlement?.revenue ?? null,
+          sloPassed: traceSnapshot.exitReadiness.slo.passes,
+          sloHealthyDays: traceSnapshot.exitReadiness.slo.healthyDays,
+          sloAverageFailureRate: traceSnapshot.exitReadiness.slo.averageFailureRate,
           hottestVisibleSignal: visibleSignal(refreshed),
           incidentControl,
           viralControl,
         }));
       }
 
+      const completedFeatureCountBeforeAdvance = engine.snapshot.completedFeatures.length;
       engine.advanceDay();
+      const releasedFeatureCount = engine.snapshot.completedFeatures.length - completedFeatureCountBeforeAdvance;
+      for (let release = 0; release < releasedFeatureCount; release += 1) {
+        metrics.beginFeatureReleaseWindow();
+      }
       daysPlayed += 1;
       metrics.recordCash(engine.snapshot.cash);
       metrics.recordIncidentIds(engine.snapshot.incidents.map(({ id }) => id));
@@ -224,6 +247,7 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
     }
   }
 
+  const finalSnapshot = engine.snapshot;
   const result = metrics.result({
     frameworkId: scenario.frameworkId,
     databaseId: scenario.databaseId,
@@ -232,7 +256,8 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
     terminalStatus: terminalStatus(engine),
     daysPlayed,
     finalDau: engine.dau,
-    endingCash: engine.snapshot.cash,
+    endingCash: finalSnapshot.cash,
+    finalSlo: finalSnapshot.exitReadiness.slo,
   });
   return { result, trace: Object.freeze(trace) };
 }

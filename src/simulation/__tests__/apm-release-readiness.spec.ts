@@ -1,0 +1,285 @@
+import { describe, expect, it } from 'vitest';
+import { ServerSize } from '../../core/infrastructure';
+import type {
+  ApmBalanceObservation,
+  BalanceNodeObservation,
+  BalanceTechnologyOption,
+  RequiredDependencyGapObservation,
+} from '../balance-observation';
+import { BALANCE_STRATEGIES } from '../strategy-registry';
+
+const TECHNOLOGIES: readonly BalanceTechnologyOption[] = Object.freeze([
+  { id: 'REDIS', buildCost: 300_000, monthlyCost: 100_000, deployed: false, available: true },
+  { id: 'SQS', buildCost: 200_000, monthlyCost: 80_000, deployed: false, available: true },
+  { id: 'RABBITMQ', buildCost: 500_000, monthlyCost: 150_000, deployed: false, available: false },
+  { id: 'KAFKA', buildCost: 1_500_000, monthlyCost: 350_000, deployed: false, available: false },
+  { id: 'ALB', buildCost: 150_000, monthlyCost: 100_000, deployed: false, available: true },
+  { id: 'OBJECT_STORAGE', buildCost: 200_000, monthlyCost: 80_000, deployed: false, available: true },
+]);
+
+const EVENT_BUS_GAP: RequiredDependencyGapObservation = Object.freeze({
+  role: 'EVENT_BUS',
+  workloadIds: Object.freeze(['AI_RECOMMENDATION']),
+  candidateTechnologyIds: Object.freeze(['SQS', 'RABBITMQ', 'KAFKA'] as const),
+});
+
+function node(overrides: Partial<BalanceNodeObservation> & Pick<BalanceNodeObservation, 'nodeId' | 'kind' | 'productId'>): BalanceNodeObservation {
+  return Object.freeze({
+    size: ServerSize.SMALL,
+    monthlyCost: 100_000,
+    aggregatePercent: 40,
+    effectivePercent: 40,
+    hardLimitPercent: 100,
+    status: 'NORMAL',
+    scaleOut: null,
+    ...overrides,
+  });
+}
+
+function baseApm(nodes: readonly BalanceNodeObservation[]): ApmBalanceObservation {
+  return Object.freeze({
+    level: 'APM',
+    frameworkId: 'SPRING_BOOT',
+    databaseId: 'POSTGRESQL',
+    day: 300,
+    dau: 500_000,
+    cash: 10_000_000,
+    monthlyInfrastructureCost: nodes.reduce((sum, candidate) => sum + candidate.monthlyCost, 0),
+    failureRate: 0,
+    requiredDependencyGaps: Object.freeze([]),
+    pendingFeature: Object.freeze({
+      id: 'SEARCH',
+      estimatedRemainingDays: 3,
+      requiredResourceRoles: Object.freeze([]),
+    }),
+    upcomingRequiredDependencyGaps: Object.freeze([]),
+    serviceHealth: 'HEALTHY',
+    growthEvent: null,
+    currentTechnologyBuildId: null,
+    deployedTechnologies: Object.freeze([]),
+    technologyOptions: TECHNOLOGIES,
+    nodes: Object.freeze(nodes),
+    resourceLoads: Object.freeze([]),
+    diagnosis: Object.freeze({ topBottleneck: null, text: null }),
+    releasePreview: null,
+  });
+}
+
+const context = Object.freeze({ protectedLearningReserve: 0 });
+const activeContext = Object.freeze({
+  protectedLearningReserve: 0,
+  postReleaseStabilityWindowActive: true,
+});
+
+describe('APM release readiness', () => {
+  it('uses projected diagnosis and chooses its cheapest affordable supported remedy', () => {
+    const app = node({ nodeId: 'app', kind: 'SERVER_GROUP', productId: 'SPRING_BOOT' });
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([app, db]),
+      releasePreview: Object.freeze({
+        resourceLoads: Object.freeze([
+          Object.freeze({
+            nodeId: 'app', nodeKind: 'SERVER_GROUP' as const, resourceKind: 'CPU' as const,
+            percent: 95, effectivePercent: 95, hardLimitPercent: 100, status: 'WARNING' as const,
+          }),
+          Object.freeze({
+            nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
+            percent: 90, effectivePercent: 90, hardLimitPercent: 100, status: 'WARNING' as const,
+          }),
+        ]),
+        maxEffectivePercent: 95,
+        diagnosis: Object.freeze({
+          topBottleneck: Object.freeze({
+            nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.9,
+            effectiveRatio: 0.9, percent: 90, effectivePercent: 90, hardLimitPercent: 100,
+            capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
+          }),
+          text: 'Projected PostgreSQL I/O bottleneck',
+        }),
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, context)).toMatchObject({
+      type: 'SCALE_OUT_NODE',
+      nodeId: 'db',
+      intent: 'RELEASE_READINESS_CAPACITY',
+    });
+  });
+
+  it('does not stabilize a healthy live diagnosis below the normal APM urgency threshold', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 70,
+      effectivePercent: 70,
+      status: 'WARNING',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      resourceLoads: Object.freeze([
+        Object.freeze({
+          nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
+          percent: 70, effectivePercent: 70, hardLimitPercent: 100, status: 'WARNING' as const,
+        }),
+      ]),
+      diagnosis: Object.freeze({
+        topBottleneck: Object.freeze({
+          nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.7,
+          effectiveRatio: 0.7, percent: 70, effectivePercent: 70, hardLimitPercent: 100,
+          capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
+        }),
+        text: 'Live PostgreSQL I/O bottleneck',
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'NO_OP',
+    });
+  });
+
+  it('stabilizes a degraded live diagnosis at 70 percent during the release window', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 70,
+      effectivePercent: 70,
+      status: 'WARNING',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      failureRate: 0.01,
+      serviceHealth: 'DEGRADED',
+      resourceLoads: Object.freeze([
+        Object.freeze({
+          nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
+          percent: 70, effectivePercent: 70, hardLimitPercent: 100, status: 'WARNING' as const,
+        }),
+      ]),
+      diagnosis: Object.freeze({
+        topBottleneck: Object.freeze({
+          nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.7,
+          effectiveRatio: 0.7, percent: 70, effectivePercent: 70, hardLimitPercent: 100,
+          capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
+        }),
+        text: 'Live PostgreSQL I/O bottleneck with request failures',
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'SCALE_OUT_NODE',
+      nodeId: 'db',
+      intent: 'POST_RELEASE_STABILITY_CAPACITY',
+    });
+  });
+
+  it('does not stabilize a diagnosis rounded up to 70 percent while raw pressure is still below the boundary', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 70,
+      effectivePercent: 70,
+      status: 'WARNING',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      diagnosis: Object.freeze({
+        topBottleneck: Object.freeze({
+          nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.699,
+          effectiveRatio: 0.699, percent: 70, effectivePercent: 70, hardLimitPercent: 100,
+          capacityFailurePercent: 0, status: 'WARNING', label: 'PostgreSQL I/O',
+        }),
+        text: 'Live PostgreSQL I/O bottleneck',
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'NO_OP',
+    });
+  });
+
+  it('does not stabilize a diagnosed live bottleneck below 70 percent', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 69,
+      effectivePercent: 69,
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      serviceHealth: 'DEGRADED',
+      diagnosis: Object.freeze({
+        topBottleneck: Object.freeze({
+          nodeId: 'db', nodeKind: 'database', resourceKind: 'IO', nominalRatio: 0.69,
+          effectiveRatio: 0.69, percent: 69, effectivePercent: 69, hardLimitPercent: 100,
+          capacityFailurePercent: 0, status: 'NORMAL', label: 'PostgreSQL I/O',
+        }),
+        text: 'Live PostgreSQL I/O bottleneck',
+      }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'NO_OP',
+    });
+  });
+
+  it('falls back to live METRICS resource pressure and uses immediate capacity when APM has no diagnosis', () => {
+    const db = node({
+      nodeId: 'db',
+      kind: 'DATABASE',
+      productId: 'POSTGRESQL',
+      aggregatePercent: 71,
+      effectivePercent: 71,
+      status: 'WARNING',
+      scaleOut: { kind: 'READ_REPLICA', count: 0, maxCount: 3, available: true, reason: null },
+    });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([db]),
+      resourceLoads: Object.freeze([
+        Object.freeze({
+          nodeId: 'db', nodeKind: 'DATABASE' as const, resourceKind: 'IO' as const,
+          percent: 71, effectivePercent: 71, hardLimitPercent: 100, status: 'WARNING' as const,
+        }),
+      ]),
+      diagnosis: Object.freeze({ topBottleneck: null, text: null }),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, activeContext)).toMatchObject({
+      type: 'SCALE_OUT_NODE',
+      nodeId: 'db',
+      intent: 'POST_RELEASE_STABILITY_CAPACITY',
+    });
+  });
+
+  it('prepares an upcoming dependency while live APM load is healthy', () => {
+    const app = node({ nodeId: 'app', kind: 'SERVER_GROUP', productId: 'SPRING_BOOT' });
+    const observation: ApmBalanceObservation = Object.freeze({
+      ...baseApm([app]),
+      pendingFeature: Object.freeze({
+        id: 'AI_RECOMMENDATION',
+        estimatedRemainingDays: 4,
+        requiredResourceRoles: Object.freeze(['EVENT_BUS'] as const),
+      }),
+      upcomingRequiredDependencyGaps: Object.freeze([EVENT_BUS_GAP]),
+    });
+
+    expect(BALANCE_STRATEGIES.APM_AWARE.decide(observation, context)).toMatchObject({
+      type: 'START_TECHNOLOGY_BUILD',
+      technologyId: 'SQS',
+      intent: 'RELEASE_READINESS_DEPENDENCY',
+    });
+  });
+});

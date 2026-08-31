@@ -11,16 +11,18 @@ import { GameEngine } from '../core/game-engine';
 import type { TrafficSpikeResponseState } from '../core/growth';
 import type { HorizontalScaleKind, LoadSnapshot, TechnologyId } from '../core/infrastructure';
 import { ServerSize } from '../core/infrastructure';
+import { skillRef } from '../core/learning';
 import type { NodeResourceKind } from '../core/node-load';
 import {
   operationalPressures,
   operationalPressuresForNode,
   primaryOperationalPressureForNode,
 } from '../core/operational-pressure';
+import type { CommunityFeatureId } from '../core/progression';
 import type { ResourceRole } from '../core/service-topology';
-import { TECHNOLOGIES, type BuildableTechnologyId } from '../core/technology';
+import { TECHNOLOGIES, TechnologyBuildTask, type BuildableTechnologyId } from '../core/technology';
 import type { InfrastructureNodeId, InfrastructureNodeKind } from '../core/topology';
-import { V1ServiceTopologyFactory } from '../core/v1-topology';
+import { V1RouteBlueprintAdapter, V1ServiceTopologyFactory } from '../core/v1-topology';
 import type { SimulationAction } from './balance-action';
 
 export type ObservationCeiling = 'BASIC' | 'METRICS' | 'APM' | 'ORACLE';
@@ -61,6 +63,12 @@ export interface RequiredDependencyGapObservation {
   readonly candidateTechnologyIds: readonly BuildableTechnologyId[];
 }
 
+export interface PendingFeatureObservation {
+  readonly id: CommunityFeatureId;
+  readonly estimatedRemainingDays: number;
+  readonly requiredResourceRoles: readonly ResourceRole[];
+}
+
 export interface BalanceResourceLoadObservation {
   readonly nodeId: InfrastructureNodeId;
   readonly nodeKind: InfrastructureNodeKind;
@@ -76,6 +84,30 @@ export interface BalanceDiagnosisObservation {
   readonly text: string | null;
 }
 
+export interface MetricsReleasePreviewObservation {
+  readonly resourceLoads: readonly BalanceResourceLoadObservation[];
+  readonly maxEffectivePercent: number;
+}
+
+export interface ApmReleasePreviewObservation extends MetricsReleasePreviewObservation {
+  readonly diagnosis: BalanceDiagnosisObservation;
+}
+
+export interface OracleExactPressure {
+  readonly nodeId: InfrastructureNodeId;
+  readonly nodeKind: InfrastructureNodeKind;
+  readonly resourceKind: NodeResourceKind;
+  readonly demand: number;
+  readonly nominalCapacity: number;
+  readonly effectiveCapacity: number;
+  readonly nominalRatio: number;
+  readonly effectiveRatio: number;
+}
+
+export interface OracleReleasePreviewObservation extends ApmReleasePreviewObservation {
+  readonly exactPressures: readonly OracleExactPressure[];
+}
+
 export interface CommonBalanceObservation {
   readonly level: ObservationCeiling;
   readonly frameworkId: FrameworkId;
@@ -86,6 +118,8 @@ export interface CommonBalanceObservation {
   readonly monthlyInfrastructureCost: number;
   readonly failureRate: number;
   readonly requiredDependencyGaps: readonly RequiredDependencyGapObservation[];
+  readonly pendingFeature: PendingFeatureObservation | null;
+  readonly upcomingRequiredDependencyGaps: readonly RequiredDependencyGapObservation[];
   readonly serviceHealth: 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
   readonly growthEvent: null | {
     readonly type: 'VIRAL' | 'NEGATIVE_BUZZ';
@@ -107,30 +141,23 @@ export interface BasicBalanceObservation extends CommonBalanceObservation {
 export interface MetricsBalanceObservation extends CommonBalanceObservation {
   readonly level: 'METRICS';
   readonly resourceLoads: readonly BalanceResourceLoadObservation[];
+  readonly releasePreview: MetricsReleasePreviewObservation | null;
 }
 
 export interface ApmBalanceObservation extends CommonBalanceObservation {
   readonly level: 'APM';
   readonly resourceLoads: readonly BalanceResourceLoadObservation[];
   readonly diagnosis: BalanceDiagnosisObservation;
-}
-
-export interface OracleExactPressure {
-  readonly nodeId: InfrastructureNodeId;
-  readonly nodeKind: InfrastructureNodeKind;
-  readonly resourceKind: NodeResourceKind;
-  readonly demand: number;
-  readonly nominalCapacity: number;
-  readonly effectiveCapacity: number;
-  readonly nominalRatio: number;
-  readonly effectiveRatio: number;
+  readonly releasePreview: ApmReleasePreviewObservation | null;
 }
 
 export interface OraclePreviewPort {
   previewTechnology(id: BuildableTechnologyId): LoadSnapshot;
   previewResize(nodeId: InfrastructureNodeId, size: ServerSize): LoadSnapshot;
   previewScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot;
+  previewReleaseAction(action: SimulationAction): LoadSnapshot;
   projectedMonthlyCost(action: SimulationAction): number;
+  technologyReadyForRelease?(id: BuildableTechnologyId): boolean;
 }
 
 export interface OracleBalanceObservation extends CommonBalanceObservation {
@@ -139,6 +166,7 @@ export interface OracleBalanceObservation extends CommonBalanceObservation {
   readonly diagnosis: BalanceDiagnosisObservation;
   readonly exactPressures: readonly OracleExactPressure[];
   readonly workloadTags: readonly FeatureTag[];
+  readonly releasePreview: OracleReleasePreviewObservation | null;
   readonly previewPort: OraclePreviewPort;
 }
 
@@ -168,6 +196,24 @@ function activeFeatures(engine: GameEngine): readonly FeatureDefinition[] {
     return feature;
   });
   return [COMMUNITY_BOOTSTRAP, ...completed];
+}
+
+function pendingFeatureDefinition(engine: GameEngine): FeatureDefinition | null {
+  const current = engine.snapshot.currentFeature;
+  if (!current || current.id === COMMUNITY_BOOTSTRAP.id) return null;
+  const feature = (COMMUNITY_FEATURES as Record<string, FeatureDefinition>)[current.id];
+  if (!feature) throw new Error(`Unknown pending community feature: ${current.id}`);
+  return feature;
+}
+
+function explicitRequiredResourceRoles(feature: FeatureDefinition): readonly ResourceRole[] {
+  const blueprint = V1RouteBlueprintAdapter.fromFeature(feature);
+  const roles = feature.requestRoute.flatMap((step, index) => (
+    step.requirement === 'REQUIRED' && blueprint.steps[index]
+      ? [blueprint.steps[index].role]
+      : []
+  ));
+  return Object.freeze([...new Set(roles)].sort());
 }
 
 function copiedBottleneck(bottleneck: BottleneckView | null): BottleneckView | null {
@@ -201,8 +247,21 @@ function requiredDependencyGaps(load: LoadSnapshot): readonly RequiredDependency
     })));
 }
 
-function resourceObservations(engine: GameEngine): readonly BalanceResourceLoadObservation[] {
-  return Object.freeze(operationalPressures(engine.snapshot.load).map((pressure) => Object.freeze({
+function upcomingRequiredDependencyGaps(
+  engine: GameEngine,
+  feature: FeatureDefinition | null,
+): readonly RequiredDependencyGapObservation[] {
+  if (!feature) return Object.freeze([]);
+  return Object.freeze(requiredDependencyGaps(engine.previewLoadWithFeature(feature))
+    .map((gap) => Object.freeze({
+      ...gap,
+      workloadIds: Object.freeze(gap.workloadIds.filter((workloadId) => workloadId === feature.id)),
+    }))
+    .filter((gap) => gap.workloadIds.length > 0));
+}
+
+function resourceObservationsFromLoad(load: LoadSnapshot): readonly BalanceResourceLoadObservation[] {
+  return Object.freeze(operationalPressures(load).map((pressure) => Object.freeze({
     nodeId: pressure.nodeId,
     nodeKind: pressure.nodeKind,
     resourceKind: pressure.resourceKind,
@@ -211,6 +270,23 @@ function resourceObservations(engine: GameEngine): readonly BalanceResourceLoadO
     hardLimitPercent: hardLimitPercent(pressure),
     status: capacityStatus(pressure.nominalRatio, pressure.effectiveRatio),
   })));
+}
+
+function exactPressuresFromLoad(load: LoadSnapshot): readonly OracleExactPressure[] {
+  return Object.freeze(operationalPressures(load).map((pressure) => Object.freeze({
+    nodeId: pressure.nodeId,
+    nodeKind: pressure.nodeKind,
+    resourceKind: pressure.resourceKind,
+    demand: pressure.demand,
+    nominalCapacity: pressure.nominalCapacity,
+    effectiveCapacity: pressure.effectiveCapacity,
+    nominalRatio: pressure.nominalRatio,
+    effectiveRatio: pressure.effectiveRatio,
+  })));
+}
+
+function resourceObservations(engine: GameEngine): readonly BalanceResourceLoadObservation[] {
+  return resourceObservationsFromLoad(engine.snapshot.load);
 }
 
 function nodeObservations(engine: GameEngine): readonly BalanceNodeObservation[] {
@@ -269,6 +345,7 @@ function commonObservation(
   const snapshot = engine.snapshot;
   const topology = V1ServiceTopologyFactory.create(engine.infrastructure, activeFeatures(engine));
   const service = OperationalViewProjector.project(snapshot, engine.developer, topology);
+  const pendingFeature = pendingFeatureDefinition(engine);
 
   return Object.freeze({
     level,
@@ -280,6 +357,14 @@ function commonObservation(
     monthlyInfrastructureCost: engine.infrastructure.monthlyCost,
     failureRate: snapshot.load.failureRate,
     requiredDependencyGaps: requiredDependencyGaps(snapshot.load),
+    pendingFeature: pendingFeature && snapshot.currentFeature
+      ? Object.freeze({
+        id: pendingFeature.id as CommunityFeatureId,
+        estimatedRemainingDays: snapshot.currentFeature.estimatedRemainingDays,
+        requiredResourceRoles: explicitRequiredResourceRoles(pendingFeature),
+      })
+      : null,
+    upcomingRequiredDependencyGaps: upcomingRequiredDependencyGaps(engine, pendingFeature),
     serviceHealth: service.health.status,
     growthEvent: snapshot.growthEvent ? Object.freeze({
       type: snapshot.growthEvent.type,
@@ -308,6 +393,76 @@ function diagnosisObservation(engine: GameEngine): BalanceDiagnosisObservation {
   });
 }
 
+function projectedDiagnosisObservation(
+  engine: GameEngine,
+  feature: FeatureDefinition,
+  load: LoadSnapshot,
+): BalanceDiagnosisObservation {
+  const snapshot = Object.freeze({ ...engine.snapshot, load });
+  const topology = V1ServiceTopologyFactory.create(
+    engine.infrastructure,
+    [...activeFeatures(engine), feature],
+  );
+  const service = OperationalViewProjector.project(snapshot, engine.developer, topology);
+  const bottleneck = copiedBottleneck(service.health.bottleneck);
+  return Object.freeze({
+    topBottleneck: bottleneck,
+    text: bottleneck
+      ? OperationalViewProjector.diagnosisText(bottleneck.nodeId, snapshot, engine.developer, topology)
+      : null,
+  });
+}
+
+function metricsReleasePreview(engine: GameEngine): MetricsReleasePreviewObservation | null {
+  const feature = pendingFeatureDefinition(engine);
+  if (!feature) return null;
+  const load = engine.previewLoadWithFeature(feature);
+  const resourceLoads = resourceObservationsFromLoad(load);
+  return Object.freeze({
+    resourceLoads,
+    maxEffectivePercent: Math.max(0, ...resourceLoads.map(({ effectivePercent }) => effectivePercent)),
+  });
+}
+
+function apmReleasePreview(engine: GameEngine): ApmReleasePreviewObservation | null {
+  const feature = pendingFeatureDefinition(engine);
+  if (!feature) return null;
+  const load = engine.previewLoadWithFeature(feature);
+  const resourceLoads = resourceObservationsFromLoad(load);
+  return Object.freeze({
+    resourceLoads,
+    maxEffectivePercent: Math.max(0, ...resourceLoads.map(({ effectivePercent }) => effectivePercent)),
+    diagnosis: projectedDiagnosisObservation(engine, feature, load),
+  });
+}
+
+function oracleReleasePreview(engine: GameEngine): OracleReleasePreviewObservation | null {
+  const feature = pendingFeatureDefinition(engine);
+  if (!feature) return null;
+  const load = engine.previewLoadWithFeature(feature);
+  const resourceLoads = resourceObservationsFromLoad(load);
+  return Object.freeze({
+    resourceLoads,
+    maxEffectivePercent: Math.max(0, ...resourceLoads.map(({ effectivePercent }) => effectivePercent)),
+    diagnosis: projectedDiagnosisObservation(engine, feature, load),
+    exactPressures: exactPressuresFromLoad(load),
+  });
+}
+
+function freshTechnologyBuildDays(engine: GameEngine, id: BuildableTechnologyId): number {
+  const technologyLevel = engine.developer.get(skillRef.technology(id)).level;
+  return new TechnologyBuildTask(TECHNOLOGIES[id]).estimatedRemainingDays(
+    technologyLevel,
+    engine.incidents.developmentModifier,
+  );
+}
+
+function technologyReadyForPendingRelease(engine: GameEngine, id: BuildableTechnologyId): boolean {
+  const featureRemainingDays = engine.snapshot.currentFeature?.estimatedRemainingDays;
+  return featureRemainingDays !== undefined
+    && freshTechnologyBuildDays(engine, id) <= featureRemainingDays;
+}
+
 function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
   return Object.freeze({
     previewTechnology: (id: BuildableTechnologyId) => engine.previewLoadWithTechnology(id),
@@ -315,6 +470,23 @@ function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
       engine.previewLoadWithNodeResize(nodeId, size)
     ),
     previewScaleOut: (nodeId: InfrastructureNodeId) => engine.previewLoadWithNodeScaleOut(nodeId),
+    previewReleaseAction: (action: SimulationAction) => {
+      const feature = pendingFeatureDefinition(engine);
+      if (!feature) throw new Error('No pending feature to preview');
+      switch (action.type) {
+        case 'RESIZE_NODE':
+          return engine.previewLoadWithFeatureAndNodeResize(feature, action.nodeId, action.size);
+        case 'SCALE_OUT_NODE':
+          return engine.previewLoadWithFeatureAndNodeScaleOut(feature, action.nodeId);
+        case 'START_TECHNOLOGY_BUILD':
+          return technologyReadyForPendingRelease(engine, action.technologyId)
+            ? engine.previewLoadWithFeatureAndTechnology(feature, action.technologyId)
+            : engine.previewLoadWithFeature(feature);
+        case 'NO_OP':
+        case 'RESPOND_TRAFFIC_SPIKE':
+          return engine.previewLoadWithFeature(feature);
+      }
+    },
     projectedMonthlyCost: (action: SimulationAction) => {
       const infrastructure = engine.infrastructure.clone();
       switch (action.type) {
@@ -333,6 +505,7 @@ function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
       }
       return infrastructure.monthlyCost;
     },
+    technologyReadyForRelease: (id: BuildableTechnologyId) => technologyReadyForPendingRelease(engine, id),
   });
 }
 
@@ -356,23 +529,14 @@ export function observeForStrategy(
     for (const feature of activeFeatures(engine)) {
       for (const tag of feature.tags) tags.add(tag);
     }
-    const exactPressures = Object.freeze(operationalPressures(snapshot.load).map((pressure) => Object.freeze({
-      nodeId: pressure.nodeId,
-      nodeKind: pressure.nodeKind,
-      resourceKind: pressure.resourceKind,
-      demand: pressure.demand,
-      nominalCapacity: pressure.nominalCapacity,
-      effectiveCapacity: pressure.effectiveCapacity,
-      nominalRatio: pressure.nominalRatio,
-      effectiveRatio: pressure.effectiveRatio,
-    })));
     return Object.freeze({
       ...commonObservation(engine, 'ORACLE'),
       level: 'ORACLE' as const,
       resourceLoads: resourceObservations(engine),
       diagnosis: diagnosisObservation(engine),
-      exactPressures,
+      exactPressures: exactPressuresFromLoad(snapshot.load),
       workloadTags: Object.freeze([...tags].sort()),
+      releasePreview: oracleReleasePreview(engine),
       previewPort: createOraclePreviewPort(engine),
     });
   }
@@ -389,6 +553,7 @@ export function observeForStrategy(
       ...commonObservation(engine, 'METRICS'),
       level: 'METRICS' as const,
       resourceLoads: resourceObservations(engine),
+      releasePreview: metricsReleasePreview(engine),
     });
   }
   return Object.freeze({
@@ -396,5 +561,6 @@ export function observeForStrategy(
     level: 'APM' as const,
     resourceLoads: resourceObservations(engine),
     diagnosis: diagnosisObservation(engine),
+    releasePreview: apmReleasePreview(engine),
   });
 }
