@@ -1,0 +1,109 @@
+name: BP2 Growth Forecast Pilot
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run five-seed pilot
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          set -euo pipefail
+          mkdir -p pilot
+          first=1
+          for seed in 5 8 17 23 29; do
+            npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed"
+            if [ "$first" -eq 1 ]; then
+              cp artifacts/balance/runs.csv "pilot/${FRAMEWORK}-${DATABASE}.csv"
+              first=0
+            else
+              tail -n +2 artifacts/balance/runs.csv >> "pilot/${FRAMEWORK}-${DATABASE}.csv"
+            fi
+          done
+          test "$(wc -l < "pilot/${FRAMEWORK}-${DATABASE}.csv")" -eq 31
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pilot-${{ matrix.framework }}-${{ matrix.database }}
+          path: pilot/*.csv
+          if-no-files-found: error
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: shard
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pilot-*
+          path: all
+          merge-multiple: true
+      - name: Aggregate pilot
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const files=fs.readdirSync('all').filter(f=>f.endsWith('.csv'));
+          const rows=[];
+          for(const file of files){
+            const lines=fs.readFileSync(`all/${file}`,'utf8').trim().split('\n');
+            const header=lines[0].split(',');
+            for(const line of lines.slice(1)){
+              const values=line.split(',');
+              rows.push(Object.fromEntries(header.map((h,i)=>[h,values[i]])));
+            }
+          }
+          if(rows.length!==450) throw new Error(`expected 450 pilot rows, got ${rows.length}`);
+          const informed=new Set(['METRICS_AWARE','APM_AWARE','ORACLE']);
+          const riskier=new Set(['REACTIVE_BASIC','YOLO_SCALE','CHEAPSKATE']);
+          const num=(r,k)=>Number(r[k]);
+          const summarize=(xs)=>({
+            runs:xs.length,
+            wins:xs.filter(r=>r.terminalStatus==='WON').length,
+            bankrupt:xs.filter(r=>r.terminalStatus==='BANKRUPT').length,
+            timeout:xs.filter(r=>r.terminalStatus==='TIMEOUT').length,
+            winRate:xs.filter(r=>r.terminalStatus==='WON').length/xs.length,
+            postReleaseOverloadPerRun:xs.reduce((s,r)=>s+num(r,'postReleaseOverloadDays'),0)/xs.length,
+            missingDependencyPerRun:xs.reduce((s,r)=>s+num(r,'missingRequiredDependencyDays'),0)/xs.length,
+            failureDaysPerRun:xs.reduce((s,r)=>s+num(r,'failureDays'),0)/xs.length,
+            overloadDaysPerRun:xs.reduce((s,r)=>s+num(r,'overloadDays'),0)/xs.length,
+            infraExposurePerRun:xs.reduce((s,r)=>s+num(r,'infrastructureCostExposure'),0)/xs.length,
+            lowUtilPerRun:xs.reduce((s,r)=>s+num(r,'lowUtilizationExpandedNodeDays'),0)/xs.length,
+          });
+          const informedRows=rows.filter(r=>informed.has(r.strategyId));
+          const riskierRows=rows.filter(r=>riskier.has(r.strategyId));
+          const byStrategy={};
+          for(const id of [...new Set(rows.map(r=>r.strategyId))].sort()) byStrategy[id]=summarize(rows.filter(r=>r.strategyId===id));
+          const i=summarize(informedRows), r=summarize(riskierRows);
+          const report={
+            rows:rows.length,
+            overall:summarize(rows),
+            informed:i,
+            riskier:r,
+            cohort:{
+              winDeltaPp:(i.winRate-r.winRate)*100,
+              postReleaseOverloadRatio:r.postReleaseOverloadPerRun===0?null:i.postReleaseOverloadPerRun/r.postReleaseOverloadPerRun,
+              missingDependencyRatio:r.missingDependencyPerRun===0?null:i.missingDependencyPerRun/r.missingDependencyPerRun,
+            },
+            byStrategy,
+          };
+          fs.writeFileSync('growth-forecast-pilot.json',JSON.stringify(report,null,2));
+          console.log(JSON.stringify(report,null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: growth-forecast-pilot
+          path: growth-forecast-pilot.json
+          if-no-files-found: error
