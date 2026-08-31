@@ -157,6 +157,7 @@ export interface OraclePreviewPort {
   previewScaleOut(nodeId: InfrastructureNodeId): LoadSnapshot;
   previewReleaseAction(action: SimulationAction): LoadSnapshot;
   projectedMonthlyCost(action: SimulationAction): number;
+  technologyReadyForRelease?(id: BuildableTechnologyId): boolean;
 }
 
 export interface OracleBalanceObservation extends CommonBalanceObservation {
@@ -456,6 +457,12 @@ function freshTechnologyBuildDays(engine: GameEngine, id: BuildableTechnologyId)
   );
 }
 
+function technologyReadyForPendingRelease(engine: GameEngine, id: BuildableTechnologyId): boolean {
+  const featureRemainingDays = engine.snapshot.currentFeature?.estimatedRemainingDays;
+  return featureRemainingDays !== undefined
+    && freshTechnologyBuildDays(engine, id) <= featureRemainingDays;
+}
+
 function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
   return Object.freeze({
     previewTechnology: (id: BuildableTechnologyId) => engine.previewLoadWithTechnology(id),
@@ -471,14 +478,10 @@ function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
           return engine.previewLoadWithFeatureAndNodeResize(feature, action.nodeId, action.size);
         case 'SCALE_OUT_NODE':
           return engine.previewLoadWithFeatureAndNodeScaleOut(feature, action.nodeId);
-        case 'START_TECHNOLOGY_BUILD': {
-          const featureRemainingDays = engine.snapshot.currentFeature?.estimatedRemainingDays;
-          if (featureRemainingDays === undefined) throw new Error('No pending feature timing to preview');
-          if (freshTechnologyBuildDays(engine, action.technologyId) > featureRemainingDays) {
-            return engine.previewLoadWithFeature(feature);
-          }
-          return engine.previewLoadWithFeatureAndTechnology(feature, action.technologyId);
-        }
+        case 'START_TECHNOLOGY_BUILD':
+          return technologyReadyForPendingRelease(engine, action.technologyId)
+            ? engine.previewLoadWithFeatureAndTechnology(feature, action.technologyId)
+            : engine.previewLoadWithFeature(feature);
         case 'NO_OP':
         case 'RESPOND_TRAFFIC_SPIKE':
           return engine.previewLoadWithFeature(feature);
@@ -502,6 +505,7 @@ function createOraclePreviewPort(engine: GameEngine): OraclePreviewPort {
       }
       return infrastructure.monthlyCost;
     },
+    technologyReadyForRelease: (id: BuildableTechnologyId) => technologyReadyForPendingRelease(engine, id),
   });
 }
 
