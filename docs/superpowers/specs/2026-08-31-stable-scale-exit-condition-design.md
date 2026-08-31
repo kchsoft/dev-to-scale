@@ -216,24 +216,26 @@ No mid-month instant victory is introduced. Exit remains a monthly business chec
 
 ## Snapshot and player-facing information
 
-Expose exit readiness in `GameSnapshot` so the game can explain why a player has or has not won.
+Expose exit readiness in `GameSnapshot` so the game can explain why the most recent monthly checkpoint did or did not qualify for exit.
 
 Suggested shape:
 
 ```ts
 exitReadiness: {
   monthlyRevenueTarget: number;
-  currentMonthlyRevenue: number;
+  lastSettledMonthlyRevenue: number;
   progressionComplete: boolean;
   slo: OperationalSloStatus;
-  qualified: boolean;
+  lastSettlementQualified: boolean;
 }
 ```
+
+`lastSettledMonthlyRevenue` is the completed settlement value already used by the victory check, not a partial estimate for the current month. Before the first settlement it is `0`. `lastSettlementQualified` is true only when the latest completed settlement simultaneously had finished progression, revenue at or above target, and a passing SLO.
 
 The UI should present the three final requirements separately:
 
 - product progression complete;
-- revenue target reached;
+- last settled monthly revenue target reached;
 - 30-day production SLO passed.
 
 The SLO display should show at minimum:
@@ -260,7 +262,7 @@ finalSloAverageFailureRate
 finalSloMissingRequiredDependencyDays
 ```
 
-The first metric is particularly important. It measures how often a strategy reached business scale but could not prove reliable operation.
+`revenueTargetMetButSloFailedSettlements` increments only for a completed settlement where progression is finished, monthly revenue is at or above 143M, the account is not bankrupt, and the SLO is the condition that prevents a win. This isolates the operational gate from ordinary progression, revenue, or bankruptcy failures.
 
 Existing metrics remain authoritative for cumulative run behavior:
 
@@ -373,6 +375,7 @@ At minimum prove:
 - revenue >= 143M with failed SLO does not set `WON`;
 - revenue >= 143M with finished progression and passing SLO does set `WON`;
 - bankruptcy still wins precedence over exit qualification;
+- `lastSettledMonthlyRevenue` never reports a partial current-month estimate;
 - ALB XLARGE throughput is exactly 2,250 and remains monotonic with lower tiers;
 - trace on/off remains result-identical;
 - deterministic scenario replay remains identical for the same seed and strategy.
