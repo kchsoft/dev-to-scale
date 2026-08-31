@@ -15,27 +15,6 @@ import {
   technologyAction,
 } from './strategy-helpers';
 
-const RELEASE_READINESS_PERCENT = 85;
-const RELEASE_READINESS_RATIO = RELEASE_READINESS_PERCENT / 100;
-const RELEASE_FORECAST_DAILY_GROWTH = 1.02;
-const RELEASE_FORECAST_MAX_DAYS = 3;
-
-function imminentReleaseGrowthMultiplier(observation: BalanceObservation): number {
-  const remainingDays = observation.pendingFeature?.estimatedRemainingDays;
-  if (remainingDays === undefined || remainingDays <= 0 || remainingDays > RELEASE_FORECAST_MAX_DAYS) {
-    return 1;
-  }
-  return RELEASE_FORECAST_DAILY_GROWTH ** remainingDays;
-}
-
-function forecastedReleasePercent(observation: BalanceObservation, effectivePercent: number): number {
-  return effectivePercent * imminentReleaseGrowthMultiplier(observation);
-}
-
-function forecastedReleaseRatio(observation: BalanceObservation, effectiveRatio: number): number {
-  return effectiveRatio * imminentReleaseGrowthMultiplier(observation);
-}
-
 function cheapestRequiredDependency(
   observation: BalanceObservation,
   context: StrategyDecisionContext,
@@ -122,7 +101,7 @@ export function decideMetricsReleaseReadiness(
   if (dependency) return dependency;
 
   if (!('releasePreview' in observation) || !observation.releasePreview) return null;
-  if (forecastedReleasePercent(observation, observation.releasePreview.maxEffectivePercent) < RELEASE_READINESS_PERCENT) return null;
+  if (observation.releasePreview.maxEffectivePercent < 85) return null;
 
   const resource = [...observation.releasePreview.resourceLoads].sort((left, right) => (
     right.effectivePercent - left.effectivePercent
@@ -187,9 +166,9 @@ export function decideApmReleaseReadiness(
   }
 
   const preview = observation.releasePreview;
-  if (!preview || forecastedReleasePercent(observation, preview.maxEffectivePercent) < RELEASE_READINESS_PERCENT) return null;
+  if (!preview || preview.maxEffectivePercent < 85) return null;
   const bottleneck = preview.diagnosis.topBottleneck;
-  if (!bottleneck || forecastedReleasePercent(observation, bottleneck.effectivePercent) < RELEASE_READINESS_PERCENT) return null;
+  if (!bottleneck || bottleneck.effectivePercent < 85) return null;
 
   const node = nodeFor(observation, bottleneck.nodeId);
   if (!node) return null;
@@ -322,23 +301,20 @@ export function decideOracleReleaseReadiness(
   const preview = observation.releasePreview;
   if (!preview) return null;
   const currentMax = Math.max(0, ...preview.exactPressures.map(({ effectiveRatio }) => effectiveRatio));
-  const currentForecastMax = forecastedReleaseRatio(observation, currentMax);
-  if (currentForecastMax < RELEASE_READINESS_RATIO) return null;
+  if (currentMax < 0.85) return null;
 
-  const growthMultiplier = imminentReleaseGrowthMultiplier(observation);
   const ranked = oracleReleaseCandidates(observation).map((action, order) => {
     if (!affordable(observation, context, 'ORACLE', action)) return null;
     const nextMax = maxEffectiveRatioFromPreview(observation.previewPort.previewReleaseAction(action));
-    const nextForecastMax = nextMax * growthMultiplier;
-    const relief = Math.max(0, currentForecastMax - nextForecastMax);
+    const relief = Math.max(0, currentMax - nextMax);
     const oneMonthCost = immediateCost(observation, action)
       + Math.max(0, projectedMonthlyCost(observation, action) - observation.monthlyInfrastructureCost);
     const requiredAlbEnablement = action.type === 'START_TECHNOLOGY_BUILD' && action.technologyId === 'ALB';
     if (relief < 0.02 && !requiredAlbEnablement) return null;
-    return { action, order, nextForecastMax, relief, oneMonthCost };
+    return { action, order, nextMax, relief, oneMonthCost };
   }).filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
 
-  const target = ranked.filter(({ nextForecastMax }) => nextForecastMax <= RELEASE_READINESS_RATIO);
+  const target = ranked.filter(({ nextMax }) => nextMax <= 0.85);
   if (target.length > 0) {
     target.sort((left, right) => (
       left.oneMonthCost - right.oneMonthCost
