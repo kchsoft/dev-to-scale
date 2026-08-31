@@ -8,6 +8,7 @@ import "./development-workbench.css";
 import "./development-workbench-accessibility.css";
 import "./mobile.css";
 import "./living-system-board.css";
+import "./living-system-details.css";
 
 export const metadata: Metadata = {
   title: "Dev to Scale",
