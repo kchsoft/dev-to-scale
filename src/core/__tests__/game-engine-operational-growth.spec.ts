@@ -81,6 +81,19 @@ function operationalLoad(options: {
   };
 }
 
+function loadWithFeatureSuccess(successRatio: number): LoadSnapshot {
+  return {
+    ...operationalLoad({ alb: 0.8 }),
+    requestTraces: Object.freeze([Object.freeze({
+      workloadId: 'TEST_GROWTH',
+      nodes: Object.freeze([]),
+      edges: Object.freeze([]),
+      successRatio,
+      failureNodeId: null,
+    })]),
+  };
+}
+
 function loadWithDualPressure(nominalRatio: number, effectiveRatio: number): LoadSnapshot {
   const nominalCapacity = 1;
   const demand = nominalRatio;
@@ -156,6 +169,16 @@ describe('game engine operational growth pressure', () => {
 
     expect(advanceGrowth(stillShipping)).toBe(1_060);
     expect(advanceGrowth(stableScale)).toBe(1_010);
+  });
+
+  it('does not grant feature acquisition growth when that feature request path is unavailable', () => {
+    const healthy = engineWithLoad(loadWithFeatureSuccess(1));
+    const unavailable = engineWithLoad(loadWithFeatureSuccess(0));
+    addCompletedGrowthFeature(healthy, 0.05);
+    addCompletedGrowthFeature(unavailable, 0.05);
+
+    expect(advanceGrowth(healthy)).toBe(1_060);
+    expect(advanceGrowth(unavailable)).toBe(1_010);
   });
 
   it('does not let a same-day capacity correction erase the previously observed overload penalty', () => {
