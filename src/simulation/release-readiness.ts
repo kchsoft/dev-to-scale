@@ -15,6 +15,23 @@ import {
   technologyAction,
 } from './strategy-helpers';
 
+function cheapestRequiredDependency(
+  observation: BalanceObservation,
+  context: StrategyDecisionContext,
+  candidates: readonly (SimulationAction | null)[],
+): SimulationAction | null {
+  return candidates
+    .filter((candidate): candidate is SimulationAction => candidate !== null)
+    .filter((candidate) => (
+      observation.cash - immediateCost(observation, candidate) >= context.protectedLearningReserve
+    ))
+    .sort((left, right) => {
+      const leftCost = immediateCost(observation, left) + projectedMonthlyCost(observation, left);
+      const rightCost = immediateCost(observation, right) + projectedMonthlyCost(observation, right);
+      return leftCost - rightCost || simulationActionId(left).localeCompare(simulationActionId(right));
+    })[0] ?? null;
+}
+
 export function preventativeDependencyAction(
   observation: BalanceObservation,
   context: StrategyDecisionContext,
@@ -23,11 +40,16 @@ export function preventativeDependencyAction(
   const gap = observation.upcomingRequiredDependencyGaps[0];
   if (!gap) return null;
 
+  // A required dependency is not a discretionary optimization. The simulation
+  // cannot hold a completed feature release, so applying a strategy-specific
+  // runway floor here would make conservative strategies knowingly ship a
+  // broken request path. Keep the shared learning reserve protected, while
+  // leaving normal capacity/technology investments on their existing runway policy.
+  void strategyId;
   const reason = `prepare ${gap.role} before ${gap.workloadIds.join(', ')} release`;
-  const action = cheapestAffordable(
+  const action = cheapestRequiredDependency(
     observation,
     context,
-    strategyId,
     gap.candidateTechnologyIds.map((technologyId) => (
       technologyAction(observation, technologyId, reason)
     )),
