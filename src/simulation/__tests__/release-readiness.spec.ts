@@ -259,7 +259,7 @@ describe('release readiness actions', () => {
     )).toBeNull();
   });
 
-  it('stabilizes live DB IO once the rounded METRICS signal reaches 71 percent during an active post-release window', () => {
+  it('stabilizes live DB IO with immediate capacity once the rounded METRICS signal reaches 71 percent during an active post-release window', () => {
     const decideMetricsPostReleaseStability = (releaseReadiness as ReleaseReadinessPolicyModule)
       .decideMetricsPostReleaseStability;
     expect(typeof decideMetricsPostReleaseStability).toBe('function');
@@ -270,8 +270,8 @@ describe('release readiness actions', () => {
       { protectedLearningReserve: 0, postReleaseStabilityWindowActive: true },
       'METRICS_AWARE',
     )).toMatchObject({
-      type: 'START_TECHNOLOGY_BUILD',
-      technologyId: 'REDIS',
+      type: 'SCALE_OUT_NODE',
+      nodeId: 'v1:database:POSTGRESQL',
       intent: 'POST_RELEASE_STABILITY_CAPACITY',
     });
   });
