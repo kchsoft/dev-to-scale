@@ -24,9 +24,9 @@ export const COMMUNITY_REQUIREMENT_THRESHOLDS = [
   30_000,
   100_000,
   300_000,
-  1_000_000,
+  900_000,
+  2_000_000,
   3_000_000,
-  10_000_000,
 ] as const;
 
 export interface CommunityRequirement {

@@ -71,6 +71,14 @@ describe('finance', () => {
     expect(RevenuePolicy.monthlyAiCost(1_000_000, true)).toBe(1_500_000);
   });
 
+  it('requires about 3.76M fully monetized average DAU for the Balance Pass 1 exit', () => {
+    expect(RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET).toBe(143_000_000);
+    expect(RevenuePolicy.monthlyRevenue(3_750_000, 0.9)).toBe(142_500_000);
+    expect(RevenuePolicy.monthlyRevenue(3_763_158, 0.9)).toBeGreaterThanOrEqual(
+      RevenuePolicy.EXIT_MONTHLY_REVENUE_TARGET,
+    );
+  });
+
   it('adds revenue first, subtracts costs, and declares bankruptcy below zero', () => {
     const account = new FinanceAccount(3_000_000);
 

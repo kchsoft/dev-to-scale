@@ -17,6 +17,9 @@ export interface BalanceTraceEntry {
   readonly actionReason: string;
   readonly cash: number;
   readonly dau: number;
+  readonly completedFeatureCount: number;
+  readonly lastSettlementMonth: number | null;
+  readonly lastSettlementRevenue: number | null;
   readonly hottestVisibleSignal: string;
   readonly incidentControl: string | null;
   readonly viralControl: 'RIDE' | 'THROTTLE' | 'BURST' | null;
@@ -188,13 +191,17 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
       metrics.recordCash(actionCashAfter);
 
       if (collectTrace) {
+        const traceSnapshot = engine.snapshot;
         trace.push(Object.freeze({
           day: engine.day,
           observabilityLevel: refreshed.level,
           actionId: simulationActionId(action),
           actionReason: action.reason,
-          cash: engine.snapshot.cash,
+          cash: traceSnapshot.cash,
           dau: engine.dau,
+          completedFeatureCount: traceSnapshot.completedFeatures.length,
+          lastSettlementMonth: traceSnapshot.lastSettlement?.month ?? null,
+          lastSettlementRevenue: traceSnapshot.lastSettlement?.revenue ?? null,
           hottestVisibleSignal: visibleSignal(refreshed),
           incidentControl,
           viralControl,
