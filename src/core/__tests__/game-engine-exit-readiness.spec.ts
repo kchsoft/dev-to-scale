@@ -89,7 +89,7 @@ describe('stable-scale exit readiness', () => {
   });
 
   it('keeps bankruptcy precedence over an otherwise qualified exit', () => {
-    const game = createGame(0);
+    const game = createGame(-200_000_000);
     finishProgression(game);
     fillHealthySlo(game);
 
