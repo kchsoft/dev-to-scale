@@ -1,0 +1,76 @@
+name: BP2 Storage Remedy Pilot
+
+on:
+  push:
+    branches: [feature/balance-pass-2-release-readiness]
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [SPRING_BOOT, NESTJS, GIN, FASTAPI, ASPNET_CORE]
+        database: [POSTGRESQL, MYSQL, MONGODB]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run fixed five-seed pilot
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          DATABASE: ${{ matrix.database }}
+        run: |
+          set -euo pipefail
+          mkdir -p pilot
+          out="pilot/${FRAMEWORK}-${DATABASE}.csv"
+          first=1
+          for seed in 5 8 17 23 29; do
+            npm run balance -- --framework "$FRAMEWORK" --db "$DATABASE" --seed "$seed" > /dev/null
+            if [ "$first" -eq 1 ]; then
+              cat artifacts/balance/runs.csv > "$out"
+              first=0
+            else
+              tail -n +2 artifacts/balance/runs.csv >> "$out"
+            fi
+          done
+          test "$(wc -l < "$out")" -eq 31
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storage-pilot-${{ matrix.framework }}-${{ matrix.database }}
+          path: pilot/*.csv
+          if-no-files-found: error
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: shard
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: storage-pilot-*
+          path: all
+          merge-multiple: true
+      - name: Summarize
+        run: |
+          node <<'NODE'
+          const fs=require('fs'), path=require('path');
+          const files=fs.readdirSync('all').filter(f=>f.endsWith('.csv'));
+          if(files.length!==15) throw new Error(`expected 15 files, got ${files.length}`);
+          const rows=files.flatMap(file=>{const lines=fs.readFileSync(path.join('all',file),'utf8').trimEnd().split('\n');const h=lines[0].split(',');return lines.slice(1).map(line=>{const v=line.split(',');return Object.fromEntries(h.map((k,i)=>[k,v[i]]));});});
+          if(rows.length!==450) throw new Error(`expected 450 rows, got ${rows.length}`);
+          const strategies=['REACTIVE_BASIC','METRICS_AWARE','APM_AWARE','ORACLE','YOLO_SCALE','CHEAPSKATE'];
+          const informed=new Set(['METRICS_AWARE','APM_AWARE','ORACLE']); const riskier=new Set(['REACTIVE_BASIC','YOLO_SCALE','CHEAPSKATE']);
+          const mean=xs=>xs.reduce((a,b)=>a+b,0)/xs.length; const num=(xs,k)=>xs.map(r=>Number(r[k]));
+          const median=xs=>{if(!xs.length)return null;xs=[...xs].sort((a,b)=>a-b);const m=Math.floor(xs.length/2);return xs.length%2?xs[m]:(xs[m-1]+xs[m])/2;};
+          function s(xs){const wins=xs.filter(r=>r.terminalStatus==='WON');return{runs:xs.length,wins:wins.length,winRate:wins.length/xs.length,bankruptcyRate:xs.filter(r=>r.terminalStatus==='BANKRUPT').length/xs.length,timeout:xs.filter(r=>r.terminalStatus==='TIMEOUT').length,winnerDayMedian:median(num(wins,'daysPlayed')),missingDependencyDays:mean(num(xs,'missingRequiredDependencyDays')),postReleaseOverloadDays:mean(num(xs,'postReleaseOverloadDays')),failureDays:mean(num(xs,'failureDays')),overloadDays:mean(num(xs,'overloadDays')),technologyBuildSpend:mean(num(xs,'technologyBuildSpend')),infrastructureCostExposure:mean(num(xs,'infrastructureCostExposure')),resizeCount:mean(num(xs,'resizeCount')),finalDau:mean(num(xs,'finalDau')),peakMonthlyRevenue:mean(num(xs,'peakMonthlyRevenue'))};}
+          const i=s(rows.filter(x=>informed.has(x.strategyId))), r=s(rows.filter(x=>riskier.has(x.strategyId)));
+          const report={overall:s(rows),informed:i,riskier:r,cohortDelta:{winRate:i.winRate-r.winRate,postReleaseOverloadRatio:i.postReleaseOverloadDays/r.postReleaseOverloadDays,missingDependencyRatio:i.missingDependencyDays/r.missingDependencyDays},perStrategy:Object.fromEntries(strategies.map(x=>[x,s(rows.filter(r=>r.strategyId===x))]))};
+          fs.writeFileSync('storage-remedy-pilot-summary.json',JSON.stringify(report,null,2)); console.log(JSON.stringify(report,null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storage-remedy-pilot-summary
+          path: storage-remedy-pilot-summary.json
+          if-no-files-found: error
