@@ -26,7 +26,7 @@ jobs:
           path = Path('src/core/infrastructure-sizing.ts')
           text = path.read_text()
           old = 'ALB: throughputProfiles([180, 360, 700, 1_800]'
-          new = 'ALB: throughputProfiles([180, 360, 700, 2_250]'
+          new = 'ALB: throughputProfiles([180, 360, 700, 1_950]'
           if text.count(old) != 1:
               raise SystemExit(f'expected exactly one ALB profile match, got {text.count(old)}')
           path.write_text(text.replace(old, new))
@@ -76,7 +76,7 @@ jobs:
           NODE
       - uses: actions/upload-artifact@v4
         with:
-          name: bp2-alb2250-${{ matrix.framework }}-${{ matrix.database }}
+          name: bp2-alb1950-${{ matrix.framework }}-${{ matrix.database }}
           path: pilot/*.csv
           if-no-files-found: error
 
@@ -86,7 +86,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: bp2-alb2250-*
+          pattern: bp2-alb1950-*
           path: all
           merge-multiple: true
       - name: Validate and summarize 900 rows
@@ -130,5 +130,5 @@ jobs:
           NODE
       - uses: actions/upload-artifact@v4
         with:
-          name: bp2-alb2250-pilot-summary
+          name: bp2-alb1950-pilot-summary
           path: summary.json
