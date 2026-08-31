@@ -21,6 +21,9 @@ export interface BalanceTraceEntry {
   readonly completedFeatureCount: number;
   readonly lastSettlementMonth: number | null;
   readonly lastSettlementRevenue: number | null;
+  readonly sloPassed: boolean;
+  readonly sloHealthyDays: number;
+  readonly sloAverageFailureRate: number;
   readonly hottestVisibleSignal: string;
   readonly incidentControl: string | null;
   readonly viralControl: 'RIDE' | 'THROTTLE' | 'BURST' | null;
@@ -214,6 +217,9 @@ function runInternal(scenario: BalanceScenario, collectTrace: boolean): BalanceT
           completedFeatureCount: traceSnapshot.completedFeatures.length,
           lastSettlementMonth: traceSnapshot.lastSettlement?.month ?? null,
           lastSettlementRevenue: traceSnapshot.lastSettlement?.revenue ?? null,
+          sloPassed: traceSnapshot.exitReadiness.slo.passes,
+          sloHealthyDays: traceSnapshot.exitReadiness.slo.healthyDays,
+          sloAverageFailureRate: traceSnapshot.exitReadiness.slo.averageFailureRate,
           hottestVisibleSignal: visibleSignal(refreshed),
           incidentControl,
           viralControl,
