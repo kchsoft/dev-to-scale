@@ -6,7 +6,6 @@ on:
 
 jobs:
   trace:
-    if: github.event.head_commit.message == 'ci: add oracle root-cause trace'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
