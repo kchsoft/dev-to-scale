@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { FeatureDefinition } from '../feature';
 import { GameEngine } from '../game-engine';
 import { RandomSource } from '../growth';
 import { LoadSnapshot, ServerSize } from '../infrastructure';
@@ -100,6 +101,23 @@ function advanceGrowth(engine: GameEngine): number {
   return engine.dau;
 }
 
+function addCompletedGrowthFeature(engine: GameEngine, growthBonus: number): void {
+  const state = engine as unknown as { completedFeatureDefinitions: FeatureDefinition[] };
+  state.completedFeatureDefinitions.push(new FeatureDefinition({
+    id: 'TEST_GROWTH',
+    name: 'Test Growth',
+    baseWork: 1,
+    complexity: 'SIMPLE',
+    load: { app: 0, db: 0, async: 0, storage: 0 },
+    growthBonus,
+  }));
+}
+
+function markRoadmapFinished(engine: GameEngine): void {
+  const progression = engine.progression as unknown as { completedCount: number; featureOrder: readonly string[] };
+  progression.completedCount = progression.featureOrder.length;
+}
+
 describe('game engine operational growth pressure', () => {
   it('applies the existing capacity growth penalty to overloaded ALB throughput', () => {
     const baseline = engineWithLoad(operationalLoad({ alb: 0.8 }));
@@ -127,6 +145,17 @@ describe('game engine operational growth pressure', () => {
     const overloadedExternal = engineWithLoad(operationalLoad({ external: 9.99 }));
 
     expect(advanceGrowth(overloadedExternal)).toBe(advanceGrowth(baseline));
+  });
+
+  it('stops permanent feature acquisition growth once the roadmap is complete', () => {
+    const stillShipping = engineWithLoad(operationalLoad({ alb: 0.8 }));
+    const stableScale = engineWithLoad(operationalLoad({ alb: 0.8 }));
+    addCompletedGrowthFeature(stillShipping, 0.05);
+    addCompletedGrowthFeature(stableScale, 0.05);
+    markRoadmapFinished(stableScale);
+
+    expect(advanceGrowth(stillShipping)).toBe(1_060);
+    expect(advanceGrowth(stableScale)).toBe(1_010);
   });
 
   it('does not let a same-day capacity correction erase the previously observed overload penalty', () => {
