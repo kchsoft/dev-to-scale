@@ -15,7 +15,8 @@ import {
   TechnologyId,
 } from './infrastructure';
 import { DeveloperProfile, LearningRules, LearningSlot, SkillRef, skillRef } from './learning';
-import { primaryOperationalPressure } from './operational-pressure';
+import { operationalPressures, primaryOperationalPressure } from './operational-pressure';
+import { OperationalSloWindow } from './operational-slo';
 import { CommunityProgression } from './progression';
 import { SeededRandomSource } from './random';
 import { trafficHealthForSeverity } from './request-trace';
@@ -105,6 +106,7 @@ export class GameEngine {
   readonly technologyBuild = new TechnologyBuildSlot();
   readonly incidents = new IncidentManager();
   readonly techDebt = new TechDebtState();
+  readonly operationalSlo = new OperationalSloWindow();
   readonly finance: FinanceAccount;
 
   private readonly random: RandomSource;
@@ -228,8 +230,11 @@ export class GameEngine {
       technologies: this.infrastructure.deployedTechnologies,
     });
 
-    // Growth uses the previous day's observed availability and capacity.
-    if (this._launched) this.advanceGrowth();
+    // Growth and SLO qualification use the previous day's observed availability and capacity.
+    if (this._launched) {
+      this.recordOperationalSloSample(this._growthReferenceLoad);
+      this.advanceGrowth();
+    }
     this.refreshLoad();
     if (this._launched) this.maybeGenerateIncident();
 
@@ -426,6 +431,18 @@ export class GameEngine {
 
   private ensureRunning(): void {
     if (this._status !== 'RUNNING') throw new Error(`Game is ${this._status}`);
+  }
+
+  private recordOperationalSloSample(load: LoadSnapshot): void {
+    const overloaded = operationalPressures(load).some(({ effectiveRatio }) => effectiveRatio > 1);
+    const missingRequiredDependency = load.requestTraces.some((trace) => (
+      trace.nodes.some((node) => node.requirement === 'REQUIRED' && node.status === 'MISSING')
+    ));
+    this.operationalSlo.record({
+      failureRate: load.failureRate,
+      overloaded,
+      missingRequiredDependency,
+    });
   }
 
   private advanceGrowth(): void {
