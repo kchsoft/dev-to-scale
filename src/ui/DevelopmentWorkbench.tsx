@@ -23,6 +23,13 @@ const KIND_LABEL: Readonly<Record<DevelopmentOptionKind, string>> = {
   learning: 'LEARN',
 };
 
+const DECISION_SECTIONS = [
+  ['active', 'IN PROGRESS', '현재 진행 중인 작업이 없습니다.'],
+  ['ready', 'AVAILABLE NOW', '현재 바로 실행 가능한 선택이 없습니다.'],
+  ['locked', 'LOCKED / NEEDS', '잠겨 있는 선택이 없습니다.'],
+  ['completed', 'COMPLETED', '완료된 선택이 없습니다.'],
+] as const;
+
 interface DevelopmentWorkbenchProps {
   readonly view: DevelopmentWorkbenchView;
   readonly initialSelectedId?: string | null;
@@ -34,6 +41,15 @@ export function filterDevelopmentOptions(
   filter: DevelopmentFilter,
 ): readonly DevelopmentOptionView[] {
   return filter === 'all' ? options : options.filter((option) => option.kind === filter);
+}
+
+export function groupDevelopmentOptions(options: readonly DevelopmentOptionView[]) {
+  return {
+    active: options.filter((option) => option.state === 'active'),
+    ready: options.filter((option) => option.state === 'ready'),
+    locked: options.filter((option) => option.state === 'locked'),
+    completed: options.filter((option) => option.state === 'completed'),
+  } as const;
 }
 
 export function optionIdForWorkSlot(
@@ -72,6 +88,10 @@ export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction 
     () => filterDevelopmentOptions(view.options, filter),
     [view.options, filter],
   );
+  const groupedOptions = useMemo(
+    () => groupDevelopmentOptions(visibleOptions),
+    [visibleOptions],
+  );
   const selected = selectedId
     ? view.options.find((option) => option.id === selectedId) ?? null
     : null;
@@ -109,12 +129,12 @@ export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction 
   return <section className="development-workbench" aria-labelledby="development-workbench-title">
     <header className="development-heading">
       <div>
-        <span>UNIFIED WORKBENCH</span>
+        <span>DECISION BOARD</span>
         <h2 id="development-workbench-title">개발 의사결정</h2>
-        <p>기능 · 기술 · 학습을 한 화면에서 비용, 시간, 효과, 위험, 선행 조건 기준으로 비교합니다.</p>
+        <p>진행 중인 작업과 지금 가능한 선택을 먼저 보고, 잠금 조건과 비용은 필요할 때 확인합니다.</p>
       </div>
-      <div className="development-legend" aria-label="정렬 우선순위">
-        <span>01 ACTIVE</span><span>02 READY</span><span>03 LOCKED</span><span>04 DONE</span>
+      <div className="development-legend" aria-label="상태 범례">
+        <span>ACTIVE</span><span>READY</span><span>LOCKED</span><span>DONE</span>
       </div>
     </header>
 
@@ -122,8 +142,9 @@ export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction 
 
     <div className="development-grid">
       <DevelopmentFilterBar filter={filter} options={view.options} onChange={setFilter} />
-      <DevelopmentOptionList
-        options={visibleOptions}
+      <DevelopmentDecisionBoard
+        groups={groupedOptions}
+        totalCount={visibleOptions.length}
         selectedId={selectedId}
         onSelect={setSelectedId}
       />
@@ -197,30 +218,68 @@ function DevelopmentFilterBar({
         </button>;
       })}
     </div>
-    <p>상태 우선순위는 Application에서 계산됩니다. 필터는 정렬을 바꾸지 않습니다.</p>
+    <p>필터는 종류만 좁힙니다. 각 상태 안에서는 Application이 제공한 순서를 유지합니다.</p>
   </aside>;
 }
 
-function DevelopmentOptionList({
+function DevelopmentDecisionBoard({
+  groups,
+  totalCount,
+  selectedId,
+  onSelect,
+}: {
+  readonly groups: ReturnType<typeof groupDevelopmentOptions>;
+  readonly totalCount: number;
+  readonly selectedId: string | null;
+  readonly onSelect: (id: string) => void;
+}) {
+  return <section className="development-list development-decision-board panel-shell" aria-label="개발 의사결정 보드">
+    <header><div><span>DECISION BOARD</span><strong>상태별 선택지</strong></div><b>{totalCount} ITEMS</b></header>
+    <div className="decision-board-body">
+      {DECISION_SECTIONS.map(([state, title, empty]) => (
+        <DecisionSection
+          key={state}
+          state={state}
+          title={title}
+          empty={empty}
+          options={groups[state]}
+          selectedId={selectedId}
+          onSelect={onSelect}
+        />
+      ))}
+    </div>
+  </section>;
+}
+
+function DecisionSection({
+  state,
+  title,
+  empty,
   options,
   selectedId,
   onSelect,
 }: {
+  readonly state: keyof ReturnType<typeof groupDevelopmentOptions>;
+  readonly title: string;
+  readonly empty: string;
   readonly options: readonly DevelopmentOptionView[];
   readonly selectedId: string | null;
   readonly onSelect: (id: string) => void;
 }) {
-  return <section className="development-list panel-shell" aria-label="개발 옵션">
-    <header><div><span>DEVELOPMENT OPTIONS</span><strong>현재 작업과 다음 선택지</strong></div><b>{options.length} ITEMS</b></header>
-    <div className="development-list-body">
-      {options.length === 0
-        ? <div className="development-empty"><strong>표시할 항목이 없습니다.</strong><small>다른 종류 필터를 선택하세요.</small></div>
-        : options.map((option) => <DevelopmentOptionRow
+  return <section className={`decision-section ${state}`} aria-labelledby={`decision-section-${state}`}>
+    <header className="decision-section-heading">
+      <div><span>{title}</span><small>{state === 'active' ? '현재 진행' : state === 'ready' ? '즉시 실행 가능' : state === 'locked' ? '선행 조건 필요' : '완료됨'}</small></div>
+      <b>{options.length}</b>
+    </header>
+    <div className="decision-section-body">
+      {options.length > 0
+        ? options.map((option) => <DevelopmentOptionRow
             key={option.id}
             option={option}
             selected={selectedId === option.id}
             onSelect={() => onSelect(option.id)}
-          />)}
+          />)
+        : <div className="decision-section-empty"><span>{empty}</span></div>}
     </div>
   </section>;
 }
