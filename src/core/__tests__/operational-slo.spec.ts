@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { OperationalSloWindow } from '../operational-slo';
+import { OperationalSloWindow, type OperationalSloSample } from '../operational-slo';
 
-const healthy = {
+const healthy: OperationalSloSample = {
   failureRate: 0,
   overloaded: false,
   missingRequiredDependency: false,
-} as const;
+};
 
 function record(
   window: OperationalSloWindow,
   count: number,
-  sample = healthy,
+  sample: OperationalSloSample = healthy,
 ): void {
   for (let index = 0; index < count; index += 1) window.record(sample);
 }
