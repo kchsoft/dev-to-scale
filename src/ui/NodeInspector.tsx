@@ -47,38 +47,59 @@ export function NodeInspector({
   onIncidentResponse,
 }: NodeInspectorProps) {
   const scaling = node.scaling;
-  const resourceDetail = node.detail;
   const scaleOut = scaling?.scaleOut ?? null;
   const horizontalLabel = scaleOut ? scaleOutLabel(scaleOut) : null;
+  const currentSize = scaling?.currentSize ?? null;
 
   return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <aside className="node-drawer">
+    <aside className="node-drawer" aria-label={`${node.name} Inspector`}>
       <header>
         <div className={`drawer-icon ${node.tone}`}>{node.icon}</div>
         <div><span>{node.kind.toUpperCase()}</span><strong>{node.name}</strong></div>
-        <button onClick={onClose}>×</button>
+        <button type="button" aria-label="Inspector 닫기" onClick={onClose}>×</button>
       </header>
 
-      <section className="drawer-load">
-        <span>LIVE LOAD · {observability.level}</span>
-        <strong>{node.loadPercent}%</strong>
-        <i><b style={{ width: `${Math.min(100, node.loadPercent)}%` }} /></i>
-        <small>{resourceDetail} · 월 {money(node.monthlyCost)}</small>
+      <section className="inspector-status">
+        <label>STATUS · OBS {observability.level}</label>
+        <div className="inspector-status-line">
+          <strong>{node.loadPercent}%</strong>
+          <span className={`inspector-tone ${node.tone}`}>{node.tone.toUpperCase()}</span>
+        </div>
+        <div className="inspector-load-track"><i style={{ width: `${Math.min(100, node.loadPercent)}%` }} /></div>
       </section>
 
-      {scaling && <section className="drawer-section">
-        <label>NODE SIZE · MONTHLY COST</label>
+      <section className="inspector-why">
+        <label>WHY IT MATTERS</label>
+        <strong>{node.detail}</strong>
+      </section>
+
+      <section className="inspector-current">
+        <label>CURRENT</label>
+        <div>
+          <span><small>CURRENT SIZE</small><strong>{currentSize ?? 'MANAGED'}</strong></span>
+          <span><small>MONTHLY</small><strong>{money(node.monthlyCost)}</strong></span>
+          {scaleOut && <span><small>{horizontalLabel}</small><strong>{scaleOut.count} / {scaleOut.maxCount}</strong></span>}
+        </div>
+      </section>
+
+      {scaling && <section className="inspector-options">
+        <label>OPTIONS</label>
         <div className="size-grid">
-          {scaling.sizeOptions.map((option) => <button
-            key={option.size}
-            className={scaling.currentSize === option.size ? 'active' : ''}
-            onClick={() => onResizeNode(node.id, option.size)}
-          >
-            <span>{SIZE_LABEL[option.size]}</span>
-            <small>{option.size}</small>
-            <em>{money(option.monthlyCost)}/월</em>
-            <small>{capacitySummary(option)}</small>
-          </button>)}
+          {scaling.sizeOptions.map((option) => {
+            const current = scaling.currentSize === option.size;
+            return <button
+              type="button"
+              key={option.size}
+              className={current ? 'active' : ''}
+              aria-current={current ? 'true' : undefined}
+              onClick={() => onResizeNode(node.id, option.size)}
+            >
+              <span>{SIZE_LABEL[option.size]}</span>
+              <small>{option.size}</small>
+              <em>{money(option.monthlyCost)}/월</em>
+              <small>{capacitySummary(option)}</small>
+            </button>;
+          })}
         </div>
 
         {scaleOut && <div className="scale-row">
@@ -90,6 +111,7 @@ export function NodeInspector({
               : scaleOut.reason ?? '최대치'}</small>
           </div>
           <button
+            type="button"
             disabled={!scaleOut.available}
             onClick={() => onScaleOutNode(node.id)}
           >
@@ -99,15 +121,15 @@ export function NodeInspector({
         </div>}
 
         <p>{scaleOut?.kind === 'READ_REPLICA'
-          ? 'Replica는 CPU보다 Read I/O Capacity 증가 효과가 더 큽니다. 각 노드의 vertical size와 별도로 관리됩니다.'
+          ? 'Replica는 Read I/O capacity를 늘리는 별도 horizontal 선택입니다.'
           : scaleOut?.kind === 'INSTANCE'
-            ? 'Instance scale-out은 이 APP 노드에만 적용됩니다. Vertical size는 모든 플레이어 소유 노드에서 독립적으로 조정할 수 있습니다.'
-            : '이 노드는 horizontal scale-out 없이 vertical size만 독립적으로 조정합니다.'}</p>
+            ? 'Instance scale-out은 이 APP node에만 적용되며 vertical size와 별도로 관리됩니다.'
+            : '이 node는 vertical size만 독립적으로 조정합니다.'}</p>
       </section>}
 
       {node.incidentId && <section className="incident-action">
         <span>⚡ {node.incidentSeverity} INCIDENT</span>
-        <button onClick={() => onIncidentResponse(node.incidentId!)}>대응 시작</button>
+        <button type="button" onClick={() => onIncidentResponse(node.incidentId!)}>대응 시작</button>
       </section>}
     </aside>
   </div>;
