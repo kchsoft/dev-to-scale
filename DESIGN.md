@@ -47,7 +47,7 @@ Anti-references: AWS Console, Grafana dashboards, database admin tools, log cons
 
 ## Colors
 
-The runtime source of truth is the `:root` token block in `app/globals.css`; this document records the approved durable meanings.
+During the legacy CSS migration, the runtime token source of truth is the final `:root` adapter in `app/living-system-board.css`. It is imported after the legacy layers, so these durable tokens win without forcing a risky all-at-once rewrite of the older stylesheet. When the legacy CSS is fully retired, the tokens can be consolidated without changing their meanings.
 
 - Obsidian `#080B0F`: application background.
 - Graphite `#10161D`: primary surfaces.
@@ -94,7 +94,7 @@ Use 8–12px radii for most interactive surfaces. Avoid turning every data value
 
 ### HUD
 
-Always-visible priority is Day, DAU, Cash, and game speed. Monthly revenue/cost/net appear as one grouped secondary summary rather than three or four peer KPI cards.
+Always-visible priority is Day, DAU, Cash, and game speed. Monthly revenue/cost/net appear as one grouped secondary summary rather than three or four peer KPI cards. The active HUD markup is `hud-primary`; the older `hud-metrics` selectors may remain in legacy CSS during migration but are not rendered by the product.
 
 ### Service Pulse
 
