@@ -10,28 +10,32 @@ describe('Living System Board style contract', () => {
     expect(layout.indexOf('living-system-report.css')).toBeGreaterThan(layout.indexOf('living-system-details.css'));
   });
 
-  it('keeps the approved palette in the global root token source', () => {
-    const globals = read('app/globals.css');
-    expect(globals).toContain('--bg: #080B0F;');
-    expect(globals).toContain('--panel: #10161D;');
-    expect(globals).toContain('--panel-2: #151D26;');
-    expect(globals).toContain('--line: #26313C;');
-    expect(globals).toContain('--text: #EDF4FA;');
-    expect(globals).toContain('--muted: #93A2B1;');
-    expect(globals).toContain('--blue: #4CA7FF;');
-    expect(globals).toContain('--green: #58D68D;');
-    expect(globals).toContain('--amber: #F4B860;');
-    expect(globals).toContain('--red: #FF6577;');
-  });
-
-  it('does not shadow the global token source in the board adapter', () => {
+  it('keeps the approved palette in the final living-system adapter', () => {
     const board = read('app/living-system-board.css');
-    expect(board).not.toMatch(/(^|\n):root\s*\{/);
+    expect(board).toContain('--bg: #080B0F;');
+    expect(board).toContain('--panel: #10161D;');
+    expect(board).toContain('--panel-2: #151D26;');
+    expect(board).toContain('--line: #26313C;');
+    expect(board).toContain('--text: #EDF4FA;');
+    expect(board).toContain('--muted: #93A2B1;');
+    expect(board).toContain('--blue: #4CA7FF;');
+    expect(board).toContain('--green: #58D68D;');
+    expect(board).toContain('--amber: #F4B860;');
+    expect(board).toContain('--red: #FF6577;');
   });
 
-  it('removes the retired horizontally scrolling mobile KPI strip', () => {
-    const mobile = read('app/mobile.css');
-    expect(mobile).not.toContain('.hud-metrics');
-    expect(mobile).not.toContain('scrollbar-width: none');
+  it('documents the final adapter as the runtime token source during legacy CSS migration', () => {
+    const design = read('DESIGN.md');
+    expect(design).toContain('`app/living-system-board.css`');
+    expect(design).toContain('runtime token source of truth');
+  });
+
+  it('uses the new non-scrolling mobile HUD instead of the retired KPI strip', () => {
+    const hud = read('src/ui/Hud.tsx');
+    const board = read('app/living-system-board.css');
+    expect(hud).toContain('className="hud-primary"');
+    expect(hud).not.toContain('hud-metrics');
+    expect(board).toContain('.hud-primary { grid-column: 1; grid-template-columns: repeat(3, minmax(0, 1fr));');
+    expect(board).not.toContain('scrollbar-width: none');
   });
 });
