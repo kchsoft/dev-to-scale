@@ -41,7 +41,8 @@ describe('focused game screens', () => {
 
     expect(html).toContain('class="service-board"');
     expect(html).toContain('class="active-work-rail"');
-    expect(html).toContain('class="service-stage"');
+    expect(html).toContain('class="service-board-stage"');
+    expect(html).not.toContain('class="service-stage"');
     expect(html).toContain('class="actionable-alerts"');
     expect(html).toContain('Service Map');
     expect(html).toContain('Local Storage');
