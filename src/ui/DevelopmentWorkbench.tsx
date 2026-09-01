@@ -268,7 +268,7 @@ function DecisionSection({
 }) {
   return <section className={`decision-section ${state}`} aria-labelledby={`decision-section-${state}`}>
     <header className="decision-section-heading">
-      <div><span>{title}</span><small>{state === 'active' ? '현재 진행' : state === 'ready' ? '즉시 실행 가능' : state === 'locked' ? '선행 조건 필요' : '완료됨'}</small></div>
+      <div><span id={`decision-section-${state}`}>{title}</span><small>{state === 'active' ? '현재 진행' : state === 'ready' ? '즉시 실행 가능' : state === 'locked' ? '선행 조건 필요' : '완료됨'}</small></div>
       <b>{options.length}</b>
     </header>
     <div className="decision-section-body">
