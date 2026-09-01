@@ -29,6 +29,16 @@ describe('DevelopmentWorkbench', () => {
     expect(html).not.toContain('CONFIRM ACTION');
   });
 
+  it('connects each decision section aria-labelledby to a real heading id', () => {
+    const view = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 }).getView();
+    const html = renderToStaticMarkup(<DevelopmentWorkbench view={view.development} onAction={vi.fn()} />);
+
+    for (const state of ['active', 'ready', 'locked', 'completed']) {
+      expect(html).toContain(`aria-labelledby="decision-section-${state}"`);
+      expect(html).toContain(`id="decision-section-${state}"`);
+    }
+  });
+
   it('groups options by Application state without reordering within a group', () => {
     const options = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 }).getView().development.options;
     const grouped = groupDevelopmentOptions(options);
