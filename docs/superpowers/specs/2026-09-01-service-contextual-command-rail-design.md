@@ -1,62 +1,58 @@
 # Service Contextual Command Rail — Design Specification
 
 Date: 2026-09-01
-Status: proposed for implementation
+Status: awaiting user review
 Base: `fix/living-system-board-layout` (`4a506ec88dcbb766047dfc661f67c05e54e3f294`)
 
 ## 1. Problem
 
-The current game splits operational observation and development decisions across two primary tabs:
+The current game separates operational observation and development decisions across two primary tabs:
 
 - `SERVICE` shows the live service, topology, current work, alerts, and node actions.
 - `BUILD` shows feature, technology, and learning options.
 
-This creates unnecessary context switching during the most important gameplay loop:
+That interrupts the core gameplay loop:
 
 `observe pressure → diagnose → choose a remedy → execute → observe the result`.
 
-A player who leaves the Service Map to browse technology or learning options loses immediate situational awareness. That is especially harmful while the clock is running, because overload, incidents, costs, and topology state can change during the decision.
-
-The Service screen should therefore become the primary operational play surface. Most immediate development decisions must be possible without leaving it.
+While the game clock is running, switching away from the Service Map also removes immediate awareness of overload, incidents, costs, and topology changes. The Service screen should therefore become the primary operational play surface, with most immediate development decisions available in context.
 
 ## 2. Product decision
 
-Adopt the following hierarchy:
+Adopt this hierarchy:
 
 - **SERVICE = operational workspace / primary play surface**
 - **BUILD = strategic catalog / deep exploration**
 - **REPORT = retrospective analysis**
 
-The Build tab remains. It is not replaced by the Service command rail.
-
-The Service screen gets a contextual command rail that supports fast Feature, Technology, and Learning decisions while keeping the live Service Map and operational alerts visible.
+Build remains a first-class tab. Service gains a contextual command surface for fast Feature, Technology, and Learning decisions while the live system remains visible.
 
 ## 3. Goals
 
-1. Let the player start Feature, Technology, and Learning work without changing away from `SERVICE`.
-2. Keep the live topology visible while browsing or reviewing an option on desktop.
-3. Preserve incident and overload awareness while the command rail is open.
-4. Reuse the same Application-projected development options, state ordering, costs, durations, benefits, unavailable reasons, and actions already used by Build.
-5. Preserve a single interaction grammar across Feature, Technology, and Learning.
+1. Start Feature, Technology, and Learning work without leaving `SERVICE`.
+2. Keep the live topology visible while browsing/reviewing quick decisions on desktop.
+3. Preserve incident and overload awareness while the command surface is open.
+4. Reuse the same Application-projected development options, ordering, costs, durations, benefits, unavailable reasons, and actions already used by Build.
+5. Use one interaction grammar for Feature, Technology, and Learning.
 6. Keep Node Inspector and incident response as first-class operational tools.
-7. Preserve command-rail context across blocking incident overlays so the player can resume the interrupted decision.
-8. Keep Build valuable as the place for complete strategic exploration, including locked and completed items.
+7. Preserve the open command context across blocking incident overlays.
+8. Keep Build valuable as the complete catalog for ready, locked, active, and completed options.
 
 ## 4. Non-goals
 
-- Do not change Core game rules, balancing, costs, build times, prerequisites, capacity calculations, or incident rules.
-- Do not add UI-side estimates that are not already projected by Application.
-- Do not remove the Build tab.
-- Do not turn the Service screen into a complete technology tree or full catalog.
-- Do not make the command rail modal on desktop.
-- Do not invent new development actions.
-- Do not rewrite TopologyMap geometry or request-trace behavior as part of this feature.
+- No Core game-rule, balance, cost, build-time, prerequisite, capacity, or incident-rule changes.
+- No UI-side estimates or effects that Application does not project.
+- No removal of Build.
+- No full technology tree/catalog embedded into Service.
+- No desktop modal for normal quick development decisions.
+- No new development actions.
+- No TopologyMap request-flow or geometry rewrite in this feature.
 
-## 5. UX model
+## 5. Core UX model
 
-### 5.1 Closed state
+### 5.1 Closed Service state
 
-The normal Service layout keeps the existing three-zone mental model:
+The normal Service layout keeps its existing spatial model:
 
 ```text
 ┌──────────────┬──────────────────────────────────────┬─────────────┐
@@ -72,15 +68,13 @@ The normal Service layout keeps the existing three-zone mental model:
 
 Feature, Technology, and Learning slots are actionable even when idle.
 
-- Active slot: opens the active option detail.
-- Idle slot: opens the quick chooser for that kind.
-- Incident remains an operational concern, not a catalog chooser.
+- Active slot → open the matching active option detail.
+- Idle slot → open Browse for that work kind.
+- Incident stays an operational concern, not a catalog chooser.
 
-### 5.2 Contextual command rail
+### 5.2 Contextual Command Rail
 
-Opening a Feature, Technology, or Learning slot expands the left operational rail into a **Contextual Command Rail**.
-
-Desktop concept:
+Opening a Feature, Technology, or Learning slot grows the left work rail into a **Contextual Command Rail**.
 
 ```text
 ┌──────────────────────────┬───────────────────────────────┬───────────┐
@@ -96,335 +90,326 @@ Desktop concept:
 └──────────────────────────┴───────────────────────────────┴───────────┘
 ```
 
-The command rail is non-modal on desktop:
+Desktop behavior is non-modal:
 
 - no backdrop;
 - no focus trap;
 - Service Map remains visible;
-- alerts remain visible where the viewport allows;
-- game clock continues unless another game rule pauses it.
+- game clock continues unless a game rule pauses it;
+- NOW remains visible on wide layouts.
+
+The signature is spatial rather than decorative: **current work expands into current decision space without leaving the machine being operated**.
 
 ### 5.3 Browse mode
 
-The browse mode is intentionally smaller than Build.
+Browse is intentionally smaller than Build. For the selected kind it shows:
 
-For the selected kind it shows:
+1. `IN PROGRESS`, if that kind has active work;
+2. `AVAILABLE NOW`, preserving Application ordering;
+3. one compact `LOCKED / NEEDS N` summary row;
+4. `OPEN FULL BUILD →`.
 
-1. **IN PROGRESS** when applicable;
-2. **AVAILABLE NOW** options;
-3. a compact **LOCKED / NEEDS** count/summary;
-4. `OPEN FULL BUILD →` for the complete catalog.
+The quick chooser does **not** list completed history and does **not** expand locked items into a second catalog. Those belong in Build.
 
-Completed options do not occupy the quick chooser unless they are needed to explain the current active state. Completed history belongs in Build.
-
-Application ordering is preserved inside each group.
-
-The Service rail must not duplicate business logic for deciding readiness or prerequisites.
+No readiness/prerequisite logic is duplicated in React. State comes from `DevelopmentWorkbenchView.options`.
 
 ### 5.4 Detail mode
 
-Selecting an option changes the rail from browse mode to detail mode without navigating away.
+Selecting an option changes Browse → Detail in the same command surface.
 
 Detail order:
 
-1. Kind / status
-2. Title
-3. Summary / why it matters
-4. Duration
-5. Upfront cost
-6. Monthly cost
-7. Benefits already projected by Application
-8. Unavailable reason when locked
-9. Primary action when Application exposes one
+1. kind / projected status;
+2. title;
+3. summary / why it matters;
+4. duration;
+5. upfront cost;
+6. monthly cost;
+7. projected benefits;
+8. unavailable reason when applicable;
+9. projected primary action when available.
 
-Example:
+All copy, costs, duration, state, benefits, and unavailable reasons come from the existing `DevelopmentOptionView`. React must not fabricate an effect preview.
 
-```text
-TECHNOLOGY
+### 5.5 Confirmation and action
 
-← Redis
+Starting work uses the same app-owned confirmation pattern and action dispatch path as Build.
 
-CACHE
-Redis
+After confirm:
 
-Repeated reads can be served without returning to the database.
-
-TIME       3 days
-UPFRONT    ₩40K
-MONTHLY    +₩15K
-
-EXPECTED EFFECT
-• DB read pressure ↓
-• App throughput ↑
-
-[ BUILD REDIS ]
-```
-
-The actual copy and effects are sourced from the existing `DevelopmentOptionView`. React does not invent effects or preview values.
-
-### 5.5 Confirmation
-
-Starting a development action uses the existing app-owned development confirmation pattern.
-
-The confirmation appears over the Service screen and uses the same action vocabulary and data as Build.
-
-No browser `confirm()` / `alert()` / `prompt()` is introduced.
-
-After confirmation:
-
-- the action is dispatched through the same `handleDevelopmentAction` path used by Build;
-- the player stays on `SERVICE`;
-- the command rail returns to the appropriate active state or remains on the now-active option;
+- `handleDevelopmentAction` remains the action owner;
+- the player remains on `SERVICE`;
+- the current option is immediately reconciled from the latest `view.development.options`;
+- if it is now active, Detail stays open on its active state;
 - the existing toast confirms the action.
 
-## 6. Interaction grammar by work kind
+No browser `alert()`, `confirm()`, or `prompt()` is introduced.
 
-Feature, Technology, and Learning use the same rail state machine.
+## 6. Command state machine
+
+Feature, Technology, and Learning share one state model:
 
 ```text
 CLOSED
-  ↓ slot click
+  ↓ slot
 BROWSE(kind)
-  ↓ option click
+  ↓ option
 DETAIL(kind, optionId)
-  ↓ start
+  ↓ action
 CONFIRM(action)
   ↓ success
-DETAIL/ACTIVE(kind, optionId)
+DETAIL(kind, optionId) using latest projected state
 ```
 
-Back behavior:
+Navigation rules are explicit:
 
-- Detail Back → Browse for the same kind.
-- Browse Close / Escape → Closed.
-- Confirmation Cancel → Detail and restore focus to the action trigger.
-- `OPEN FULL BUILD` → Build tab with the same kind selected; selected option is preserved when practical.
+- Detail Back → `BROWSE(same kind)`.
+- Browse Close / Escape → `CLOSED`.
+- Confirmation Cancel → Detail and restore focus to the action button.
+- Clicking another work slot while the rail is open → `BROWSE(new kind)` or its active Detail.
+- Primary nav away from Service → close the Service command state.
+- Returning to Service from Build/Report → command state starts closed.
 
-## 7. Incident and live-state behavior
+## 7. Full Build handoff
 
-### 7.1 Blocking incidents
+`OPEN FULL BUILD →` is a deliberate deep-exploration handoff.
 
-Blocking events keep existing priority and auto-pause behavior.
+When invoked:
 
-If an incident occurs while the Service command rail is open:
+1. close the Service command rail;
+2. navigate to `BUILD`;
+3. initialize Build's filter to the current kind (`feature`, `technology`, or `learning`);
+4. if Detail was open, initialize Build's selected option to the same `optionId`;
+5. if Browse was open, Build opens with that kind filter and no forced selection.
 
-1. the EventOverlay appears above the current Service UI;
-2. command-rail kind and selected option are retained in state;
+This requires extending Build's initial inputs so kind and selection are explicit rather than inferred.
+
+## 8. Incident and live-state behavior
+
+### 8.1 Blocking incidents
+
+Existing EventOverlay priority and auto-pause behavior remains authoritative.
+
+If a blocking incident arrives while the command rail is open:
+
+1. EventOverlay appears above Service;
+2. command `kind` and `optionId` remain stored;
 3. incident response proceeds normally;
-4. dismissing/resolving the overlay returns the player to the same command-rail context when that option still exists.
+4. after the overlay closes, the previous command context is restored if that option still exists.
 
-The player must not lose a technology/learning decision merely because an incident interrupted it.
+### 8.2 Live option reconciliation
 
-### 7.2 Live option reconciliation
+Time can advance while Browse or Detail is open. Every render reconciles against the latest `view.development.options`:
 
-Because game time can advance while the rail is open, development option state can change.
+- option still exists → render latest projected state;
+- option becomes active/completed/locked → show the new state;
+- selected option disappears → return to `BROWSE(same kind)`;
+- never dispatch from stale copied option data.
 
-The UI must reconcile against the newest `view.development.options` on every render:
+Controller/domain validation remains authoritative.
 
-- if a selected option still exists, render its latest projected state;
-- if it becomes active/completed/locked, show the new state rather than stale local data;
-- if it no longer exists, return to Browse for the same kind;
-- never dispatch an action solely from stale local option data.
-
-Existing controller-side validation remains authoritative.
-
-## 8. Node Inspector coexistence
+## 9. Node Inspector coexistence
 
 Spatial meaning is intentional:
 
-- **left = development / preparation decision**
+- **left = development / preparation**
 - **center = live system**
 - **right = operational diagnosis / node action**
 
-On sufficiently wide desktop layouts, Command Rail and Node Inspector may be open at the same time.
+At wide desktop widths, Command Rail and Node Inspector can be open simultaneously. This enables:
 
-This supports workflows such as:
+`inspect PostgreSQL → compare Redis/Replica → keep node condition visible → choose remedy`.
 
-`inspect PostgreSQL pressure → compare Redis/Replica → keep PostgreSQL Inspector visible → choose remedy`.
+The command surface must never replace Node Inspector.
 
-The Service Map must retain a usable minimum center width. Responsive rules decide when simultaneous side surfaces stop being practical.
+## 10. Responsive contract
 
-## 9. Responsive behavior
+Use the existing Service breakpoint family rather than inventing an unrelated responsive system.
 
-### 9.1 Wide desktop
+### 10.1 Wide desktop: `>= 1181px`
 
-At widths where the center topology can retain its established usable minimum:
+- expanded command column target: about `360px` (allowed range 340–380px for final fit);
+- center topology must retain at least the existing `560px` usable minimum;
+- NOW remains in the board;
+- Node Inspector may coexist;
+- layout expansion pushes/resizes content; it does not cover the entire Service Map.
 
-- the left column expands from compact rail to approximately 340–380px;
-- the Service Map remains visible and is resized by layout, not covered by a modal backdrop;
-- NOW remains visible;
-- Node Inspector can coexist.
+### 10.2 Medium: `601px–1180px`
 
-### 9.2 Medium desktop / tablet landscape
+- compact rail remains the normal closed state;
+- expanded command surface becomes a left-anchored persistent drawer/overlay within the workspace;
+- it is non-modal: no backdrop and no focus trap;
+- Service context remains visible beside/behind it where geometry allows;
+- existing NOW stacking rules remain authoritative;
+- the drawer owns its internal scroll only and must not create a new `100vh`/shared-workspace overflow owner.
 
-When expanding both sides would make the topology unreadable:
+### 10.3 Mobile: `<= 600px`
 
-- Command Rail becomes a persistent overlay/drawer anchored to the left edge of the workspace;
-- it remains non-modal when there is still enough visible Service context;
-- NOW may continue using the existing stacked responsive treatment;
-- Node Inspector follows its established responsive behavior.
+The same command state renders as a non-modal bottom command sheet:
 
-The drawer must not change document height or create competing viewport scroll owners.
+- no backdrop;
+- maximum height target: `72dvh` or equivalent safe bounded value;
+- Service Map remains visible above/behind the sheet;
+- explicit Close control;
+- visible internal scrollbar;
+- primary action remains above `env(safe-area-inset-bottom)`;
+- closing restores focus to the work-slot trigger;
+- blocking EventOverlay always appears above the sheet.
 
-### 9.3 Mobile
+Desktop, medium, and mobile must reuse the same option/detail/action primitives.
 
-Mobile does not attempt a narrow left rail.
-
-The same command state is rendered as a bottom sheet / bottom panel:
-
-- Service Map remains the first Service content;
-- opening Feature/Technology/Learning brings up the command surface from the bottom;
-- the surface has an explicit close action and visible scrolling;
-- primary action remains reachable above safe-area insets;
-- closing restores focus to the originating slot;
-- incident overlays retain higher priority.
-
-The mobile command surface must reuse the same data and action components as desktop rather than becoming a separate feature implementation.
-
-## 10. Build tab role after this change
-
-Build remains the complete strategic view.
+## 11. Build's role after the change
 
 Service answers:
 
-> **What can/should I do right now while this system is running?**
+> **What should I do right now while this system is running?**
 
 Build answers:
 
-> **What options exist, what is locked, what have I completed, and where can I take the architecture next?**
+> **What exists, what is locked, what is completed, and where can the architecture go next?**
 
-Build continues to show:
+Build continues to expose:
 
-- In Progress
-- Available Now
-- Locked / Needs
-- Completed
-- full filters
-- detailed option browsing
+- In Progress;
+- Available Now;
+- Locked / Needs;
+- Completed;
+- complete filters;
+- complete option exploration.
 
-Service intentionally shows a reduced operational subset.
+Service intentionally exposes the operational subset only.
 
-## 11. Component architecture
+## 12. Component architecture
 
-### 11.1 Shared development presentation
+### 12.1 Shared development UI
 
-Do not duplicate DevelopmentWorkbench detail/confirmation logic in ServiceDashboard.
+Do not copy DevelopmentWorkbench's option-detail or confirmation implementation into ServiceDashboard.
 
-Refactor reusable pieces into shared components/helpers, likely along these boundaries:
+Extract reusable development presentation/action primitives from the current Build UI. The implementation plan should preserve these responsibilities:
 
-- `DevelopmentOptionDetail` — renders the projected option detail
-- `DevelopmentActionDialog` — shared confirmation
-- existing grouping/filter helpers remain shared or move to a neutral development UI module
+- shared option-detail renderer;
+- shared development-action confirmation dialog;
+- shared grouping/filter helpers where appropriate.
 
-Build and Service both consume these primitives.
+Build and Service consume the same primitives.
 
-### 11.2 ServiceCommandRail
+### 12.2 ServiceCommandRail
 
-Introduce one bounded component responsible for Service-side development navigation.
+Introduce one component responsible only for Service-side development presentation/navigation.
 
-Inputs:
+Inputs conceptually include:
 
-- `DevelopmentWorkbenchView`
-- current command state / initial kind
-- `onAction(DevelopmentActionView)`
-- `onOpenFullBuild(kind, optionId?)`
-- close/focus callbacks as needed
+- `DevelopmentWorkbenchView`;
+- command state (`kind`, optional `optionId`);
+- `onAction(DevelopmentActionView)`;
+- `onOpenFullBuild(kind, optionId?)`;
+- close/back/focus callbacks.
 
-It owns presentation state only. It must not own game rules.
+It owns no game rules.
 
-### 11.3 GameApp ownership
+### 12.3 GameApp state ownership
 
-`GameApp` continues to own:
+`GameApp` owns the Service command state because it already owns primary navigation, blocking events, selected node, action dispatch, and toast feedback.
 
-- active primary tab;
-- selected node;
-- blocking events;
-- development action dispatch;
-- toast feedback.
+Use a small presentation state such as:
 
-Command-rail state should live high enough that a blocking EventOverlay does not reset it. It may be owned by GameApp or by a Service subtree that remains mounted while EventOverlay is shown; implementation should prefer the smallest owner that guarantees interruption persistence.
+```ts
+type ServiceCommandState =
+  | { kind: 'feature' | 'technology' | 'learning'; optionId: string | null }
+  | null;
+```
 
-Opening Full Build passes the relevant kind/selection into DevelopmentWorkbench using existing or extended initial-selection inputs.
+This guarantees EventOverlay does not reset the player's decision context.
 
-### 11.4 ServiceDashboard
+GameApp also owns the explicit Build handoff inputs:
 
-ServiceDashboard becomes the trigger/placement owner for the command rail.
+- initial Build filter kind;
+- initial selected option ID.
 
-It must not duplicate the full Build Decision Board.
+### 12.4 ServiceDashboard
 
-The compact Active rail remains useful when the command surface is closed.
+ServiceDashboard owns:
 
-## 12. Accessibility and focus
+- work-slot triggers;
+- compact/expanded rail placement;
+- rendering ServiceCommandRail;
+- focus restoration to the originating slot.
 
-Target: WCAG 2.2 AA baseline.
+It does not embed the full Build Decision Board.
 
-- Work-slot actions remain native buttons.
-- Idle Feature/Technology/Learning slots are enabled and have explicit accessible names.
-- Command Rail has a named region/surface and explicit close action.
-- Escape closes Detail/Browse when no higher-priority overlay owns Escape.
-- Closing the rail restores focus to the slot that opened it.
-- Detail Back restores focus predictably inside the rail.
-- Confirmation follows existing dialog focus trap, Escape, cancel, and focus restoration behavior.
+## 13. Accessibility and focus
+
+Target WCAG 2.2 AA baseline.
+
+- Feature/Technology/Learning slot triggers remain native buttons.
+- Idle slots are enabled and have explicit accessible names.
+- Command surface is a named non-modal region, not a modal dialog.
+- Explicit Close action exists at every responsive size.
+- Escape closes Detail/Browse only when no higher-priority overlay owns Escape.
+- Close restores focus to the slot that opened the command surface.
+- Detail Back keeps focus within the command surface predictably.
+- Shared confirmation preserves its existing focus trap, Escape, cancel, and focus-restoration contract.
 - No hover-only information.
-- Scrollbars remain visible and operable.
-- Reduced-motion rules remain respected.
-- The non-modal desktop rail must not claim modal dialog semantics.
+- Product-owned scrollbars stay visible.
+- Reduced-motion behavior stays intact.
 
-## 13. Visual direction
+## 14. Visual direction
 
-This feature extends the existing Living System Board; it does not create a new visual identity.
+This extends the existing Living System Board. Do not create a new visual identity.
 
-Use existing tokens and typography from `DESIGN.md` / `app/living-system-board.css`.
+Use current tokens and typography from `DESIGN.md` and the canonical `app/living-system-board.css` adapter.
 
-Signature behavior is spatial rather than decorative: the left rail physically grows from **current work** into **current decision space**, while the live architecture remains present.
+The visual signature is the rail transformation itself: **ACTIVE work expands into an operational control bay**.
 
 Avoid:
 
-- floating generic SaaS cards;
-- oversized modal catalogs;
-- neon/glow expansion effects;
-- a second competing accent color;
-- duplicating Build's full board inside Service.
+- generic floating SaaS cards;
+- a full-screen development modal;
+- decorative neon/glow expansion;
+- a second primary accent;
+- duplicating Build's full catalog inside Service.
 
-The transition should feel like opening a control bay on the same machine, not navigating to another product screen.
+The interaction should feel like opening a control bay on the same running system.
 
-## 14. Durable DESIGN.md update
+## 15. Durable DESIGN.md update
 
-Implementation must update `DESIGN.md` with this approved system rule:
+Implementation must add this durable rule to `DESIGN.md`:
 
 > Service is the primary operational play surface. Immediate Feature, Technology, and Learning decisions use a contextual command surface that preserves live system visibility. Build remains the complete strategic catalog.
 
-No palette or typography token changes are required by this feature.
+No palette or typography token changes are required.
 
-## 15. Testing strategy
+## 16. Testing strategy
 
-### Component / unit
+### Component/unit
 
-- idle Feature/Technology/Learning slot opens the correct Browse kind;
-- active slot opens the corresponding active option detail;
+- idle Feature/Technology/Learning slot opens `BROWSE(correct kind)`;
+- active slot opens the matching active Detail;
 - Browse preserves Application ordering;
-- locked/completed options follow the Service subset policy;
-- Detail renders costs/duration/benefits directly from the projected option;
-- Escape closes and focus restoration contract is covered;
-- stale/missing selected option reconciles back to current projected state;
-- `OPEN FULL BUILD` forwards kind/selection.
+- quick chooser includes active + ready and only a compact locked summary;
+- completed history is absent from Service quick Browse;
+- Detail uses projected costs/duration/benefits/reason;
+- Escape/Close restores focus;
+- stale/missing selected option reconciles correctly;
+- Full Build handoff forwards exact kind and optional option ID.
 
 ### Integration
 
 - start Technology from Service and remain on Service;
 - start Learning from Service and remain on Service;
 - start/inspect Feature work from Service;
-- command-rail state survives a blocking EventOverlay;
-- Node Inspector and Command Rail can coexist on wide desktop state;
-- Build still works with the extracted shared detail/dialog primitives.
+- command state survives blocking EventOverlay;
+- Node Inspector and Command Rail coexist at wide desktop state;
+- Build still functions using extracted shared detail/dialog primitives;
+- returning from Build to Service starts with command rail closed.
 
-### Style / responsive contract
+### Responsive/style contract
 
-- wide desktop expanded rail preserves a bounded usable topology region;
-- command surface does not introduce a new `100vh`/overflow owner on shared workspace ancestors;
-- medium widths use the intended drawer mode;
-- mobile uses the intended bottom-panel mode;
-- no hidden scrollbar rule is introduced.
+- `>=1181px`: expanded rail + usable center topology + NOW coexist;
+- `601–1180px`: left persistent drawer mode;
+- `<=600px`: bounded bottom command sheet mode;
+- no new shared `100vh` scroll owner;
+- no hidden-scrollbar rule.
 
 ### Full verification
 
@@ -433,19 +418,20 @@ No palette or typography token changes are required by this feature.
 - `npm run build`
 - existing balance/determinism CI steps
 - static search for native browser dialogs
-- refreshed visual inspection at representative wide desktop, medium desktop, and mobile widths before merge
+- visual inspection at representative wide desktop, medium desktop, and mobile widths before merge
 
-## 16. Acceptance criteria
+## 17. Acceptance criteria
 
-The feature is complete when all of the following are true:
+Complete means all are true:
 
-1. A player can begin available Feature, Technology, and Learning actions from Service without switching tabs.
-2. The live service remains visible during desktop quick decisions.
-3. Build continues to expose the complete development catalog.
-4. Service and Build use the same projected option data and shared action/detail primitives.
-5. A blocking incident does not erase the player's open command context.
-6. Starting a Service-side development action leaves the player on Service.
-7. Node Inspector remains usable and is not replaced by the development rail.
-8. Mobile offers the same capability through a safe-area-aware bottom surface.
-9. No Core/Application/Simulation game-rule behavior changes are required.
-10. Existing tests, typecheck, build, balance verification, and new interaction tests pass.
+1. Available Feature, Technology, and Learning work can start from Service without switching tabs.
+2. Live Service remains visible during desktop quick decisions.
+3. Build remains the complete development catalog.
+4. Service and Build use the same projected data and shared option/action primitives.
+5. Blocking incidents do not erase open command context.
+6. Service-side development actions leave the player on Service.
+7. Node Inspector remains usable and independent.
+8. Full Build handoff preserves exact kind and optional selected option.
+9. Mobile provides the same capability through the bounded non-modal bottom sheet.
+10. No Core/Application/Simulation game-rule change is required.
+11. Existing tests, typecheck, build, balance verification, and new interaction tests pass.
