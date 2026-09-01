@@ -48,9 +48,16 @@ describe('Living System Board style contract', () => {
     expect(dashboard).toContain('className="service-board-stage"');
     expect(dashboard).not.toContain('className="service-stage"');
     expect(board).toContain('.service-board-stage {');
-    expect(board).not.toContain('.service-stage');
+    expect(board).not.toMatch(/(^|\n)\.service-stage(?:\s|\{)/);
     expect(board).toContain('align-items: start;');
     expect(board).not.toContain('min-height: calc(100vh - 129px)');
     expect(board).not.toContain('.active-work-rail .runway-box { margin: auto');
+  });
+
+  it('caps the topology canvas on wide desktops instead of scaling height with the full stage width', () => {
+    const board = read('app/living-system-board.css');
+    expect(board).toContain('height: clamp(520px, 42vw, 720px);');
+    expect(board).toContain('aspect-ratio: auto;');
+    expect(board).toContain('.service-board-stage .topology-map { margin: 10px 12px 0;');
   });
 });
