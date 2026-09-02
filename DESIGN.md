@@ -31,6 +31,8 @@ components:
     purpose: "Connect time progression to the current service state without decorative motion."
   serviceStage:
     purpose: "Make the topology the dominant playable object."
+  serviceCommand:
+    purpose: "Keep immediate development decisions on Service without hiding the live system."
   inspector:
     purpose: "Explain status, why it matters, current configuration, then available actions."
 ---
@@ -80,6 +82,13 @@ Hierarchy comes before density.
 
 On desktop the Service Map should occupy roughly two-thirds of the service workspace's visual attention. Work and alerts are supporting rails. On mobile the map appears first; Day/DAU/Cash and time controls fit without horizontal KPI scrolling.
 
+Service is the primary operational play surface. Immediate Feature, Technology, and Learning decisions use a contextual command surface that preserves live system visibility. Build remains the complete strategic catalog.
+
+The Service workspace keeps a durable spatial meaning:
+- Left = development and preparation.
+- Center = live system.
+- Right = operational diagnosis.
+
 ## Elevation & Depth
 
 Static content is mostly flat. Use subtle surface-level differences and spacing before shadows. Strong glow is reserved for selected nodes, incidents, and the Service Pulse moment. Avoid large shadows on ordinary panels.
@@ -103,6 +112,12 @@ Service Pulse combines day progress with the already-projected Application servi
 ### Service Stage
 
 The topology is the playable object. Toolbars, traces, loads, work, and alerts visually support it rather than compete with it.
+
+### Service Command Surface
+
+Use the contextual command surface for immediate Feature, Technology, and Learning decisions from Service. It is contextual and non-modal: on wide screens it occupies the development rail, at medium widths it becomes a bounded left drawer, and on mobile it becomes a bounded bottom sheet above persistent navigation. It owns its own scrolling rather than turning the shared workspace into a viewport-height scroll container.
+
+Browse only active work and currently available options; summarize locked options by count. Completed history remains in Build. Reuse Application-projected option detail and the same confirmation path as Build. Blocking EventOverlay content keeps priority and temporarily covers the command surface without clearing its navigation state.
 
 ### Node Inspector
 

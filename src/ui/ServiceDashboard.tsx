@@ -1,52 +1,84 @@
+import { useEffect, useRef, type MutableRefObject } from 'react';
+import type { DevelopmentActionView, DevelopmentOptionKind, DevelopmentWorkbenchView } from '../application/development-view';
 import type { AlertView, GameView, LoadMetricView, ObservabilityView, WorkSlotView } from '../application/game-view';
 import { money, pct } from './game-format';
+import {
+  ServiceCommandRail,
+  developmentKindForWorkSlot,
+  serviceCommandStateForWorkSlot,
+  type ServiceCommandState,
+} from './ServiceCommandRail';
 import { TopologyMap } from './TopologyMap';
 
 interface ServiceDashboardProps {
   readonly view: GameView;
+  readonly development: DevelopmentWorkbenchView;
   readonly observability: ObservabilityView;
+  readonly commandState: ServiceCommandState;
+  readonly onCommandStateChange: (next: ServiceCommandState) => void;
+  readonly onDevelopmentAction: (action: DevelopmentActionView) => void;
+  readonly onOpenFullBuild: (kind: DevelopmentOptionKind, optionId: string | null) => void;
   readonly onNode: (id: string) => void;
-  readonly onDevelopmentSlot: (slot: WorkSlotView) => void;
 }
 
 const MAX_VISIBLE_ALERTS = 3;
 
-export function ServiceDashboard({ view, observability, onNode, onDevelopmentSlot }: ServiceDashboardProps) {
+const WORK_KIND_TITLE: Readonly<Record<DevelopmentOptionKind, string>> = {
+  feature: 'Feature',
+  technology: 'Technology',
+  learning: 'Learning',
+};
+
+export function ServiceDashboard({
+  view,
+  development,
+  observability,
+  commandState,
+  onCommandStateChange,
+  onDevelopmentAction,
+  onOpenFullBuild,
+  onNode,
+}: ServiceDashboardProps) {
   const health = view.service.health;
   const visibleAlerts = view.alerts.slice(0, MAX_VISIBLE_ALERTS);
   const remainingAlertCount = Math.max(0, view.alerts.length - visibleAlerts.length);
+  const slotButtonRefs = useRef<Record<DevelopmentOptionKind, HTMLButtonElement | null>>({
+    feature: null,
+    technology: null,
+    learning: null,
+  });
+  const lastCommandKindRef = useRef<DevelopmentOptionKind | null>(null);
+
+  useEffect(() => {
+    if (commandState !== null || !lastCommandKindRef.current) return;
+    const kind = lastCommandKindRef.current;
+    const frame = requestAnimationFrame(() => slotButtonRefs.current[kind]?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [commandState]);
+
+  const openCommandFromSlot = (slot: WorkSlotView) => {
+    const next = serviceCommandStateForWorkSlot(slot, development.options);
+    if (!next) return;
+    lastCommandKindRef.current = next.kind;
+    onCommandStateChange(next);
+  };
 
   return (
-    <div className="service-board">
-      <aside className="active-work-rail" aria-label="현재 진행 작업">
-        <header className="board-rail-heading">
-          <span>ACTIVE</span>
-          <strong>진행 중</strong>
-        </header>
-        <div className="work-slot-list">
-          {view.workSlots.map((slot) => (
-            <button
-              key={slot.id}
-              disabled={slot.id === 'incident'}
-              onClick={() => onDevelopmentSlot(slot)}
-              className={`work-slot ${slot.active ? 'active' : 'empty'}`}
-            >
-              <div><span>{slot.label}</span><b>{slot.active ? '●' : '○'}</b></div>
-              <strong>{slot.title}</strong>
-              <small>{slot.meta}</small>
-              {slot.progress !== null && <>
-                <div className="progress-track"><i style={{ width: `${pct(slot.progress)}%` }} /></div>
-                <em className="progress-percent">{pct(slot.progress)}%</em>
-              </>}
-            </button>
-          ))}
-        </div>
-        <div className="runway-box">
-          <span>MONTHLY NET</span>
-          <strong className={view.hud.monthlyProfit >= 0 ? 'ok' : 'warn'}>{money(view.hud.monthlyProfit)}</strong>
-          <small>정산 D-{view.hud.daysUntilSettlement}</small>
-        </div>
-      </aside>
+    <div className={`service-board${commandState ? ' command-open' : ''}`}>
+      {commandState
+        ? <ServiceCommandRail
+            view={development}
+            state={commandState}
+            onStateChange={onCommandStateChange}
+            onAction={onDevelopmentAction}
+            onOpenFullBuild={onOpenFullBuild}
+            onClose={() => onCommandStateChange(null)}
+          />
+        : <ActiveWorkRail
+            view={view}
+            slotButtonRefs={slotButtonRefs}
+            onOpenCommand={openCommandFromSlot}
+          />}
 
       <section className="service-board-stage" aria-labelledby="service-stage-title">
         <header className="service-stage-heading">
@@ -95,6 +127,52 @@ export function ServiceDashboard({ view, observability, onNode, onDevelopmentSlo
       </aside>
     </div>
   );
+}
+
+function ActiveWorkRail({
+  view,
+  slotButtonRefs,
+  onOpenCommand,
+}: {
+  readonly view: GameView;
+  readonly slotButtonRefs: MutableRefObject<Record<DevelopmentOptionKind, HTMLButtonElement | null>>;
+  readonly onOpenCommand: (slot: WorkSlotView) => void;
+}) {
+  return <aside className="active-work-rail" aria-label="현재 진행 작업">
+    <header className="board-rail-heading">
+      <span>ACTIVE</span>
+      <strong>진행 중</strong>
+    </header>
+    <div className="work-slot-list">
+      {view.workSlots.map((slot) => {
+        const kind = developmentKindForWorkSlot(slot);
+        const commandLabel = kind
+          ? `${WORK_KIND_TITLE[kind]} ${slot.active ? '진행 작업 열기' : '선택 열기'}`
+          : 'Incident 상태';
+        return <button
+          key={slot.id}
+          ref={kind ? (node) => { slotButtonRefs.current[kind] = node; } : undefined}
+          disabled={!kind}
+          aria-label={commandLabel}
+          onClick={() => onOpenCommand(slot)}
+          className={`work-slot ${slot.active ? 'active' : 'empty'}`}
+        >
+          <div><span>{slot.label}</span><b>{slot.active ? '●' : '○'}</b></div>
+          <strong>{slot.title}</strong>
+          <small>{slot.meta}</small>
+          {slot.progress !== null && <>
+            <div className="progress-track"><i style={{ width: `${pct(slot.progress)}%` }} /></div>
+            <em className="progress-percent">{pct(slot.progress)}%</em>
+          </>}
+        </button>;
+      })}
+    </div>
+    <div className="runway-box">
+      <span>MONTHLY NET</span>
+      <strong className={view.hud.monthlyProfit >= 0 ? 'ok' : 'warn'}>{money(view.hud.monthlyProfit)}</strong>
+      <small>정산 D-{view.hud.daysUntilSettlement}</small>
+    </div>
+  </aside>;
 }
 
 function topologyNodeIdForAlert(view: GameView, alertNodeId: string | undefined): string | null {

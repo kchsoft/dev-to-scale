@@ -9,6 +9,7 @@ import "./development-workbench-accessibility.css";
 import "./mobile.css";
 import "./living-system-board.css";
 import "./living-system-details.css";
+import "./living-system-command.css";
 import "./living-system-report.css";
 
 export const metadata: Metadata = {
