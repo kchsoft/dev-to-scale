@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { GameClock, type GameSpeed } from '../application/game-clock';
 import { GameController, type DevelopmentActionView, type GameEventView, type GameView } from '../application/game-controller';
-import type { DatabaseOptionId, FrameworkOptionId, SkillRefView, TechnologyIdView, TrafficResponseChoice, WorkSlotView } from '../application/game-view';
-import { DevelopmentWorkbench, optionIdForWorkSlot } from './DevelopmentWorkbench';
+import type { DevelopmentOptionKind } from '../application/development-view';
+import type { DatabaseOptionId, FrameworkOptionId, SkillRefView, TechnologyIdView, TrafficResponseChoice } from '../application/game-view';
+import { DevelopmentWorkbench, type DevelopmentFilter } from './DevelopmentWorkbench';
 import { dispatchDevelopmentAction } from './development-action-dispatcher';
 import { EventOverlay } from './EventOverlay';
 import { GameSetup } from './GameSetup';
@@ -12,6 +13,7 @@ import { Hud } from './Hud';
 import { NodeInspector } from './NodeInspector';
 import { ReportPanel } from './ReportPanel';
 import { ServiceDashboard } from './ServiceDashboard';
+import type { ServiceCommandState } from './ServiceCommandRail';
 import { GAME_NAV_ITEMS, type GameTab } from './game-navigation';
 import { money } from './game-format';
 
@@ -23,6 +25,8 @@ export default function GameApp() {
   const [speed, setSpeedState] = useState<GameSpeed>(0);
   const [dayProgress, setDayProgress] = useState(0);
   const [tab, setTab] = useState<GameTab>('service');
+  const [serviceCommand, setServiceCommand] = useState<ServiceCommandState>(null);
+  const [developmentInitialFilter, setDevelopmentInitialFilter] = useState<DevelopmentFilter>('all');
   const [developmentInitialSelectedId, setDevelopmentInitialSelectedId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [events, setEvents] = useState<GameEventView[]>([]);
@@ -61,6 +65,8 @@ export default function GameApp() {
     setController(next);
     setView(next.getView());
     setDayProgress(0);
+    setServiceCommand(null);
+    setDevelopmentInitialFilter('all');
     setDevelopmentInitialSelectedId(null);
     setTab('service');
   };
@@ -71,6 +77,8 @@ export default function GameApp() {
     setView(null);
     setEvents([]);
     setSelectedNode(null);
+    setServiceCommand(null);
+    setDevelopmentInitialFilter('all');
     setDevelopmentInitialSelectedId(null);
     setSpeedState(0);
     setDayProgress(0);
@@ -145,12 +153,18 @@ export default function GameApp() {
   };
 
   const openPrimaryTab = (nextTab: GameTab) => {
-    if (nextTab === 'development') setDevelopmentInitialSelectedId(null);
+    setServiceCommand(null);
+    if (nextTab === 'development') {
+      setDevelopmentInitialFilter('all');
+      setDevelopmentInitialSelectedId(null);
+    }
     setTab(nextTab);
   };
 
-  const openDevelopmentFromSlot = (slot: WorkSlotView) => {
-    setDevelopmentInitialSelectedId(optionIdForWorkSlot(slot, view.development.options));
+  const openFullBuild = (kind: DevelopmentOptionKind, optionId: string | null) => {
+    setDevelopmentInitialFilter(kind);
+    setDevelopmentInitialSelectedId(optionId);
+    setServiceCommand(null);
     setTab('development');
   };
 
@@ -159,8 +173,22 @@ export default function GameApp() {
     <div className="main-shell">
       <nav className="side-nav"><div className="nav-brand">D<span>2</span>S</div>{GAME_NAV_ITEMS.map(([id, icon, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => openPrimaryTab(id)}><span>{icon}</span><small>{label}</small></button>)}<button className="restart-button" onClick={restart}><span>↺</span><small>재시작</small></button></nav>
       <section className="workspace">
-        {tab === 'service' && <ServiceDashboard view={view} observability={observability} onNode={setSelectedNode} onDevelopmentSlot={openDevelopmentFromSlot} />}
-        {tab === 'development' && <DevelopmentWorkbench view={view.development} initialSelectedId={developmentInitialSelectedId} onAction={handleDevelopmentAction} />}
+        {tab === 'service' && <ServiceDashboard
+          view={view}
+          development={view.development}
+          observability={observability}
+          commandState={serviceCommand}
+          onCommandStateChange={setServiceCommand}
+          onDevelopmentAction={handleDevelopmentAction}
+          onOpenFullBuild={openFullBuild}
+          onNode={setSelectedNode}
+        />}
+        {tab === 'development' && <DevelopmentWorkbench
+          view={view.development}
+          initialFilter={developmentInitialFilter}
+          initialSelectedId={developmentInitialSelectedId}
+          onAction={handleDevelopmentAction}
+        />}
         {tab === 'report' && <ReportPanel view={view} observability={observability} />}
       </section>
     </div>
