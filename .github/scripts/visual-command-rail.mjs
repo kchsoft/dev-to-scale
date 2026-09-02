@@ -74,6 +74,7 @@ async function captureDetail(name, viewport) {
 }
 
 for (const [name, viewport, baseline] of [
+  ['desktop-2048x1649', { width: 2048, height: 1649 }, true],
   ['wide-1440x1000', { width: 1440, height: 1000 }, true],
   ['medium-900x1000', { width: 900, height: 1000 }, false],
   ['mobile-390x844', { width: 390, height: 844 }, true],
