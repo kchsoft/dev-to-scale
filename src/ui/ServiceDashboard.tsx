@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import type { DevelopmentActionView, DevelopmentOptionKind } from '../application/development-view';
+import { useEffect, useRef, type MutableRefObject } from 'react';
+import type { DevelopmentActionView, DevelopmentOptionKind, DevelopmentWorkbenchView } from '../application/development-view';
 import type { AlertView, GameView, LoadMetricView, ObservabilityView, WorkSlotView } from '../application/game-view';
 import { money, pct } from './game-format';
 import {
@@ -12,6 +12,7 @@ import { TopologyMap } from './TopologyMap';
 
 interface ServiceDashboardProps {
   readonly view: GameView;
+  readonly development: DevelopmentWorkbenchView;
   readonly observability: ObservabilityView;
   readonly commandState: ServiceCommandState;
   readonly onCommandStateChange: (next: ServiceCommandState) => void;
@@ -30,6 +31,7 @@ const WORK_KIND_TITLE: Readonly<Record<DevelopmentOptionKind, string>> = {
 
 export function ServiceDashboard({
   view,
+  development,
   observability,
   commandState,
   onCommandStateChange,
@@ -55,7 +57,7 @@ export function ServiceDashboard({
   }, [commandState]);
 
   const openCommandFromSlot = (slot: WorkSlotView) => {
-    const next = serviceCommandStateForWorkSlot(slot, view.development.options);
+    const next = serviceCommandStateForWorkSlot(slot, development.options);
     if (!next) return;
     lastCommandKindRef.current = next.kind;
     onCommandStateChange(next);
@@ -65,7 +67,7 @@ export function ServiceDashboard({
     <div className={`service-board${commandState ? ' command-open' : ''}`}>
       {commandState
         ? <ServiceCommandRail
-            view={view.development}
+            view={development}
             state={commandState}
             onStateChange={onCommandStateChange}
             onAction={onDevelopmentAction}
@@ -133,7 +135,7 @@ function ActiveWorkRail({
   onOpenCommand,
 }: {
   readonly view: GameView;
-  readonly slotButtonRefs: React.MutableRefObject<Record<DevelopmentOptionKind, HTMLButtonElement | null>>;
+  readonly slotButtonRefs: MutableRefObject<Record<DevelopmentOptionKind, HTMLButtonElement | null>>;
   readonly onOpenCommand: (slot: WorkSlotView) => void;
 }) {
   return <aside className="active-work-rail" aria-label="현재 진행 작업">
