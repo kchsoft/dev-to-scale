@@ -69,6 +69,7 @@ export default function GameApp() {
     setDevelopmentInitialFilter('all');
     setDevelopmentInitialSelectedId(null);
     setTab('service');
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   };
 
   const restart = () => {
