@@ -116,4 +116,16 @@ describe('Living System Board style contract', () => {
     expect(mobile).toContain('z-index: 50;');
     expect(globals).toContain('.event-overlay { position: fixed; inset: 0; z-index: 60;');
   });
+
+  it('documents Service as the operational play surface and Build as the complete strategic catalog', () => {
+    const design = read('DESIGN.md');
+    const command = read('app/living-system-command.css');
+
+    expect(design).toContain('Service is the primary operational play surface.');
+    expect(design).toContain('Build remains the complete strategic catalog.');
+    expect(design).toContain('Left = development and preparation');
+    expect(design).toContain('Center = live system');
+    expect(design).toContain('Right = operational diagnosis');
+    expect(command).not.toContain(':root');
+  });
 });
