@@ -1,0 +1,42 @@
+name: Visual QA Command Rail
+
+on:
+  push:
+    branches: [qa/visual-command-rail-bba1bb51]
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - name: Start app
+        run: |
+          npm run dev -- --hostname 127.0.0.1 > /tmp/dev-to-scale-visual-qa.log 2>&1 &
+          echo $! > /tmp/dev-to-scale-visual-qa.pid
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/dev-to-scale-visual-qa.log
+          exit 1
+      - name: Capture visual QA
+        run: node .github/scripts/visual-command-rail.mjs
+      - name: Upload visual QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-command-rail
+          path: |
+            artifacts/visual-qa/
+            /tmp/dev-to-scale-visual-qa.log
+          if-no-files-found: error
