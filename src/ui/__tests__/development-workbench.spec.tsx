@@ -85,6 +85,24 @@ describe('DevelopmentWorkbench', () => {
     expect(html).toContain(`<code>${technology.id}</code>`);
   });
 
+  it('rejects an initial selection that does not belong to the requested Full Build filter', () => {
+    const view = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 }).getView();
+    const feature = view.development.options.find(({ kind }) => kind === 'feature')!;
+
+    const html = renderToStaticMarkup(
+      <DevelopmentWorkbench
+        view={view.development}
+        initialFilter="technology"
+        initialSelectedId={feature.id}
+        onAction={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('aria-selected="true" class="active"><span>TECH</span>');
+    expect(html).toContain('NO SELECTION');
+    expect(html).not.toContain(`<code>${feature.id}</code>`);
+  });
+
   it('renders a selected Inspector as a focusable sheet with a mobile dismiss backdrop', () => {
     const view = new GameController({ frameworkId: 'SPRING_BOOT', databaseId: 'POSTGRESQL', seed: 7 }).getView();
     const featureSlot = view.development.workSlots.find(({ id }) => id === 'feature')!;
