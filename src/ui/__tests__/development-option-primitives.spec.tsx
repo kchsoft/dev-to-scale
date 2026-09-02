@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import type { DevelopmentActionView } from '../../application/development-view';
 import { GameController } from '../../application/game-controller';
 import { DevelopmentActionDialog } from '../DevelopmentActionDialog';
 import { DevelopmentOptionDetail } from '../DevelopmentOptionDetail';
@@ -12,8 +13,11 @@ describe('shared development option primitives', () => {
     seed: 7,
   }).getView();
 
-  const option = view.development.options.find((candidate) => candidate.action !== null)!;
-  const action = option.action!;
+  const option = view.development.options[0]!;
+  const action: DevelopmentActionView = {
+    kind: 'fast-track-feature',
+    featureId: 'COMMUNITY_MVP',
+  };
 
   it('renders projected option details without inventing another data model', () => {
     const html = renderToStaticMarkup(
