@@ -53,6 +53,7 @@ async function collectMetrics(page) {
         eventCard: layer(eventCard),
       },
       eventKind: eventCard?.className ?? null,
+      eventTitle: eventCard?.querySelector('h2')?.textContent?.trim() ?? null,
       railStillMounted: Boolean(rail),
       drawerStillMounted: Boolean(drawer),
     };
@@ -101,17 +102,29 @@ async function captureLayering(name, viewport) {
   await page.getByRole('button', { name: /Technology 선택 열기/i }).click();
   await page.locator('.service-command-rail').waitFor();
 
-  await page.getByRole('button', { name: '2배속' }).click();
   await page.locator('.topology-node.server-group').first().click();
   await page.locator('.node-drawer').waitFor();
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${outDir}/${name}-command-plus-inspector.png`, fullPage: false });
   await writeFile(`${outDir}/${name}-command-plus-inspector-metrics.json`, JSON.stringify(await collectMetrics(page), null, 2));
 
-  await page.locator('.event-overlay').waitFor({ state: 'visible', timeout: 30_000 });
+  const dayButton = page.getByRole('button', { name: '하루 진행' });
+  const eventOverlay = page.locator('.event-overlay');
+  let advancedDays = 0;
+  for (; advancedDays < 120; advancedDays += 1) {
+    await dayButton.evaluate((button) => button.click());
+    await page.waitForTimeout(20);
+    if (await eventOverlay.count()) break;
+  }
+  if (!(await eventOverlay.count())) {
+    throw new Error(`blocking event not reached after ${advancedDays} QA day advances`);
+  }
+
+  await eventOverlay.waitFor({ state: 'visible', timeout: 5_000 });
   await page.waitForTimeout(250);
+  const eventMetrics = await collectMetrics(page);
   await page.screenshot({ path: `${outDir}/${name}-blocking-event-over-inspector.png`, fullPage: false });
-  await writeFile(`${outDir}/${name}-blocking-event-over-inspector-metrics.json`, JSON.stringify(await collectMetrics(page), null, 2));
+  await writeFile(`${outDir}/${name}-blocking-event-over-inspector-metrics.json`, JSON.stringify({ advancedDays: advancedDays + 1, ...eventMetrics }, null, 2));
 
   await context.close();
 }
