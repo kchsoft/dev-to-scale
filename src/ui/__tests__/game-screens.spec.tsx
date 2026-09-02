@@ -33,6 +33,7 @@ describe('focused game screens', () => {
     const html = renderToStaticMarkup(
       <ServiceDashboard
         view={view}
+        development={view.development}
         observability={view.service.observability}
         commandState={null}
         onCommandStateChange={vi.fn()}
@@ -63,6 +64,7 @@ describe('focused game screens', () => {
     const html = renderToStaticMarkup(
       <ServiceDashboard
         view={view}
+        development={view.development}
         observability={view.service.observability}
         commandState={{ kind: 'technology', optionId: null }}
         onCommandStateChange={vi.fn()}
@@ -96,6 +98,7 @@ describe('focused game screens', () => {
     const html = renderToStaticMarkup(
       <ServiceDashboard
         view={view}
+        development={view.development}
         observability={view.service.observability}
         commandState={null}
         onCommandStateChange={vi.fn()}
