@@ -91,19 +91,29 @@ describe('Living System Board style contract', () => {
     expect(command).not.toContain('service-command-backdrop');
   });
 
-  it('uses a safe-area aware mobile bottom command sheet with its own scroll owner', () => {
+  it('uses a safe-area aware mobile command sheet with its own scroll owner', () => {
     expect(existsSync('app/living-system-command.css')).toBe(true);
     if (!existsSync('app/living-system-command.css')) return;
     const command = read('app/living-system-command.css');
 
     expect(command).toContain('@media (max-width: 600px)');
     expect(command).toContain('position: fixed;');
-    expect(command).toContain('bottom: 0;');
+    expect(command).toContain('bottom: calc(62px + env(safe-area-inset-bottom));');
     expect(command).toContain('max-height: 72dvh;');
-    expect(command).toContain('env(safe-area-inset-bottom)');
     expect(command).toContain('overflow-y: auto;');
     expect(command).not.toContain('scrollbar-width: none');
     expect(command).not.toContain('::-webkit-scrollbar { display: none');
     expect(command).not.toContain('service-command-backdrop');
+  });
+
+  it('keeps the non-modal mobile command surface below inspectors and blocking events instead of covering navigation by z-index', () => {
+    const command = read('app/living-system-command.css');
+    const globals = read('app/globals.css');
+    const mobile = read('app/mobile.css');
+
+    expect(command).toContain('z-index: 32;');
+    expect(globals).toContain('.drawer-backdrop { position: fixed; inset: 78px 0 0; background: rgba(3,6,9,.44); z-index: 40;');
+    expect(mobile).toContain('z-index: 50;');
+    expect(globals).toContain('.event-overlay { position: fixed; inset: 0; z-index: 60;');
   });
 });
