@@ -205,7 +205,7 @@
     position: fixed;
     left: 6px;
     right: 6px;
-    bottom: 0;
+    bottom: calc(62px + env(safe-area-inset-bottom));
     width: auto;
     max-height: 72dvh;
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
