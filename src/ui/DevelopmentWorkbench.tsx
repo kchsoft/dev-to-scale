@@ -6,6 +6,8 @@ import type {
   DevelopmentWorkbenchView,
 } from '../application/development-view';
 import type { WorkSlotView } from '../application/game-view';
+import { DevelopmentActionDialog } from './DevelopmentActionDialog';
+import { DEVELOPMENT_KIND_LABEL, DevelopmentOptionDetail } from './DevelopmentOptionDetail';
 import { money, pct } from './game-format';
 
 export type DevelopmentFilter = 'all' | DevelopmentOptionKind;
@@ -16,12 +18,6 @@ const FILTERS: readonly { readonly id: DevelopmentFilter; readonly label: string
   { id: 'technology', label: 'TECH' },
   { id: 'learning', label: 'LEARN' },
 ];
-
-const KIND_LABEL: Readonly<Record<DevelopmentOptionKind, string>> = {
-  feature: 'FEATURE',
-  technology: 'TECH',
-  learning: 'LEARN',
-};
 
 const DECISION_SECTIONS = [
   ['active', 'IN PROGRESS', '현재 진행 중인 작업이 없습니다.'],
@@ -163,7 +159,7 @@ export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction 
       />
     </div>
 
-    {pendingAction && selected && selected.action && <StartDevelopmentDialog
+    {pendingAction && selected && selected.action && <DevelopmentActionDialog
       option={selected}
       action={pendingAction}
       onCancel={closeDialog}
@@ -292,7 +288,7 @@ function DevelopmentOptionRow({ option, selected, onSelect }: { readonly option:
     onClick={onSelect}
     aria-pressed={selected}
   >
-    <span className="development-kind">{KIND_LABEL[option.kind]}</span>
+    <span className="development-kind">{DEVELOPMENT_KIND_LABEL[option.kind]}</span>
     <div className="development-option-copy">
       <div><small>{option.eyebrow}</small><em className={`development-state ${option.state}`}>{option.statusLabel}</em></div>
       <strong>{option.title}</strong>
@@ -345,92 +341,18 @@ function DevelopmentInspector({
     tabIndex={-1}
     onKeyDown={onKeyDown}
   >
-    <header><div><span>INSPECTOR · {KIND_LABEL[option.kind]}</span><strong id="development-inspector-title">{option.title}</strong></div><button type="button" onClick={onClose} aria-label="Inspector 닫기">×</button></header>
-    <div className="development-inspector-body">
-      <div className="development-inspector-status"><em className={`development-state ${option.state}`}>{option.statusLabel}</em><code>{option.id}</code></div>
-      <p className="development-summary">{option.summary}</p>
-
-      {option.progress !== null && <section><label>PROGRESS</label><div className="development-progress"><i style={{ width: `${pct(option.progress)}%` }} /></div><strong>{pct(option.progress)}%</strong></section>}
-
-      <div className="development-cost-grid">
-        <span><small>TIME</small><b>{option.durationLabel ?? '—'}</b></span>
-        <span><small>UPFRONT</small><b>{option.upfrontCost === null ? '—' : money(option.upfrontCost)}</b></span>
-        <span><small>MONTHLY</small><b>{option.monthlyCost === null ? '—' : money(option.monthlyCost)}</b></span>
+    <header>
+      <div>
+        <span>INSPECTOR · {DEVELOPMENT_KIND_LABEL[option.kind]}</span>
+        <strong id="development-inspector-title">{option.title}</strong>
       </div>
-
-      <InspectorList title="BENEFIT" items={option.benefits} empty="표시할 주요 효과 없음" />
-      <InspectorList title="RISK / TRADE-OFF" items={option.risks} empty="추가 위험 정보 없음" />
-      <InspectorList title="REQUIREMENTS" items={option.requirements} empty="추가 선행 조건 없음" />
-
-      {option.unavailableReason && <div className="development-blocker"><span>UNAVAILABLE</span><strong>{option.unavailableReason}</strong></div>}
-    </div>
-    <footer>
-      {option.action
-        ? <button type="button" ref={actionButtonRef} className="development-primary-action" onClick={() => onAction(option.action!)}>{option.actionLabel ?? '실행'}</button>
-        : <span>현재 실행 가능한 Action 없음</span>}
-    </footer>
+      <button type="button" onClick={onClose} aria-label="Inspector 닫기">×</button>
+    </header>
+    <DevelopmentOptionDetail
+      option={option}
+      titleId="development-inspector-title"
+      actionButtonRef={actionButtonRef}
+      onAction={onAction}
+    />
   </aside>;
-}
-
-function InspectorList({ title, items, empty }: { readonly title: string; readonly items: readonly string[]; readonly empty: string }) {
-  return <section className="development-inspector-list"><label>{title}</label>{items.length
-    ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>
-    : <p>{empty}</p>}</section>;
-}
-
-function StartDevelopmentDialog({
-  option,
-  action,
-  onCancel,
-  onConfirm,
-}: {
-  readonly option: DevelopmentOptionView;
-  readonly action: DevelopmentActionView;
-  readonly onCancel: () => void;
-  readonly onConfirm: () => void;
-}) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    cancelRef.current?.focus();
-  }, []);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      onCancel();
-      return;
-    }
-    if (event.key !== 'Tab' || !dialogRef.current) return;
-    const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), [href], [tabindex]:not([tabindex="-1"])')) as HTMLElement[];
-    if (!focusable.length) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
-  return <div className="development-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-    <div
-      ref={dialogRef}
-      className="development-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="development-dialog-title"
-      aria-describedby="development-dialog-description"
-      onKeyDown={onKeyDown}
-    >
-      <span>CONFIRM ACTION</span>
-      <h3 id="development-dialog-title">{option.actionLabel ?? option.title}</h3>
-      <p id="development-dialog-description">{option.title}에 상태 변경을 적용합니다. 실행 시점의 최신 게임 규칙으로 다시 검증됩니다.</p>
-      <div><small>ACTION</small><code>{action.kind}</code></div>
-      <footer><button type="button" ref={cancelRef} onClick={onCancel}>취소</button><button type="button" className="confirm" onClick={onConfirm}>{option.actionLabel ?? '실행'}</button></footer>
-    </div>
-  </div>;
 }
