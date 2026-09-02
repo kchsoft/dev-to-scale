@@ -20,7 +20,26 @@ async function openGame(page) {
   await page.locator('#service-stage-title').waitFor();
 }
 
-async function capture(name, viewport, { baseline = false } = {}) {
+async function collectMetrics(page) {
+  return page.evaluate(() => {
+    const rail = document.querySelector('.service-command-rail');
+    const nav = document.querySelector('.side-nav');
+    const map = document.querySelector('.service-board-stage');
+    const alerts = document.querySelector('.actionable-alerts');
+    const rect = (el) => el ? el.getBoundingClientRect().toJSON() : null;
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      body: { scrollWidth: document.body.scrollWidth, clientWidth: document.documentElement.clientWidth },
+      rail: rect(rail),
+      railScroll: rail ? { scrollHeight: rail.scrollHeight, clientHeight: rail.clientHeight, scrollTop: rail.scrollTop } : null,
+      nav: rect(nav),
+      map: rect(map),
+      alerts: rect(alerts),
+    };
+  });
+}
+
+async function captureBrowse(name, viewport, { baseline = false } = {}) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   await openGame(page);
@@ -33,31 +52,35 @@ async function capture(name, viewport, { baseline = false } = {}) {
   await technology.waitFor();
   await technology.click();
   await page.locator('.service-command-rail').waitFor();
-  await page.waitForTimeout(350);
-  await page.screenshot({ path: `${outDir}/${name}-command.png`, fullPage: false });
-
-  const metrics = await page.evaluate(() => {
-    const rail = document.querySelector('.service-command-rail');
-    const nav = document.querySelector('.side-nav');
-    const map = document.querySelector('.service-board-stage');
-    const alerts = document.querySelector('.actionable-alerts');
-    const rect = (el) => el ? el.getBoundingClientRect().toJSON() : null;
-    return {
-      viewport: { width: innerWidth, height: innerHeight },
-      body: { scrollWidth: document.body.scrollWidth, clientWidth: document.documentElement.clientWidth },
-      rail: rect(rail),
-      nav: rect(nav),
-      map: rect(map),
-      alerts: rect(alerts),
-      activeElement: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? null,
-    };
-  });
-  await writeFile(`${outDir}/${name}-metrics.json`, JSON.stringify(metrics, null, 2));
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${outDir}/${name}-browse.png`, fullPage: false });
+  await writeFile(`${outDir}/${name}-browse-metrics.json`, JSON.stringify(await collectMetrics(page), null, 2));
   await context.close();
 }
 
-await capture('wide-1440x1000', { width: 1440, height: 1000 }, { baseline: true });
-await capture('medium-900x1000', { width: 900, height: 1000 });
-await capture('mobile-390x844', { width: 390, height: 844 });
+async function captureDetail(name, viewport) {
+  const context = await browser.newContext({ viewport });
+  const page = await context.newPage();
+  await openGame(page);
+
+  const feature = page.getByRole('button', { name: /Feature 진행 작업 열기/i });
+  await feature.waitFor();
+  await feature.click();
+  await page.locator('.service-command-rail.detail').waitFor();
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${outDir}/${name}-detail.png`, fullPage: false });
+  await writeFile(`${outDir}/${name}-detail-metrics.json`, JSON.stringify(await collectMetrics(page), null, 2));
+  await context.close();
+}
+
+for (const [name, viewport, baseline] of [
+  ['wide-1440x1000', { width: 1440, height: 1000 }, true],
+  ['medium-900x1000', { width: 900, height: 1000 }, false],
+  ['mobile-390x844', { width: 390, height: 844 }, true],
+]) {
+  await captureBrowse(name, viewport, { baseline });
+  await captureDetail(name, viewport);
+}
+
 await writeFile(`${outDir}/browser-console.txt`, logs.join('\n') || 'No browser warnings/errors captured.');
 await browser.close();
