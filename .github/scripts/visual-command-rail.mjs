@@ -26,7 +26,17 @@ async function collectMetrics(page) {
     const nav = document.querySelector('.side-nav');
     const map = document.querySelector('.service-board-stage');
     const alerts = document.querySelector('.actionable-alerts');
+    const drawerBackdrop = document.querySelector('.drawer-backdrop');
+    const drawer = document.querySelector('.node-drawer');
+    const eventOverlay = document.querySelector('.event-overlay');
+    const eventCard = document.querySelector('.event-card');
     const rect = (el) => el ? el.getBoundingClientRect().toJSON() : null;
+    const layer = (el) => el ? {
+      zIndex: getComputedStyle(el).zIndex,
+      position: getComputedStyle(el).position,
+      pointerEvents: getComputedStyle(el).pointerEvents,
+      rect: rect(el),
+    } : null;
     return {
       viewport: { width: innerWidth, height: innerHeight },
       body: { scrollWidth: document.body.scrollWidth, clientWidth: document.documentElement.clientWidth },
@@ -35,6 +45,16 @@ async function collectMetrics(page) {
       nav: rect(nav),
       map: rect(map),
       alerts: rect(alerts),
+      layers: {
+        rail: layer(rail),
+        drawerBackdrop: layer(drawerBackdrop),
+        drawer: layer(drawer),
+        eventOverlay: layer(eventOverlay),
+        eventCard: layer(eventCard),
+      },
+      eventKind: eventCard?.className ?? null,
+      railStillMounted: Boolean(rail),
+      drawerStillMounted: Boolean(drawer),
     };
   });
 }
@@ -73,6 +93,29 @@ async function captureDetail(name, viewport) {
   await context.close();
 }
 
+async function captureLayering(name, viewport) {
+  const context = await browser.newContext({ viewport });
+  const page = await context.newPage();
+  await openGame(page);
+
+  await page.getByRole('button', { name: /Technology 선택 열기/i }).click();
+  await page.locator('.service-command-rail').waitFor();
+
+  await page.getByRole('button', { name: '2배속' }).click();
+  await page.locator('.topology-node.server-group').first().click();
+  await page.locator('.node-drawer').waitFor();
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${outDir}/${name}-command-plus-inspector.png`, fullPage: false });
+  await writeFile(`${outDir}/${name}-command-plus-inspector-metrics.json`, JSON.stringify(await collectMetrics(page), null, 2));
+
+  await page.locator('.event-overlay').waitFor({ state: 'visible', timeout: 30_000 });
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${outDir}/${name}-blocking-event-over-inspector.png`, fullPage: false });
+  await writeFile(`${outDir}/${name}-blocking-event-over-inspector-metrics.json`, JSON.stringify(await collectMetrics(page), null, 2));
+
+  await context.close();
+}
+
 for (const [name, viewport, baseline] of [
   ['desktop-2048x1649', { width: 2048, height: 1649 }, true],
   ['wide-1440x1000', { width: 1440, height: 1000 }, true],
@@ -82,6 +125,8 @@ for (const [name, viewport, baseline] of [
   await captureBrowse(name, viewport, { baseline });
   await captureDetail(name, viewport);
 }
+
+await captureLayering('wide-1440x1000', { width: 1440, height: 1000 });
 
 await writeFile(`${outDir}/browser-console.txt`, logs.join('\n') || 'No browser warnings/errors captured.');
 await browser.close();
