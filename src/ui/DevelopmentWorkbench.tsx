@@ -28,6 +28,7 @@ const DECISION_SECTIONS = [
 
 interface DevelopmentWorkbenchProps {
   readonly view: DevelopmentWorkbenchView;
+  readonly initialFilter?: DevelopmentFilter;
   readonly initialSelectedId?: string | null;
   readonly onAction: (action: DevelopmentActionView) => void;
 }
@@ -69,8 +70,13 @@ export function shouldDismissInspector(key: string): boolean {
   return key === 'Escape';
 }
 
-export function DevelopmentWorkbench({ view, initialSelectedId = null, onAction }: DevelopmentWorkbenchProps) {
-  const [filter, setFilter] = useState<DevelopmentFilter>('all');
+export function DevelopmentWorkbench({
+  view,
+  initialFilter = 'all',
+  initialSelectedId = null,
+  onAction,
+}: DevelopmentWorkbenchProps) {
+  const [filter, setFilter] = useState<DevelopmentFilter>(initialFilter);
   const [selectedId, setSelectedId] = useState<string | null>(() => (
     initialSelectedId && view.options.some((option) => option.id === initialSelectedId)
       ? initialSelectedId
