@@ -38,4 +38,26 @@ describe('Living System Board style contract', () => {
     expect(board).toContain('.hud-primary { grid-column: 1; grid-template-columns: repeat(3, minmax(0, 1fr));');
     expect(board).not.toContain('scrollbar-width: none');
   });
+
+  it('isolates the playable service stage from setup CSS and avoids viewport-height stretching', () => {
+    const dashboard = read('src/ui/ServiceDashboard.tsx');
+    const board = read('app/living-system-board.css');
+    const globals = read('app/globals.css');
+
+    expect(globals).toContain('.service-stage {');
+    expect(dashboard).toContain('className="service-board-stage"');
+    expect(dashboard).not.toContain('className="service-stage"');
+    expect(board).toContain('.service-board-stage {');
+    expect(board).not.toMatch(/(^|\n)\.service-stage(?:\s|\{)/);
+    expect(board).toContain('align-items: start;');
+    expect(board).not.toContain('min-height: calc(100vh - 129px)');
+    expect(board).not.toContain('.active-work-rail .runway-box { margin: auto');
+  });
+
+  it('caps the topology canvas on wide desktops instead of scaling height with the full stage width', () => {
+    const board = read('app/living-system-board.css');
+    expect(board).toContain('height: clamp(520px, 42vw, 720px);');
+    expect(board).toContain('aspect-ratio: auto;');
+    expect(board).toContain('.service-board-stage .topology-map { margin: 10px 12px 0;');
+  });
 });

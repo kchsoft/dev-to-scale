@@ -48,7 +48,7 @@ export function ServiceDashboard({ view, observability, onNode, onDevelopmentSlo
         </div>
       </aside>
 
-      <section className="service-stage" aria-labelledby="service-stage-title">
+      <section className="service-board-stage" aria-labelledby="service-stage-title">
         <header className="service-stage-heading">
           <div>
             <span>LIVE ARCHITECTURE · OBS {observability.level}</span>
