@@ -34,8 +34,11 @@ describe('focused game screens', () => {
       <ServiceDashboard
         view={view}
         observability={view.service.observability}
+        commandState={null}
+        onCommandStateChange={vi.fn()}
+        onDevelopmentAction={vi.fn()}
+        onOpenFullBuild={vi.fn()}
         onNode={vi.fn()}
-        onDevelopmentSlot={vi.fn()}
       />,
     );
 
@@ -46,8 +49,35 @@ describe('focused game screens', () => {
     expect(html).toContain('class="actionable-alerts"');
     expect(html).toContain('Service Map');
     expect(html).toContain('Local Storage');
+    expect(html).toContain('aria-label="Technology 선택 열기"');
     expect(html).not.toContain('WORK QUEUE');
     expect(html).not.toContain('NOW / ALERT');
+  });
+
+  it('keeps Service Map and NOW visible while the contextual command rail is open', () => {
+    const view = new GameController({
+      frameworkId: 'SPRING_BOOT',
+      databaseId: 'POSTGRESQL',
+      seed: 7,
+    }).getView();
+    const html = renderToStaticMarkup(
+      <ServiceDashboard
+        view={view}
+        observability={view.service.observability}
+        commandState={{ kind: 'technology', optionId: null }}
+        onCommandStateChange={vi.fn()}
+        onDevelopmentAction={vi.fn()}
+        onOpenFullBuild={vi.fn()}
+        onNode={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('class="service-board command-open"');
+    expect(html).toContain('class="service-command-rail browse"');
+    expect(html).toContain('class="service-board-stage"');
+    expect(html).toContain('Service Map');
+    expect(html).toContain('class="actionable-alerts"');
+    expect(html).toContain('AVAILABLE NOW');
   });
 
   it('shows only the first three Application alerts and summarizes the rest without reordering them', () => {
@@ -67,8 +97,11 @@ describe('focused game screens', () => {
       <ServiceDashboard
         view={view}
         observability={view.service.observability}
+        commandState={null}
+        onCommandStateChange={vi.fn()}
+        onDevelopmentAction={vi.fn()}
+        onOpenFullBuild={vi.fn()}
         onNode={vi.fn()}
-        onDevelopmentSlot={vi.fn()}
       />,
     );
 
