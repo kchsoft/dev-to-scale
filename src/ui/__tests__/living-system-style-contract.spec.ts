@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(path, 'utf8');
@@ -59,5 +59,51 @@ describe('Living System Board style contract', () => {
     expect(board).toContain('height: clamp(520px, 42vw, 720px);');
     expect(board).toContain('aspect-ratio: auto;');
     expect(board).toContain('.service-board-stage .topology-map { margin: 10px 12px 0;');
+  });
+
+  it('loads one command-surface stylesheet between shared details and report overrides', () => {
+    const layout = read('app/layout.tsx');
+    expect(existsSync('app/living-system-command.css')).toBe(true);
+    expect(layout).toContain('import "./living-system-command.css";');
+    expect(layout.indexOf('living-system-command.css')).toBeGreaterThan(layout.indexOf('living-system-details.css'));
+    expect(layout.indexOf('living-system-command.css')).toBeLessThan(layout.indexOf('living-system-report.css'));
+  });
+
+  it('keeps the wide command rail in the first Service column without shrinking the topology below its minimum', () => {
+    expect(existsSync('app/living-system-command.css')).toBe(true);
+    if (!existsSync('app/living-system-command.css')) return;
+    const command = read('app/living-system-command.css');
+
+    expect(command).toContain('@media (min-width: 1181px)');
+    expect(command).toContain('.service-board.command-open { grid-template-columns: clamp(340px, 24vw, 360px) minmax(560px, 1fr) minmax(190px, 224px); }');
+  });
+
+  it('uses a bounded left command drawer at medium widths without creating another shared viewport-height owner', () => {
+    expect(existsSync('app/living-system-command.css')).toBe(true);
+    if (!existsSync('app/living-system-command.css')) return;
+    const command = read('app/living-system-command.css');
+
+    expect(command).toContain('@media (min-width: 601px) and (max-width: 1180px)');
+    expect(command).toContain('position: absolute;');
+    expect(command).toContain('width: min(360px, calc(100% - 24px));');
+    expect(command).toContain('overflow-y: auto;');
+    expect(command).not.toMatch(/\.(?:workspace|service-board)\s*\{[^}]*100d?vh/s);
+    expect(command).not.toContain('service-command-backdrop');
+  });
+
+  it('uses a safe-area aware mobile bottom command sheet with its own scroll owner', () => {
+    expect(existsSync('app/living-system-command.css')).toBe(true);
+    if (!existsSync('app/living-system-command.css')) return;
+    const command = read('app/living-system-command.css');
+
+    expect(command).toContain('@media (max-width: 600px)');
+    expect(command).toContain('position: fixed;');
+    expect(command).toContain('bottom: 0;');
+    expect(command).toContain('max-height: 72dvh;');
+    expect(command).toContain('env(safe-area-inset-bottom)');
+    expect(command).toContain('overflow-y: auto;');
+    expect(command).not.toContain('scrollbar-width: none');
+    expect(command).not.toContain('::-webkit-scrollbar { display: none');
+    expect(command).not.toContain('service-command-backdrop');
   });
 });
