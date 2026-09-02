@@ -17,7 +17,7 @@ async function openGame(page) {
   page.on('pageerror', (error) => logs.push(`[pageerror] ${error.stack ?? error.message}`));
   await page.goto(baseURL, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: /BOOT SERVICE/i }).click();
-  await page.getByRole('heading', { name: 'Service Map' }).waitFor();
+  await page.locator('#service-stage-title').waitFor();
 }
 
 async function capture(name, viewport, { baseline = false } = {}) {
