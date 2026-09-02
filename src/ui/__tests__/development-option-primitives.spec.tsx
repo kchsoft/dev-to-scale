@@ -28,7 +28,7 @@ describe('shared development option primitives', () => {
       />,
     );
 
-    expect(html).toContain(option.title);
+    expect(html).toContain(option.id);
     expect(html).toContain(option.summary);
     expect(html).toContain(option.statusLabel);
     expect(html).toContain('TIME');
