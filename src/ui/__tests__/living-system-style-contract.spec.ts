@@ -87,7 +87,7 @@ describe('Living System Board style contract', () => {
     expect(command).toContain('position: absolute;');
     expect(command).toContain('width: min(360px, calc(100% - 24px));');
     expect(command).toContain('overflow-y: auto;');
-    expect(command).not.toMatch(/\.(?:workspace|service-board)\s*\{[^}]*100d?vh/s);
+    expect(command).not.toMatch(/\.(?:workspace|service-board)\s*\{[\s\S]*?100d?vh/);
     expect(command).not.toContain('service-command-backdrop');
   });
 
