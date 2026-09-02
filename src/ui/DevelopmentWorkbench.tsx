@@ -78,7 +78,9 @@ export function DevelopmentWorkbench({
 }: DevelopmentWorkbenchProps) {
   const [filter, setFilter] = useState<DevelopmentFilter>(initialFilter);
   const [selectedId, setSelectedId] = useState<string | null>(() => (
-    initialSelectedId && view.options.some((option) => option.id === initialSelectedId)
+    initialSelectedId && view.options.some((option) => (
+      option.id === initialSelectedId && (initialFilter === 'all' || option.kind === initialFilter)
+    ))
       ? initialSelectedId
       : null
   ));
