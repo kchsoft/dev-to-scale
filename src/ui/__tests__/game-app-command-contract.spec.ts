@@ -32,4 +32,9 @@ describe('GameApp service command orchestration contract', () => {
     expect(actionHandler).not.toContain("setTab('development')");
     expect(actionHandler).not.toContain('setServiceCommand(null)');
   });
+
+  it('resets the viewport when booting from the scrollable mobile setup screen', () => {
+    const startGame = source.match(/const startGame = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? '';
+    expect(startGame).toContain("window.scrollTo({ top: 0, left: 0, behavior: 'auto' });");
+  });
 });
