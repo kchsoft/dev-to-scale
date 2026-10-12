@@ -291,3 +291,35 @@ export function totalScore(state: FounderState): number {
   const economy = Math.max(0, Math.min(200, Math.round(state.cash / 20000)));
   return completedScore + economy;
 }
+
+
+/** Explicit escape hatch: a player who runs out of repair cash cannot soft-lock. */
+export function abandonIncident(state: FounderState): FounderState {
+  if (state.phase !== 'incident' || state.activeFeature === null) {
+    throw new Error('포기할 진행 중 장애가 없습니다.');
+  }
+  const featureId = state.activeFeature;
+  const trust = Math.max(0, state.trust - 20);
+  const dau = Math.max(0, Math.round(state.dau * 0.75));
+  const expenses = Math.min(state.cash, 90000);
+  const report: SprintReport = {
+    sprint: state.sprint,
+    feature: featureId,
+    incident: INCIDENT_CASES[featureId].title,
+    cause: INCIDENT_CASES[featureId].cause,
+    fixed: false,
+    investigationCount: state.examined.length,
+    actionCount: state.usedRemedies.length,
+    downtimeMinutes: state.downtimeMinutes + 30,
+    revenue: 0,
+    expenses,
+    finalTrust: trust,
+    finalDau: dau,
+    score: 0,
+  };
+  return {
+    ...state, phase: 'debrief', cash: state.cash - expenses, trust, dau,
+    reports: [...state.reports, report],
+    feedback: '서비스 중단을 선택했습니다. 사용자 신뢰와 성장 기회를 잃었습니다.',
+  };
+}
