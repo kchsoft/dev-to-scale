@@ -22,7 +22,9 @@ function repairAll(state: FounderState): FounderState {
     if (!resolution) throw new Error('Every cause needs a causal remedy');
     const before = state.cash;
     state = remediate(state, resolution.id);
-    expect(state.cash).toBeLessThan(before);
+    // A final repair also settles the sprint, so successful revenue can exceed its cost.
+    if (state.phase === 'incident') expect(state.cash).toBeLessThan(before);
+    else expect(state.reports[state.reports.length - 1].fixed).toBe(true);
   }
   expect(state.phase).toBe('debrief');
   return state;
