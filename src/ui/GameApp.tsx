@@ -9,6 +9,7 @@ import { DevelopmentWorkbench, type DevelopmentFilter } from './DevelopmentWorkb
 import { dispatchDevelopmentAction } from './development-action-dispatcher';
 import { EventOverlay } from './EventOverlay';
 import { GameSetup } from './GameSetup';
+import { FounderRun } from './FounderRun';
 import { Hud } from './Hud';
 import { NodeInspector } from './NodeInspector';
 import { ReportPanel } from './ReportPanel';
@@ -18,6 +19,7 @@ import { GAME_NAV_ITEMS, type GameTab } from './game-navigation';
 import { money } from './game-format';
 
 export default function GameApp() {
+  const [founderMode, setFounderMode] = useState(false);
   const [frameworkId, setFrameworkId] = useState<FrameworkOptionId>('SPRING_BOOT');
   const [databaseId, setDatabaseId] = useState<DatabaseOptionId>('POSTGRESQL');
   const [controller, setController] = useState<GameController | null>(null);
@@ -101,8 +103,10 @@ export default function GameApp() {
     if (!hasMoreBlockingEvents) clockRef.current?.resumeAfterAutoPause();
   };
 
+  if (founderMode) return <FounderRun onExit={() => setFounderMode(false)} />;
+
   if (!controller || !view) {
-    return <GameSetup frameworkId={frameworkId} databaseId={databaseId} onFrameworkChange={setFrameworkId} onDatabaseChange={setDatabaseId} onStart={startGame} />;
+    return <GameSetup frameworkId={frameworkId} databaseId={databaseId} onFrameworkChange={setFrameworkId} onDatabaseChange={setDatabaseId} onStart={startGame} onStartFounderRun={() => setFounderMode(true)} />;
   }
 
   const activeEvent = events[0] ?? null;
