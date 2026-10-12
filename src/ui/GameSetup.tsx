@@ -7,9 +7,10 @@ interface GameSetupProps {
   readonly onFrameworkChange: (id: FrameworkOptionId) => void;
   readonly onDatabaseChange: (id: DatabaseOptionId) => void;
   readonly onStart: () => void;
+  readonly onStartFounderRun?: () => void;
 }
 
-export function GameSetup({ frameworkId, databaseId, onFrameworkChange, onDatabaseChange, onStart }: GameSetupProps) {
+export function GameSetup({ frameworkId, databaseId, onFrameworkChange, onDatabaseChange, onStart, onStartFounderRun }: GameSetupProps) {
   return (
     <main className="setup-screen">
       <header className="setup-brand"><div className="brand-symbol">D2S</div><div><span>SOFTWARE SERVICE MANAGEMENT SIM</span><h1>DEV TO SCALE</h1><p>코드를 선택하고, 서비스를 띄우고, 장애와 비용을 견디며 Scale 하세요.</p></div></header>
@@ -23,6 +24,7 @@ export function GameSetup({ frameworkId, databaseId, onFrameworkChange, onDataba
         <div className="database-card-grid">{GAME_DATABASE_OPTIONS.map((database) => <button key={database.id} onClick={() => onDatabaseChange(database.id)} className={`database-card ${databaseId === database.id ? 'selected' : ''}`}><span>{database.mark}</span><div><strong>{database.name}</strong><em>{database.trait}</em><small>{database.detail}</small></div></button>)}</div>
       </section>
       <footer className="launch-console"><div><span>INITIAL ARCHITECTURE</span><strong>Client → {GAME_FRAMEWORK_OPTIONS.find((item) => item.id === frameworkId)?.name} → {GAME_DATABASE_OPTIONS.find((item) => item.id === databaseId)?.name}</strong></div><div><span>STARTING CASH</span><strong>₩3.0M</strong></div><button onClick={onStart}>BOOT SERVICE <b>→</b></button></footer>
+      {onStartFounderRun && <section className="founder-launch-wrap" aria-label="신규 게임 모드"><button type="button" className="founder-launch" onClick={onStartFounderRun}><strong>▶ FOUNDER RUN · 새로운 플레이 모드</strong><small>직접 기능을 선택하고, 로그를 조사하고, 장애의 원인을 해결하는 3-스프린트 캠페인</small></button></section>}
     </main>
   );
 }
