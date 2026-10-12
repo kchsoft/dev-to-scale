@@ -138,3 +138,6 @@
   .founder-choice { transition: none; }
   .founder-choice:hover:not(:disabled) { transform: none; }
 }
+
+.founder-launch-wrap { max-width: 1260px; margin: 18px auto 0; }
+.founder-launch-wrap .founder-launch { width: 100%; }
