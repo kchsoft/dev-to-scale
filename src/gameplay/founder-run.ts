@@ -3,6 +3,11 @@
  * Its decisions and causal incident outcomes are intentionally isolated
  * from the legacy long-running GameEngine until the mode is playtested.
  */
+import {
+  INVESTMENTS, ROOT_CAUSES, calculateOperations, detectIncidentCause, diagnostics,
+  type IncidentCauseId, type InvestmentId, type OperationalSnapshot,
+} from './operational-model';
+
 export type FeatureId = 'SEARCH' | 'IMAGES' | 'ADS' | 'NOTIFICATIONS';
 export type ProbeId = 'metrics' | 'logs' | 'trace';
 export type RemedyEffect = 'fix' | 'mitigate' | 'wrong';
@@ -36,7 +41,7 @@ export interface Remedy {
 }
 
 export interface IncidentCase {
-  id: FeatureId;
+  id: FeatureId | IncidentCauseId;
   title: string;
   story: string;
   cause: string;
@@ -76,6 +81,10 @@ export interface FounderState {
   usedRemedies: readonly string[];
   downtimeMinutes: number;
   mitigated: boolean;
+  investments: readonly InvestmentId[];
+  investedThisSprint: boolean;
+  incidentCause: IncidentCauseId | null;
+  operational: OperationalSnapshot;
   incidentsResolved: number;
   feedback: string;
   reports: readonly SprintReport[];
@@ -177,17 +186,86 @@ export const INCIDENT_CASES: Readonly<Record<FeatureId, IncidentCase>> = {
   },
 };
 
+/**
+ * The original authored stories are presentation assets only. Root causes,
+ * readings and actual incident activation now come from one operations model.
+ */
+const REMEDIATION_INVESTMENTS: Readonly<Record<string, InvestmentId>> = {
+  'search-index': 'INDEX',
+  'images-object': 'OBJECT_STORAGE',
+  'ads-connection': 'POOL_TUNING',
+  'notify-workers': 'QUEUE_WORKERS',
+  'db-capacity': 'DB_SCALE',
+  'app-capacity': 'APP_SCALE',
+};
+
+function investmentById(id: InvestmentId) {
+  const option = INVESTMENTS.find((candidate) => candidate.id === id);
+  if (!option) throw new Error('알 수 없는 투자 옵션입니다.');
+  return option;
+}
+
+export function investInOperations(state: FounderState, investmentId: InvestmentId): FounderState {
+  if (state.phase !== 'planning') throw new Error('기능 출시 전에만 투자할 수 있습니다.');
+  if (state.investedThisSprint) throw new Error('스프린트당 사전 투자는 한 번만 가능합니다.');
+  if (state.investments.includes(investmentId)) throw new Error('이미 도입한 개선입니다.');
+  const selected = investmentById(investmentId);
+  if (state.cash < selected.cost) throw new Error('투자 예산이 부족합니다.');
+  const investments = [...state.investments, investmentId];
+  return {
+    ...state, cash: state.cash - selected.cost,
+    investments, investedThisSprint: true,
+    operational: calculateOperations(state.completed, investments, state.dau),
+    feedback: selected.name + ' 도입 완료. 앞으로의 출시와 장애에 영향을 줍니다.',
+  };
+}
+
 export function createFounderRun(): FounderState {
   return {
     phase: 'planning', sprint: 1, day: 1, cash: 3000000, dau: 650, trust: 80,
     completed: [], activeFeature: null, examined: [], usedRemedies: [],
-    downtimeMinutes: 0, mitigated: false, incidentsResolved: 0,
-    feedback: '첫 기능을 선택하세요. 성장과 위험은 함께 찾아옵니다.', reports: [],
+    downtimeMinutes: 0, mitigated: false,
+    investments: [], investedThisSprint: false, incidentCause: null,
+    operational: calculateOperations([], [], 650),
+    incidentsResolved: 0,
+    feedback: '첫 기능을 선택하세요. 운영을 위한 사전 투자도 한 번 할 수 있습니다.', reports: [],
   };
 }
 
 export function currentIncident(state: FounderState): IncidentCase | null {
-  return state.activeFeature === null ? null : INCIDENT_CASES[state.activeFeature];
+  const featureId = state.activeFeature;
+  const cause = state.incidentCause;
+  if (featureId === null || cause === null) return null;
+  const definition = ROOT_CAUSES[cause];
+  const authored = INCIDENT_CASES[featureId];
+  const selectedFixId = Object.entries(REMEDIATION_INVESTMENTS)
+    .find(([, investment]) => investment === definition.fix)?.[0];
+  if (!selectedFixId) throw new Error('원인을 해결할 수단이 없습니다.');
+  const originalRemedy = authored.remedies.find((remedy) => remedy.id === selectedFixId);
+  const fix: Remedy = originalRemedy ?? {
+    id: selectedFixId, label: definition.action,
+    description: '실제 병목을 해결하도록 서비스 처리 용량을 변경합니다.',
+    cost: investmentById(definition.fix).cost, minutes: 9, effect: 'fix',
+  };
+  // Root-cause variants deliberately share some symptoms but not remedies.
+  const remedies = cause === 'DB_CAPACITY' || cause === 'APP_CAPACITY'
+    ? [
+        fix,
+        { id: cause + '-limit', label: '일시적 트래픽 제한', description: '추가 부하를 억제하지만 근본 용량 문제는 남습니다.', cost: 25000, minutes: 3, effect: 'mitigate' as const },
+        { id: cause + '-wrong', label: '무관한 시스템 확장', description: '병목과 관련 없는 노드를 확장합니다.', cost: 140000, minutes: 5, effect: 'wrong' as const },
+      ]
+    : authored.remedies;
+  const probes: readonly Probe[] = [
+    { id: 'metrics', name: '운영 메트릭 확인', finding: definition.diagnosis[0], cost: 10000, minutes: 3 },
+    { id: 'logs', name: '로그 분석', finding: definition.diagnosis[1], cost: 10000, minutes: 3 },
+    { id: 'trace', name: '요청 추적', finding: definition.diagnosis[2], cost: 10000, minutes: 3 },
+  ];
+  return {
+    id: cause, title: definition.title, story: authored.story,
+    cause: definition.root, lesson: definition.lesson,
+    node: definition.node, probes, remedies,
+    metrics: diagnostics(cause, state.operational),
+  };
 }
 
 export function launchFeature(state: FounderState, featureId: FeatureId): FounderState {
@@ -195,13 +273,19 @@ export function launchFeature(state: FounderState, featureId: FeatureId): Founde
   if (state.completed.includes(featureId)) throw new Error('이미 출시한 기능입니다.');
   const feature = FEATURE_CATALOG[featureId];
   if (feature.cost > state.cash) throw new Error('기능 개발 예산이 부족합니다.');
-  return {
-    ...state, phase: 'incident', activeFeature: featureId,
-    cash: state.cash - feature.cost, dau: state.dau + feature.users,
-    completed: [...state.completed, featureId], examined: [], usedRemedies: [],
-    downtimeMinutes: 0, mitigated: false,
-    feedback: feature.name + ' 출시 성공! 곧 운영 경고가 도착했습니다.',
+  const completed = [...state.completed, featureId];
+  const dau = state.dau + feature.users;
+  const operational = calculateOperations(completed, state.investments, dau);
+  const incidentCause = detectIncidentCause(featureId, state.investments, operational);
+  const next: FounderState = {
+    ...state, phase: incidentCause ? 'incident' : 'debrief', activeFeature: featureId,
+    cash: state.cash - feature.cost, dau, completed, incidentCause, operational,
+    examined: [], usedRemedies: [], downtimeMinutes: 0, mitigated: false,
+    feedback: incidentCause
+      ? feature.name + ' 출시 후 운영 경고가 발생했습니다. 병목 원인을 조사하세요.'
+      : feature.name + ' 안정적인 출시 성공! 사전 준비 덕분에 장애 없이 진행했습니다.',
   };
+  return incidentCause ? next : settleIncident(next);
 }
 
 export function investigate(state: FounderState, probeId: ProbeId): FounderState {
@@ -209,11 +293,14 @@ export function investigate(state: FounderState, probeId: ProbeId): FounderState
   if (state.examined.includes(probeId)) return state;
   const selected = currentIncident(state)?.probes.find((item) => item.id === probeId);
   if (!selected) throw new Error('알 수 없는 조사입니다.');
-  if (selected.cost > state.cash) throw new Error('조사 예산이 부족합니다.');
+  const apm = state.investments.includes('APM');
+  const cost = apm ? 3000 : selected.cost;
+  const minutes = apm ? 1 : selected.minutes;
+  if (cost > state.cash) throw new Error('조사 예산이 부족합니다.');
   return {
-    ...state, cash: state.cash - selected.cost,
+    ...state, cash: state.cash - cost,
     examined: [...state.examined, probeId],
-    downtimeMinutes: state.downtimeMinutes + selected.minutes,
+    downtimeMinutes: state.downtimeMinutes + minutes,
     feedback: selected.name + ' 확인 완료. 관측 결과를 토대로 대응해보세요.',
   };
 }
@@ -230,19 +317,25 @@ function settleIncident(state: FounderState): FounderState {
   const revenue = Math.round(dau * 85 + state.completed.reduce((sum, id) => sum + FEATURE_CATALOG[id].revenue, 0));
   const expenses = 90000 + state.completed.length * 28000;
   const cash = state.cash + revenue - expenses;
+  const incident = currentIncident(state);
   const report: SprintReport = {
-    sprint: state.sprint, feature: selectedId, incident: INCIDENT_CASES[selectedId].title,
-    cause: INCIDENT_CASES[selectedId].cause, fixed: true,
+    sprint: state.sprint, feature: selectedId,
+    incident: incident?.title ?? '장애 없는 안정적인 기능 출시',
+    cause: incident?.cause ?? '사전 기술 투자와 충분한 처리 용량으로 장애 예방',
+    fixed: true,
     investigationCount: state.examined.length, actionCount: state.usedRemedies.length,
     downtimeMinutes: state.downtimeMinutes, revenue, expenses,
     finalTrust: trust, finalDau: dau,
-    score: Math.max(0, Math.round(120 + trust * 2 + dau * 0.1 - penaltyMinutes * 1.2)),
+    score: Math.max(0, Math.round(120 + trust * 2 + dau * 0.1 - penaltyMinutes * 1.2 + (incident ? 0 : 80))),
   };
   return {
     ...state, phase: 'debrief', cash, dau, trust,
-    incidentsResolved: state.incidentsResolved + 1,
+    operational: calculateOperations(state.completed, state.investments, dau),
+    incidentsResolved: state.incidentsResolved + (incident ? 1 : 0),
     reports: [...state.reports, report],
-    feedback: selected.name + '의 장애를 해결했습니다. 인과관계와 회고를 확인해보세요.',
+    feedback: incident
+      ? selected.name + '의 장애를 해결했습니다. 인과관계와 회고를 확인해보세요.'
+      : selected.name + '을 장애 없이 출시했습니다. 사전 투자가 효과를 냈습니다.',
   };
 }
 
@@ -252,7 +345,6 @@ export function remediate(state: FounderState, remedyId: string): FounderState {
   const selected = currentIncident(state)?.remedies.find((item) => item.id === remedyId);
   if (!selected) throw new Error('알 수 없는 대응입니다.');
   if (selected.cost > state.cash) throw new Error('대응 예산이 부족합니다.');
-
   const next: FounderState = {
     ...state,
     cash: state.cash - selected.cost,
@@ -260,13 +352,28 @@ export function remediate(state: FounderState, remedyId: string): FounderState {
     downtimeMinutes: state.downtimeMinutes + selected.minutes,
     mitigated: state.mitigated || selected.effect === 'mitigate',
     feedback: selected.effect === 'fix'
-      ? '원인 제거 성공! 실제 서비스 부하가 안정화되었습니다.'
+      ? '조치를 적용했습니다. 새로운 운영 상태를 검증합니다.'
       : selected.effect === 'mitigate'
         ? '긴급 완화에 성공했습니다. 하지만 근본 원인은 남아 있습니다.'
         : '병목을 해결하지 못했습니다. 현금과 복구 시간을 소비했습니다.',
   };
-
-  if (selected.effect === 'fix') return settleIncident(next);
+  if (selected.effect === 'fix') {
+    const installed = REMEDIATION_INVESTMENTS[selected.id];
+    if (!installed) throw new Error('실제 시스템에 반영할 해결 기술이 없습니다.');
+    const investments = next.investments.includes(installed)
+      ? next.investments : [...next.investments, installed];
+    const operational = calculateOperations(next.completed, investments, next.dau);
+    const nextCause = detectIncidentCause(next.activeFeature!, investments, operational);
+    const verified: FounderState = { ...next, investments, operational, incidentCause: nextCause };
+    if (nextCause) {
+      return {
+        ...verified, examined: [],
+        feedback: '일부 병목은 해결했지만 시스템에 다른 병목이 남아 있습니다. 다시 조사해야 합니다.',
+      };
+    }
+    // Keep the solved root cause for the postmortem.
+    return settleIncident({ ...verified, incidentCause: state.incidentCause });
+  }
   if (selected.effect === 'wrong') {
     return { ...next, trust: Math.max(0, next.trust - 5), dau: Math.round(next.dau * 0.97) };
   }
@@ -280,9 +387,10 @@ export function continueFounderRun(state: FounderState): FounderState {
   }
   return {
     ...state, phase: 'planning', sprint: state.sprint + 1,
-    day: state.day + 7, activeFeature: null, examined: [], usedRemedies: [],
+    day: state.day + 7, activeFeature: null, incidentCause: null,
+    investedThisSprint: false, examined: [], usedRemedies: [],
     downtimeMinutes: 0, mitigated: false,
-    feedback: '다음 스프린트입니다. 이전 선택을 고려해 새로운 기능을 선택하세요.',
+    feedback: '다음 스프린트입니다. 사전 투자로 장애를 예방할 수도 있습니다.',
   };
 }
 
@@ -291,7 +399,6 @@ export function totalScore(state: FounderState): number {
   const economy = Math.max(0, Math.min(200, Math.round(state.cash / 20000)));
   return completedScore + economy;
 }
-
 
 /** Explicit escape hatch: a player who runs out of repair cash cannot soft-lock. */
 export function abandonIncident(state: FounderState): FounderState {
@@ -305,8 +412,8 @@ export function abandonIncident(state: FounderState): FounderState {
   const report: SprintReport = {
     sprint: state.sprint,
     feature: featureId,
-    incident: INCIDENT_CASES[featureId].title,
-    cause: INCIDENT_CASES[featureId].cause,
+    incident: currentIncident(state)?.title ?? INCIDENT_CASES[featureId].title,
+    cause: currentIncident(state)?.cause ?? INCIDENT_CASES[featureId].cause,
     fixed: false,
     investigationCount: state.examined.length,
     actionCount: state.usedRemedies.length,
@@ -319,6 +426,7 @@ export function abandonIncident(state: FounderState): FounderState {
   };
   return {
     ...state, phase: 'debrief', cash: state.cash - expenses, trust, dau,
+    operational: calculateOperations(state.completed, state.investments, dau),
     reports: [...state.reports, report],
     feedback: '서비스 중단을 선택했습니다. 사용자 신뢰와 성장 기회를 잃었습니다.',
   };
