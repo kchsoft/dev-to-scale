@@ -4,9 +4,10 @@ import { useState } from 'react';
 import {
   FEATURE_CATALOG, FEATURE_ORDER, MAX_SPRINTS,
   createFounderRun, currentIncident, launchFeature, investigate, remediate,
-  continueFounderRun, abandonIncident, totalScore,
+  continueFounderRun, abandonIncident, investInOperations, totalScore,
   type FeatureId, type FounderState, type ProbeId,
 } from '../gameplay/founder-run';
+import { INVESTMENTS, NODE_ORDER, calculateOperations } from '../gameplay/operational-model';
 
 const won = (value: number) => '₩' + Math.round(value).toLocaleString('ko-KR');
 const number = (value: number) => Math.round(value).toLocaleString('ko-KR');
@@ -61,9 +62,38 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
                 기능을 선택하면 사용자가 증가하지만 새로운 운영 부하도 생깁니다.
                 사용자가 늘어나는 것만으로 성공하는 게임은 아닙니다.
               </p>
+
+              <section className="founder-investment-section" aria-labelledby="founder-investment-title">
+                <div className="founder-subtitle">
+                  <div>
+                    <span className="founder-kicker">PREPARATION / OPTIONAL</span>
+                    <h3 id="founder-investment-title">출시 전 사전 투자</h3>
+                  </div>
+                  <span className="founder-caption">{game.investedThisSprint ? '이번 스프린트 투자 완료' : '스프린트당 최대 1개 · 투자 없이 출시 가능'}</span>
+                </div>
+                <div className="founder-investment-grid">
+                  {INVESTMENTS.map((investment) => {
+                    const installed = game.investments.includes(investment.id);
+                    return (
+                      <button type="button" key={investment.id} className={installed ? 'founder-investment installed' : 'founder-investment'}
+                        disabled={installed || game.investedThisSprint || game.cash < investment.cost}
+                        onClick={() => setGame((state) => investInOperations(state, investment.id))}>
+                        <span><strong>{investment.name}</strong><small>{investment.description}</small></span>
+                        <span className="founder-investment-meta"><b>{installed ? '도입됨 ✓' : won(investment.cost)}</b><small>{investment.relatedTo}</small></span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+              <div className="founder-subtitle">
+                <div><span className="founder-kicker">CHOOSE NEXT FEATURE</span><h3>기능 출시 결정</h3></div>
+                <span className="founder-caption">선택한 기능에 따라 실제 부하가 달라집니다.</span>
+              </div>
               <div className="founder-choice-grid">
                 {FEATURE_ORDER.filter((id) => !game.completed.includes(id)).map((id) => {
                   const feature = FEATURE_CATALOG[id];
+                  const projection = calculateOperations([...game.completed, id], game.investments, game.dau + feature.users);
+                  const maximumLoad = Math.round(Math.max(...NODE_ORDER.map((node) => projection.nodes[node].ratio)) * 100);
                   return (
                     <button type="button" key={feature.id} className="founder-choice" disabled={feature.cost > game.cash} onClick={() => start(feature.id)}>
                       <span className="founder-choice-head"><strong>{feature.name}</strong><b>↗</b></span>
@@ -72,7 +102,7 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
                         <span>개발비 <b>{won(feature.cost)}</b></span>
                         <span>신규 DAU <b>+{number(feature.users)}</b></span>
                       </span>
-                      <span className="founder-risk">⚠ {feature.risk}</span>
+                      <span className="founder-risk">⚠ {feature.risk} · 예상 최고 부하 {maximumLoad}%</span>
                     </button>
                   );
                 })}
@@ -100,7 +130,7 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
               </div>
               <div className="founder-subtitle">
                 <div><span className="founder-kicker">03 / INVESTIGATE</span><h3>진단 도구</h3></div>
-                <span className="founder-caption">조사당 {won(10000)} · 3분 소요</span>
+                <span className="founder-caption">조사당 {game.investments.includes('APM') ? won(3000) + ' · 1분' : won(10000) + ' · 3분'} 소요</span>
               </div>
               <div className="founder-probes">
                 {incident.probes.map((probe) => {
@@ -146,8 +176,8 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
           {game.phase === 'debrief' && currentReport && (
             <section className="founder-panel founder-debrief">
               <p className="founder-kicker">POSTMORTEM / SPRINT {currentReport.sprint}</p>
-              <h2>{currentReport.fixed ? '서비스 복구 완료' : '장애 대응 실패'}</h2>
-              <p className="founder-muted">코드를 맞히는 퀴즈가 아닙니다. 실제 시스템 변화와 선택 비용을 평가합니다.</p>
+              <h2>{!currentReport.fixed ? '장애 대응 실패' : currentReport.incident === '장애 없는 안정적인 기능 출시' ? '장애 없는 안정적인 출시' : '서비스 복구 완료'}</h2>
+              <p className="founder-muted">사전 예방과 복구 과정에서 사용한 비용, 사용자 손실, 안정성을 함께 평가합니다.</p>
               <div className="founder-report-grid">
                 <Status label="OUTAGE" value={currentReport.downtimeMinutes + '분'} />
                 <Status label="INVESTIGATIONS" value={String(currentReport.investigationCount)} />
@@ -155,9 +185,9 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
                 <Status label="SPRINT SCORE" value={number(currentReport.score)} tone="good" />
               </div>
               <div className="founder-postmortem">
-                <span className="founder-kicker">ROOT CAUSE / 근본 원인</span>
+                <span className="founder-kicker">{currentReport.incident === '장애 없는 안정적인 기능 출시' ? 'PREVENTION / 사전 예방 성공' : 'ROOT CAUSE / 근본 원인'}</span>
                 <strong>{currentReport.cause}</strong>
-                <p>{incident?.lesson}</p>
+                <p>{incident?.lesson ?? '시스템 용량과 사전 투자 덕분에 이 기능을 장애 없이 출시했습니다.'}</p>
               </div>
               <div className="founder-settlement">
                 <span>이번 기간 수익 <b>+{won(currentReport.revenue)}</b></span>
@@ -195,17 +225,26 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
             <span className="founder-kicker">LIVE SYSTEM</span>
             <h3>서비스 토폴로지</h3>
             <div className="founder-topology">
-              <div className="founder-node"><small>ENTRY</small><strong>USERS</strong></div>
+              <div className="founder-node"><small>ENTRY</small><strong>USERS · {number(game.dau)} DAU</strong></div>
               <div className="founder-link">↓</div>
-              <div className={incident?.node === 'APP' && game.phase === 'incident' ? 'founder-node alarm' : 'founder-node'}><small>API</small><strong>APPLICATION</strong></div>
-              <div className="founder-link">↓</div>
-              <div className={incident?.node === 'DB' && game.phase === 'incident' ? 'founder-node alarm' : 'founder-node'}><small>DATA</small><strong>DATABASE</strong></div>
-              {incident && incident.node !== 'APP' && incident.node !== 'DB' && game.phase === 'incident' && (
-                <><div className="founder-link">↳</div><div className="founder-node alarm"><small>DEPENDENCY</small><strong>{incident.node}</strong></div></>
-              )}
+              {NODE_ORDER.map((node, index) => {
+                const load = game.operational.nodes[node];
+                const isIncidentNode = game.phase === 'incident' && incident?.node === node;
+                return (
+                  <div className="founder-node-block" key={node}>
+                    {index > 0 && <div className="founder-link">↳</div>}
+                    <div className={isIncidentNode ? 'founder-node alarm' : 'founder-node'}>
+                      <small>{node === 'APP' ? 'API SERVER' : node === 'DB' ? 'DATABASE' : node === 'QUEUE' ? 'MESSAGES' : 'FILES'}</small>
+                      <strong>{node} · {load.utilization}%</strong>
+                      <div className="founder-load-track"><span style={{ width: load.utilization + '%' }} /></div>
+                      <small>수요 {Math.round(load.demand)} / 용량 {load.capacity}</small>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <p className="founder-muted founder-topology-caption">
-              {game.phase === 'incident' ? '문제가 발생한 노드를 강조했습니다. 증상과 실제 근본 원인은 다를 수 있습니다.' : '기능을 출시하면 필요한 기술과 위험이 추가됩니다.'}
+              {game.phase === 'incident' ? '병목 후보를 강조했습니다. 조사하면 실제 근본 원인을 좁힐 수 있습니다.' : '출시 및 투자 이후 실시간 운영 부하 예측을 표시합니다.'}
             </p>
           </section>
           <section className="founder-aside-panel">
@@ -219,6 +258,13 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
                 <span>대응 시도 <strong>{game.usedRemedies.length}회</strong></span>
                 <span>임시 완화 <strong>{game.mitigated ? '적용' : '없음'}</strong></span>
               </div>
+            )}
+          </section>
+          <section className="founder-aside-panel">
+            <span className="founder-kicker">TECH INVESTMENTS</span>
+            <h3>구축한 운영 개선</h3>
+            {game.investments.length === 0 ? <p className="founder-muted">아직 사전 투자하거나 장애를 근본 해결한 기록이 없습니다.</p> : (
+              <ol className="founder-roadmap">{game.investments.map((id) => <li key={id}>{INVESTMENTS.find((item) => item.id === id)?.name ?? id}</li>)}</ol>
             )}
           </section>
           <section className="founder-aside-panel">
