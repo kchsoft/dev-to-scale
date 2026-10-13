@@ -1,3 +1,35 @@
+## Real daily simulation — new 90-DAY FOUNDER mode (v0.4)
+
+The former Founder Run remains available as a compact three-decision prototype, but the setup screen now also exposes **90-DAY FOUNDER**, backed by a new, genuinely day-stepped `src/gameplay/daily-campaign.ts` engine. The new mode is intended to supersede the three-step prototype after user testing.
+
+### Daily player loop
+
+1. D1/D31/D61: resolve the same seeded three-act market deck.
+2. Each month optionally buy **one** preventive investment, then choose a feature and pace (normal or Fast Track), or skip product development to prioritize operations.
+3. Feature development consumes `DEVELOPMENT_DAYS[feature] + ceil(techDebt/18)` game days; Fast Track reduces the duration to ~62% at the cost of **27 tech-debt points** instead of 4.
+4. Exactly **one daily simulation record** is generated per day, including while a feature is in development. Users and expenses evolve gradually; day-end capacity checks can interrupt with an incident. An accelerated run is implemented by repeatedly executing the same one-day transition and stopping at launches, outages and month-end.
+5. Each release adds workload. Tech debt adds APP and DB overhead; above a threshold, it can also cause a separate deploy-regression incident. Metrics, diagnosis and corrective actions derive from the active cause.
+6. Incident investigation and repairs cost money and downtime minutes, but do **not** replay a calendar day or duplicate its revenue. The player can opt for emergency throttling (temporary) or a permanent investment/refactor and must get causal validation.
+7. At D30/D60/D90, a report consolidates daily revenue, operating expenses, outages and healthy days. The next market cycle begins only after player acknowledgement.
+8. At the end of 90 day records, evaluate the campaign: three released features, DAU >= 1700, trust >= 50, healthy days >= 72, and positive cash to win; failing to reach the targets while surviving is reported separately from insolvency.
+
+### Code and integration
+
+- `src/gameplay/daily-campaign.ts`: pure immutable deterministic transitions. No timers, network calls or mutable singleton state.
+- `src/gameplay/operational-model.ts`: shared authoritative node demand/capacity calculation, now optionally including tech-debt load.
+- `src/ui/DailyCampaign.tsx`: client UI for every step, progress bar, day ledger, investigation and postmortems.
+- `app/daily-campaign.css`: responsive dark UI complementing existing founder styles.
+- Save data is stored locally in the browser under a **versioned key**, with basic validation and safe fallback if storage is unavailable.
+
+### Remaining realism / UX limits
+
+- Demand and cost are game-calibration units. Market options and investigation text are authored.
+- Each campaign includes only one major feature decision per month; day-to-day actions are accelerated through the clock rather than needing 90 clicks.
+- No employees, financing rounds, networked ranking or replay uploads yet.
+- A prevented incident or permanent infrastructure improvement is more consequential, but the simulator still does not model real thread pools, transactions, database execution plans or request-level queue events.
+- Save state is not cross-device and an incompatible local format would require a new save key or a migration.
+- Manual browser testing and game-balance playtesting remain to be done.
+
 # Founder Run — playable vertical slice (v0.1)
 
 ## Why this mode exists
