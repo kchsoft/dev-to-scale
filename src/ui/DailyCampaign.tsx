@@ -3,18 +3,20 @@
 import { useEffect, useState } from 'react';
 import { FEATURE_CATALOG, FEATURE_ORDER } from '../gameplay/founder-run';
 import { INVESTMENTS, NODE_ORDER } from '../gameplay/operational-model';
+import { HYPOTHESES } from '../gameplay/incident-deduction';
 import {
   CAMPAIGN_LENGTH, MONTH_LENGTH,
   advanceDailyCampaign, chooseDailyMarket, concedeDailyIncident,
   createDailyCampaign, dailyCampaignOutcome, dailyIncidentInfo, dailyMarketEvent, dailyScore,
   developmentDays, investigateDailyIncident, nextDailyMonth, prepareDailyOperations,
+  quoteDailyRepair, submitIncidentHypothesis,
   repairDailyIncident, runUntilDecision, skipDailyFeature, startDailyDevelopment,
   type DailyCampaignState, type EngineeringPace, type RepairChoice,
 } from '../gameplay/daily-campaign';
 
 const money = (v: number) => '₩' + Math.round(v).toLocaleString('ko-KR');
 const num = (v: number) => Math.round(v).toLocaleString('ko-KR');
-const SAVE_KEY = 'dev-to-scale:daily-campaign:v1';
+const SAVE_KEY = 'dev-to-scale:daily-campaign:v2';
 
 /** A narrow, versioned reader: corrupted or stale saves never crash the play surface. */
 function validSave(value: unknown): value is DailyCampaignState {
@@ -32,6 +34,11 @@ function validSave(value: unknown): value is DailyCampaignState {
     && Array.isArray(data.history) && data.history.length <= CAMPAIGN_LENGTH
     && Array.isArray(data.features) && Array.isArray(data.investments)
     && Array.isArray(data.reports) && Array.isArray(data.marketHistory)
+    && typeof data.verifiedDiagnoses === 'number' && Number.isInteger(data.verifiedDiagnoses)
+    && typeof data.incorrectDiagnoses === 'number' && Number.isInteger(data.incorrectDiagnoses)
+    && (data.incident === null || (typeof data.incident === 'object'
+      && Array.isArray(data.incident.findings) && Array.isArray(data.incident.hypotheses)
+      && 'verifiedHypothesis' in data.incident))
     && data.ops !== null && typeof data.ops === 'object' && !!data.ops.nodes;
 }
 
@@ -249,20 +256,56 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
                   );
                 })}
               </div>
-              <div className="founder-subtitle"><h3>조치 적용</h3><span className="founder-caption">가능한 모든 조치가 현재 장애를 해결하는 것은 아닙니다.</span></div>
+              <div className="founder-subtitle">
+                <div><span className="founder-kicker">WAR ROOM / ROOT-CAUSE DEDUCTION</span><h3>원인 가설 세우기</h3></div>
+                <span className="founder-caption">서로 다른 증거 2개 필요 · 잘못 검증하면 ₩20,000 / 7분 손실</span>
+              </div>
+              <div className="daily-hypothesis-intro">
+                <p>같은 증상에서도 원인은 다를 수 있습니다. 로그와 트레이스를 대조해 가장 설명력이 높은 가설을 선택하세요.</p>
+                <div className="daily-hypothesis-progress">
+                  <span>수집한 증거 <b>{game.incident.findings.length}/3</b></span>
+                  <span>검증 기회 <b>{2 - game.incident.hypotheses.filter((attempt) => !attempt.matched).length}/2</b></span>
+                  <span>검증된 가설 <b>{game.incident.verifiedHypothesis ? '있음 ✓' : '없음'}</b></span>
+                </div>
+              </div>
+              <div className="daily-hypothesis-grid" role="group" aria-label="장애 원인 가설">
+                {HYPOTHESES.map((hypothesis) => {
+                  const checked = game.incident!.hypotheses.find((attempt) => attempt.id === hypothesis.id);
+                  const wrong = game.incident!.hypotheses.filter((attempt) => !attempt.matched).length;
+                  return (
+                    <div className={checked?.matched ? 'daily-hypothesis verified' : checked ? 'daily-hypothesis rejected' : 'daily-hypothesis'} key={hypothesis.id}>
+                      <span className="founder-kicker">{hypothesis.category}</span>
+                      <strong>{hypothesis.name}</strong>
+                      <small>{hypothesis.check}</small>
+                      <button type="button"
+                        disabled={game.incident!.findings.length < 2 || !!game.incident!.verifiedHypothesis || wrong >= 2 || !!checked || game.cash < 20000}
+                        onClick={() => act((state) => submitIncidentHypothesis(state, hypothesis.id))}>
+                        {checked ? checked.matched ? '가설 검증 성공 ✓' : '증거와 불일치' : game.incident!.findings.length < 2 ? '증거 2개 필요' : '가설 검증 →'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              {game.incident.verifiedHypothesis && (
+                <p className="daily-verified-notice" role="status">증거를 통해 원인을 검증했어. 이제 영구 복구 조치 비용 18% 절감, 복구 시간 3분 단축 혜택을 받을 수 있어.</p>
+              )}
+                            <div className="founder-subtitle"><h3>조치 적용</h3><span className="founder-caption">가능한 모든 조치가 현재 장애를 해결하는 것은 아닙니다.</span></div>
               <div className="daily-repair-grid">
                 {INVESTMENTS.filter((item) => item.id !== 'APM' &&
-                  (!game.investments.includes(item.id) || item.id === 'DB_SCALE' || item.id === 'APP_SCALE')).map((item) => (
-                  <button type="button" className="founder-remedy" key={item.id} disabled={game.cash < item.cost}
-                    onClick={() => act((s) => repairDailyIncident(s, item.id))}>
-                    <span><strong>{item.name}</strong><small>{item.description}</small></span>
-                    <span className="founder-remedy-cost"><b>{money(item.cost)}</b><small>8분</small></span>
-                  </button>
-                ))}
-                <button type="button" className="founder-remedy" disabled={game.cash < 80000}
+                  (!game.investments.includes(item.id) || item.id === 'DB_SCALE' || item.id === 'APP_SCALE')).map((item) => {
+                  const quote = quoteDailyRepair(game, item.id);
+                  return (
+                    <button type="button" className="founder-remedy" key={item.id} disabled={game.cash < quote.cost}
+                      onClick={() => act((state) => repairDailyIncident(state, item.id))}>
+                      <span><strong>{item.name}</strong><small>{item.description}</small></span>
+                      <span className="founder-remedy-cost"><b>{money(quote.cost)}</b><small>{quote.minutes}분</small></span>
+                    </button>
+                  );
+                })}
+                <button type="button" className="founder-remedy" disabled={game.cash < quoteDailyRepair(game, 'REFACTOR').cost || game.incident.attempted.includes('REFACTOR')}
                   onClick={() => act((s) => repairDailyIncident(s, 'REFACTOR'))}>
                   <span><strong>회귀 결함 검증 및 리팩터링</strong><small>기술 부채 −45 · 개발 회귀 문제를 줄입니다.</small></span>
-                  <span className="founder-remedy-cost"><b>{money(80000)}</b><small>11분</small></span>
+                  <span className="founder-remedy-cost"><b>{money(quoteDailyRepair(game, 'REFACTOR').cost)}</b><small>{quoteDailyRepair(game, 'REFACTOR').minutes}분</small></span>
                 </button>
                 <button type="button" className="founder-remedy" disabled={game.cash < 25000 || game.incident.attempted.includes('THROTTLE')}
                   onClick={() => act((s) => repairDailyIncident(s, 'THROTTLE'))}>
@@ -289,6 +332,7 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
                 <span className="founder-kicker">MONTHLY OUTCOME</span>
                 <strong>{currentMonth.feature ? FEATURE_CATALOG[currentMonth.feature].name + ' 출시' : '신규 기능 없이 운영'}</strong>
                 <p>다운타임 {currentMonth.outageMinutes}분 · 월말 DAU {num(currentMonth.endDau)} · 기술 부채 {currentMonth.endDebt}/100</p>
+                <p>장애 원인 검증 성공 {currentMonth.verifiedDiagnoses}회 · 잘못된 가설 {currentMonth.incorrectDiagnoses}회</p>
               </div>
               <button type="button" className="founder-primary daily-report-next" onClick={() => act(nextDailyMonth)}>
                 {game.month === 3 ? '90일 최종 결과 →' : '다음 달 시장 이벤트 →'}
@@ -307,6 +351,8 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
                 <span>최종 신뢰 <strong>{game.trust} / 50</strong></span>
                 <span>최종 현금 <strong>{money(game.cash)}</strong></span>
                 <span>기술 부채 <strong>{game.debt} / 100</strong></span>
+                <span>근본 원인 검증 <strong>{game.verifiedDiagnoses}회</strong></span>
+                <span>잘못된 가설 <strong>{game.incorrectDiagnoses}회</strong></span>
               </div>
               <div className="founder-history">
                 {game.reports.map((report) => (
@@ -352,6 +398,7 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
               <span>이번 달 매출 <strong>{money(game.monthRevenue)}</strong></span>
               <span>이번 달 비용 <strong>{money(game.monthCost)}</strong></span>
               <span>시장 부하 종료일 <strong>{game.peakUntilDay || '종료'}</strong></span>
+              <span>증거 기반 진단 <strong>{game.verifiedDiagnoses}회 성공</strong></span>
             </div>
           </section>
           <section className="founder-aside-panel">
