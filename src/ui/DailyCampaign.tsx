@@ -16,7 +16,7 @@ import {
 
 const money = (v: number) => '₩' + Math.round(v).toLocaleString('ko-KR');
 const num = (v: number) => Math.round(v).toLocaleString('ko-KR');
-const SAVE_KEY = 'dev-to-scale:daily-campaign:v2';
+const SAVE_KEY = 'dev-to-scale:daily-campaign:v3';
 
 /** A narrow, versioned reader: corrupted or stale saves never crash the play surface. */
 function validSave(value: unknown): value is DailyCampaignState {
@@ -34,6 +34,7 @@ function validSave(value: unknown): value is DailyCampaignState {
     && Array.isArray(data.history) && data.history.length <= CAMPAIGN_LENGTH
     && Array.isArray(data.features) && Array.isArray(data.investments)
     && Array.isArray(data.reports) && Array.isArray(data.marketHistory)
+    && Array.isArray(data.reviews)
     && typeof data.verifiedDiagnoses === 'number' && Number.isInteger(data.verifiedDiagnoses)
     && typeof data.incorrectDiagnoses === 'number' && Number.isInteger(data.incorrectDiagnoses)
     && (data.incident === null || (typeof data.incident === 'object'
@@ -334,6 +335,20 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
                 <p>다운타임 {currentMonth.outageMinutes}분 · 월말 DAU {num(currentMonth.endDau)} · 기술 부채 {currentMonth.endDebt}/100</p>
                 <p>장애 원인 검증 성공 {currentMonth.verifiedDiagnoses}회 · 잘못된 가설 {currentMonth.incorrectDiagnoses}회</p>
               </div>
+              <section className="daily-postmortem">
+                <span className="founder-kicker">INCIDENT POSTMORTEMS / 이번 달 장애 회고</span>
+                {game.reviews.filter((review) => review.month === game.month).length === 0 ? (
+                  <p className="founder-muted">이번 달은 복구하거나 중단한 장애가 없습니다.</p>
+                ) : game.reviews.filter((review) => review.month === game.month).map((review, index) => (
+                  <article key={review.day + ':' + review.cause + ':' + index} className="daily-review-entry">
+                    <div>
+                      <strong>D{review.day} · {HYPOTHESES.find((item) => item.id === review.cause)?.name ?? review.cause}</strong>
+                      <span className={review.solved ? 'daily-ok' : 'daily-warn'}>{review.solved ? '원인 해결' : '대응 포기'}</span>
+                    </div>
+                    <p>대응: {review.remedy} · 조사 {review.evidence.length}종 · 가설 검증 {review.verified ? '성공' : '없음'} · 오진 {review.hypotheses.filter((attempt) => !attempt.matched).length}회 · 장애 {review.outageMinutes}분</p>
+                  </article>
+                ))}
+              </section>
               <button type="button" className="founder-primary daily-report-next" onClick={() => act(nextDailyMonth)}>
                 {game.month === 3 ? '90일 최종 결과 →' : '다음 달 시장 이벤트 →'}
               </button>
@@ -353,6 +368,9 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
                 <span>기술 부채 <strong>{game.debt} / 100</strong></span>
                 <span>근본 원인 검증 <strong>{game.verifiedDiagnoses}회</strong></span>
                 <span>잘못된 가설 <strong>{game.incorrectDiagnoses}회</strong></span>
+              </div>
+              <div className="daily-deduction-summary">
+                증거 기반 원인 검증 {game.verifiedDiagnoses}회 · 잘못된 가설 {game.incorrectDiagnoses}회 · 장애 회고 {game.reviews.length}건
               </div>
               <div className="founder-history">
                 {game.reports.map((report) => (
