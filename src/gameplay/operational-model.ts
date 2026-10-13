@@ -63,8 +63,10 @@ export function calculateOperations(
   features: readonly FeatureId[],
   investments: readonly InvestmentId[],
   dau: number,
+  trafficMultiplier = 1,
 ): OperationalSnapshot {
-  const factor = 1 + Math.max(0, dau - 650) / 5000;
+  if (!Number.isFinite(trafficMultiplier) || trafficMultiplier <= 0) throw new Error('유효하지 않은 트래픽 배율입니다.');
+  const factor = (1 + Math.max(0, dau - 650) / 5000) * trafficMultiplier;
   const capacity: Record<NodeId, number> = {
     ...CAPACITY,
     APP: CAPACITY.APP + (has(investments, 'APP_SCALE') ? 85 : 0),
