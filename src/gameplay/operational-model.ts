@@ -71,8 +71,8 @@ export function calculateOperations(
   const factor = (1 + Math.max(0, dau - 650) / 5000) * trafficMultiplier;
   const capacity: Record<NodeId, number> = {
     ...CAPACITY,
-    APP: CAPACITY.APP + (has(investments, 'APP_SCALE') ? 85 : 0),
-    DB: CAPACITY.DB + (has(investments, 'DB_SCALE') ? 100 : 0),
+    APP: CAPACITY.APP + investments.filter((id) => id === 'APP_SCALE').length * 85,
+    DB: CAPACITY.DB + investments.filter((id) => id === 'DB_SCALE').length * 100,
     STORAGE: CAPACITY.STORAGE + (has(investments, 'OBJECT_STORAGE') ? 130 : 0),
     QUEUE: CAPACITY.QUEUE + (has(investments, 'QUEUE_WORKERS') ? 130 : 0),
   };
