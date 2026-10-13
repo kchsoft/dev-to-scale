@@ -222,7 +222,7 @@ describe('daily 90-day campaign', () => {
     expect(verified.verifiedDiagnoses).toBe(1);
     expect(verified.monthVerifiedDiagnoses).toBe(1);
     expect(verified.cash).toBe(s.cash);
-    expect(submitIncidentHypothesis(verified, 'SEARCH_SCAN')).toThrow('이미');
+    expect(() => submitIncidentHypothesis(verified, 'SEARCH_SCAN')).toThrow('이미');
     const standardQuote = quoteDailyRepair(s, 'INDEX');
     const verifiedQuote = quoteDailyRepair(verified, 'INDEX');
     expect(verifiedQuote.cost).toBeLessThan(standardQuote.cost);
