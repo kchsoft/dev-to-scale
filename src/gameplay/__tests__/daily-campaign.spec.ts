@@ -120,6 +120,10 @@ describe('daily 90-day campaign', () => {
     expect(fixed.features).toContain('SEARCH');
     expect(fixed.investments).toContain('INDEX');
     expect(fixed.phase).toBe('operating');
+    expect(fixed.reviews).toHaveLength(1);
+    expect(fixed.reviews[0].cause).toBe('SEARCH_SCAN');
+    expect(fixed.reviews[0].remedy).toBe('INDEX');
+    expect(fixed.reviews[0].solved).toBe(true);
   });
 
   it('safely handles recovery from an incident opened on the last day of a month', () => {
@@ -143,6 +147,9 @@ describe('daily 90-day campaign', () => {
     s = concedeDailyIncident(s);
     expect(s.day).toBe(finishedDay + 1);
     expect(s.history).toHaveLength(count);
+    expect(s.reviews).toHaveLength(1);
+    expect(s.reviews[0].solved).toBe(false);
+    expect(s.reviews[0].remedy).toBe('CONCEDE');
     const next = advanceDailyCampaign(s);
     expect(next.history.length).toBe(count + 1);
     expect(next.history.at(-1)?.day).toBe(finishedDay + 1);
@@ -281,6 +288,9 @@ describe('daily 90-day campaign', () => {
     }
     expect(end.phase).toBe('report');
     expect(end.reports[0].verifiedDiagnoses).toBe(1);
+    expect(end.reviews[0].verified).toBe(true);
+    expect(end.reviews[0].hypotheses[0].matched).toBe(true);
+    expect(end.reviews[0].evidence).toEqual(['logs', 'trace']);
     expect(end.reports[0].incorrectDiagnoses).toBe(0);
     const baseline = { ...end, verifiedDiagnoses: 0 };
     expect(dailyScore(end)).toBeGreaterThan(dailyScore(baseline));
