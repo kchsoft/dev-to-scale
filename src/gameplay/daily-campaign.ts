@@ -4,6 +4,7 @@ import {
   type IncidentCauseId, type InvestmentId, type NodeId, type OperationalSnapshot,
 } from './operational-model';
 import { marketEventForSprint, type MarketDecisionRecord } from './market-events';
+import { incidentEvidence, hypothesisById, type EvidenceProbe, type HypothesisAttempt, type HypothesisId } from './incident-deduction';
 
 /**
  * Second campaign: actual 90 one-day transitions with interrupting decisions.
@@ -28,7 +29,9 @@ export interface DevelopmentJob {
 export interface DailyIncident {
   cause: DailyCause;
   node: NodeId;
-  findings: readonly ('metrics' | 'logs' | 'trace')[];
+  findings: readonly EvidenceProbe[];
+  hypotheses: readonly HypothesisAttempt[];
+  verifiedHypothesis: HypothesisId | null;
   attempted: readonly RepairChoice[];
   minutes: number;
   mitigated: boolean;
@@ -53,6 +56,8 @@ export interface MonthReport {
   incidents: number;
   outageMinutes: number;
   healthyDays: number;
+  verifiedDiagnoses: number;
+  incorrectDiagnoses: number;
   endCash: number;
   endDau: number;
   endTrust: number;
@@ -87,6 +92,10 @@ export interface DailyCampaignState {
   monthOutageMinutes: number;
   monthHealthyDays: number;
   healthyDays: number;
+  verifiedDiagnoses: number;
+  incorrectDiagnoses: number;
+  monthVerifiedDiagnoses: number;
+  monthIncorrectDiagnoses: number;
   reports: readonly MonthReport[];
   history: readonly DayRecord[];
   journal: readonly string[];
@@ -129,7 +138,10 @@ export function createDailyCampaign(seed = 17): DailyCampaignState {
     peakMultiplier: 1, peakUntilDay: 0, marketBonus: 0, marketHistory: [],
     ops: calculateOperations([], [], 650), incident: null, suppressedCause: null,
     monthRevenue: 0, monthCost: 0, monthIncidents: 0, monthOutageMinutes: 0,
-    monthHealthyDays: 0, healthyDays: 0, reports: [], history: [], journal: [],
+    monthHealthyDays: 0, healthyDays: 0,
+    verifiedDiagnoses: 0, incorrectDiagnoses: 0,
+    monthVerifiedDiagnoses: 0, monthIncorrectDiagnoses: 0,
+    reports: [], history: [], journal: [],
     feedback: '1개월 차입니다. 시장 사건에 대응해 사업 방향을 결정하세요.',
   };
 }
@@ -230,9 +242,9 @@ export function dailyIncidentInfo(s: DailyCampaignState): {
   return {
     title: definition.title, node, cause: definition.root, lesson: definition.lesson,
     metrics, probes: [
-      { id: 'metrics', title: '메트릭 확인', finding: definition.diagnosis[0] },
-      { id: 'logs', title: '에러 로그 확인', finding: definition.diagnosis[1] },
-      { id: 'trace', title: '요청 추적', finding: definition.diagnosis[2] },
+      { id: 'metrics', title: '서비스 메트릭', finding: incidentEvidence(cause, 'metrics', s.ops, s.debt) },
+      { id: 'logs', title: '애플리케이션 / DB 로그', finding: incidentEvidence(cause, 'logs', s.ops, s.debt) },
+      { id: 'trace', title: '분산 트레이스', finding: incidentEvidence(cause, 'trace', s.ops, s.debt) },
     ],
   };
 }
@@ -267,7 +279,8 @@ function beginIncident(s: DailyCampaignState, cause: DailyCause): DailyCampaignS
   return {
     ...s, phase: 'incident', monthIncidents: s.monthIncidents + 1,
     incident: {
-      cause, node, findings: [], attempted: [], minutes: 0, mitigated: false,
+      cause, node, findings: [], hypotheses: [], verifiedHypothesis: null,
+      attempted: [], minutes: 0, mitigated: false,
       resumePhase: s.phase === 'development' ? 'development' : 'operating',
     },
     feedback: '프로덕션 경고! 메트릭과 로그를 조사한 뒤 대응하세요.',
@@ -302,6 +315,8 @@ function finalizeDailyMonth(s: DailyCampaignState): DailyCampaignState {
     revenue: s.monthRevenue, cost: s.monthCost,
     incidents: s.monthIncidents, outageMinutes: s.monthOutageMinutes,
     healthyDays: s.monthHealthyDays,
+    verifiedDiagnoses: s.monthVerifiedDiagnoses,
+    incorrectDiagnoses: s.monthIncorrectDiagnoses,
     endCash: s.cash, endDau: s.dau, endTrust: s.trust, endDebt: s.debt,
   };
   return {
@@ -388,6 +403,46 @@ export function investigateDailyIncident(s: DailyCampaignState, probe: 'metrics'
   return { ...next, ops: simple(next) };
 }
 
+/**
+ * Diagnose a root cause from collected evidence. Players may still repair
+ * without a hypothesis, but only a verified diagnosis earns a repair discount.
+ * Wrong claims cost cash, outage time, users and trust, not arbitrary trivia XP.
+ */
+export function submitIncidentHypothesis(s: DailyCampaignState, hypothesis: HypothesisId): DailyCampaignState {
+  if (s.phase !== 'incident' || !s.incident) throw new Error('진단할 진행 중 장애가 없습니다.');
+  hypothesisById(hypothesis); // validate even if called outside the UI
+  if (s.incident.verifiedHypothesis) throw new Error('이미 원인을 검증했습니다.');
+  if (s.incident.findings.length < 2) throw new Error('서로 다른 종류의 증거를 최소 2개 조사해야 합니다.');
+  if (s.incident.hypotheses.some((attempt) => attempt.id === hypothesis)) return s;
+  const wrong = s.incident.hypotheses.filter((attempt) => !attempt.matched).length;
+  if (wrong >= 2) throw new Error('가설 검증 기회를 모두 사용했습니다. 직접 복구 조치를 선택하세요.');
+
+  const matched = hypothesis === s.incident.cause;
+  const minutes = matched ? 0 : 7;
+  const cost = matched ? 0 : 20000;
+  if (s.cash < cost) throw new Error('가설 검증 비용이 부족합니다.');
+  const next: DailyCampaignState = {
+    ...s, ...(matched ? {} : outageImpact(s, minutes)),
+    cash: s.cash - cost,
+    monthCost: s.monthCost + cost,
+    monthOutageMinutes: s.monthOutageMinutes + minutes,
+    verifiedDiagnoses: s.verifiedDiagnoses + (matched ? 1 : 0),
+    incorrectDiagnoses: s.incorrectDiagnoses + (matched ? 0 : 1),
+    monthVerifiedDiagnoses: s.monthVerifiedDiagnoses + (matched ? 1 : 0),
+    monthIncorrectDiagnoses: s.monthIncorrectDiagnoses + (matched ? 0 : 1),
+    incident: {
+      ...s.incident,
+      verifiedHypothesis: matched ? hypothesis : null,
+      hypotheses: [...s.incident.hypotheses, { id: hypothesis, matched, evidenceCount: s.incident.findings.length }],
+      minutes: s.incident.minutes + minutes,
+    },
+    feedback: matched
+      ? '근본 원인 가설 검증 성공! 이제 수리비가 18% 감소하고 복구 시간이 3분 단축됩니다.'
+      : '가설과 수집된 증거가 일치하지 않았습니다. 복구 시간이 늘어났으니 다른 근거를 검토하세요.',
+  };
+  return { ...next, ops: simple(next) };
+}
+
 export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice): DailyCampaignState {
   if (s.phase !== 'incident' || !s.incident) throw new Error('대응 중인 장애가 없습니다.');
   // Scaling can be purchased repeatedly until capacity genuinely exceeds demand.
@@ -396,9 +451,14 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
       && action !== 'DB_SCALE' && action !== 'APP_SCALE' && s.investments.includes(action)) {
     throw new Error('이미 도입한 조치입니다.');
   }
-  const cost = action === 'THROTTLE' ? THROTTLE_COST : action === 'REFACTOR' ? REFACTOR_COST : price(action);
+  const baseCost = action === 'THROTTLE' ? THROTTLE_COST : action === 'REFACTOR' ? REFACTOR_COST : price(action);
+  // Correct, evidence-backed diagnosis makes the permanent repair plan cheaper
+  // and reduces time spent applying it. Raw guessing gives no discount.
+  const prepared = action !== 'THROTTLE' && s.incident.verifiedHypothesis === s.incident.cause;
+  const cost = prepared ? Math.round(baseCost * 0.82) : baseCost;
   if (s.cash < cost) throw new Error('복구 비용이 부족합니다.');
-  const minutes = action === 'THROTTLE' ? 4 : action === 'REFACTOR' ? 11 : 8;
+  const baseMinutes = action === 'THROTTLE' ? 4 : action === 'REFACTOR' ? 11 : 8;
+  const minutes = prepared ? Math.max(2, baseMinutes - 3) : baseMinutes;
   const mitigated = action === 'THROTTLE' || s.incident.mitigated;
   let investments = s.investments;
   let debt = s.debt;
@@ -436,7 +496,8 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
     return {
       ...reassessed,
       incident: {
-        cause: newCause, node, findings: [], attempted: [], minutes: 0,
+        cause: newCause, node, findings: [], hypotheses: [], verifiedHypothesis: null,
+        attempted: [], minutes: 0,
         mitigated: false, resumePhase: s.incident.resumePhase,
       },
       monthIncidents: s.monthIncidents + 1,
@@ -469,7 +530,8 @@ export function nextDailyMonth(s: DailyCampaignState): DailyCampaignState {
     preparedThisMonth: false, decidedFeature: false, currentMonthFeature: null,
     peakMultiplier: 1, peakUntilDay: 0, marketBonus: 0, suppressedCause: null,
     monthRevenue: 0, monthCost: 0, monthIncidents: 0, monthOutageMinutes: 0,
-    monthHealthyDays: 0, feedback: month + '개월 차 시장 이벤트를 확인하세요.',
+    monthHealthyDays: 0, monthVerifiedDiagnoses: 0, monthIncorrectDiagnoses: 0,
+    feedback: month + '개월 차 시장 이벤트를 확인하세요.',
   };
 }
 
@@ -488,5 +550,7 @@ export function dailyScore(s: DailyCampaignState): number {
   const progress = s.features.length * 60;
   const debtPenalty = s.debt * 1.2;
   const downtimePenalty = Math.min(180, s.reports.reduce((sum, report) => sum + report.outageMinutes, 0) * 0.3);
-  return Math.max(0, Math.round(growth + reliability + finance + progress - debtPenalty - downtimePenalty));
+  const diagnosisBonus = Math.min(90, s.verifiedDiagnoses * 30);
+  const mistakesPenalty = Math.min(90, s.incorrectDiagnoses * 15);
+  return Math.max(0, Math.round(growth + reliability + finance + progress - debtPenalty - downtimePenalty + diagnosisBonus - mistakesPenalty));
 }
