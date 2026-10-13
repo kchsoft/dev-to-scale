@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { calculateOperations } from '../operational-model';
 import {
   advanceDailyCampaign, CAMPAIGN_LENGTH, chooseDailyMarket,
   concedeDailyIncident, createDailyCampaign, dailyCampaignOutcome, dailyMarketEvent,
@@ -178,6 +179,31 @@ describe('daily 90-day campaign', () => {
     expect(rushed.history.some((d) => d.debt >= 55)).toBe(true);
     expect(rushed.journal.some((entry) => entry.includes('DEBT_REGRESSION'))).toBe(true);
     expect(rushed.debt).toBeLessThan(81);
+  });
+
+  it('charges outage minutes as user churn and trust loss, not only cash', () => {
+    let s = startDailyDevelopment(chooseAffordable(createDailyCampaign()), 'SEARCH', 'NORMAL');
+    s = runUntilDecision(s, 30);
+    expect(s.phase).toBe('incident');
+    const inspected = investigateDailyIncident(s, 'logs');
+    expect(inspected.dau).toBeLessThan(s.dau);
+    expect(inspected.trust).toBeLessThan(s.trust);
+    expect(inspected.ops.nodes.DB.demand).toBeLessThan(s.ops.nodes.DB.demand);
+    const resolved = recover(inspected);
+    expect(resolved.dau).toBeLessThan(inspected.dau);
+    expect(resolved.trust).toBeLessThan(inspected.trust);
+    expect(resolved.monthOutageMinutes).toBeGreaterThan(0);
+  });
+
+  it('supports buying successive APP and DB tiers when one scale-up is insufficient', () => {
+    const base = chooseAffordable(createDailyCampaign());
+    const first = prepareDailyOperations(base, 'DB_SCALE');
+    expect(first.ops.nodes.DB.capacity).toBeGreaterThan(base.ops.nodes.DB.capacity);
+    // A new month may buy another tier. A one-time investment cannot be repeated.
+    const oneTier = calculateOperations(['SEARCH', 'ADS'], ['INDEX', 'POOL_TUNING', 'DB_SCALE'], 4000);
+    const twoTiers = calculateOperations(['SEARCH', 'ADS'], ['INDEX', 'POOL_TUNING', 'DB_SCALE', 'DB_SCALE'], 4000);
+    expect(twoTiers.nodes.DB.capacity).toBe(oneTier.nodes.DB.capacity + 100);
+    expect(twoTiers.nodes.DB.ratio).toBeLessThan(oneTier.nodes.DB.ratio);
   });
 
   it('has robust invalid-action guards and resolves loans only through player actions', () => {
