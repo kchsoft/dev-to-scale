@@ -106,6 +106,14 @@ export const DEVELOPMENT_DAYS: Readonly<Record<FeatureId, number>> = {
 const REFACTOR_COST = 80000;
 const THROTTLE_COST = 25000;
 
+/** Outages are no longer cosmetic: every minute erodes active users and trust. */
+function outageImpact(s: DailyCampaignState, minutes: number): Pick<DailyCampaignState, 'dau' | 'trust'> {
+  return {
+    dau: Math.max(0, Math.round(s.dau * (1 - Math.min(0.3, minutes * 0.0015)))),
+    trust: clip(s.trust - Math.ceil(minutes / 10), 0, 100),
+  };
+}
+
 /** Predict a development duration before committing to a pace. */
 export function developmentDays(feature: FeatureId, debt: number, pace: EngineeringPace): number {
   const baseline = DEVELOPMENT_DAYS[feature] + Math.ceil(debt / 18);
@@ -371,7 +379,8 @@ export function investigateDailyIncident(s: DailyCampaignState, probe: 'metrics'
   if (s.cash < cost) throw new Error('조사할 현금이 부족합니다.');
   const minutes = apm ? 1 : 3;
   return {
-    ...s, cash: s.cash - cost, monthCost: s.monthCost + cost,
+    ...s, ...outageImpact(s, minutes),
+    cash: s.cash - cost, monthCost: s.monthCost + cost,
     monthOutageMinutes: s.monthOutageMinutes + minutes,
     incident: { ...s.incident, findings: [...s.incident.findings, probe], minutes: s.incident.minutes + minutes },
     feedback: '조사 결과가 공개됐습니다. 현재 증거를 바탕으로 다음 대응을 선택하세요.',
@@ -399,7 +408,8 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
     investments = [...investments, action];
   }
   const next: DailyCampaignState = {
-    ...s, investments, debt, peakMultiplier, cash: s.cash - cost,
+    ...s, ...outageImpact(s, minutes),
+    investments, debt, peakMultiplier, cash: s.cash - cost,
     monthCost: s.monthCost + cost,
     monthOutageMinutes: s.monthOutageMinutes + minutes,
     incident: {
@@ -476,5 +486,6 @@ export function dailyScore(s: DailyCampaignState): number {
   const finance = clip(Math.round((s.cash / 3000000) * 160), 0, 200);
   const progress = s.features.length * 60;
   const debtPenalty = s.debt * 1.2;
-  return Math.max(0, Math.round(growth + reliability + finance + progress - debtPenalty));
+  const downtimePenalty = Math.min(180, s.reports.reduce((sum, report) => sum + report.outageMinutes, 0) * 0.3);
+  return Math.max(0, Math.round(growth + reliability + finance + progress - debtPenalty - downtimePenalty));
 }
