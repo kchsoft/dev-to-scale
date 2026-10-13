@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { calculateOperations } from '../operational-model';
+import { HYPOTHESES, incidentEvidence } from '../incident-deduction';
 import {
   advanceDailyCampaign, CAMPAIGN_LENGTH, chooseDailyMarket,
   concedeDailyIncident, createDailyCampaign, dailyCampaignOutcome, dailyMarketEvent,
   dailyScore, developmentDays, investigateDailyIncident, nextDailyMonth,
-  prepareDailyOperations, repairDailyIncident, runUntilDecision, skipDailyFeature,
+  prepareDailyOperations, repairDailyIncident, quoteDailyRepair,
+  submitIncidentHypothesis, runUntilDecision, skipDailyFeature,
   startDailyDevelopment, type DailyCampaignState, type DailyCause, type RepairChoice,
 } from '../daily-campaign';
 
@@ -204,6 +206,85 @@ describe('daily 90-day campaign', () => {
     const twoTiers = calculateOperations(['SEARCH', 'ADS'], ['INDEX', 'POOL_TUNING', 'DB_SCALE', 'DB_SCALE'], 4000);
     expect(twoTiers.nodes.DB.capacity).toBe(oneTier.nodes.DB.capacity + 100);
     expect(twoTiers.nodes.DB.ratio).toBeLessThan(oneTier.nodes.DB.ratio);
+  });
+
+  it('requires two independent probes before verifying a root-cause hypothesis', () => {
+    let s = startDailyDevelopment(chooseAffordable(createDailyCampaign()), 'SEARCH', 'NORMAL');
+    s = runUntilDecision(s, 30);
+    expect(s.phase).toBe('incident');
+    expect(s.incident?.cause).toBe('SEARCH_SCAN');
+    expect(() => submitIncidentHypothesis(s, 'SEARCH_SCAN')).toThrow('증거');
+    s = investigateDailyIncident(s, 'metrics');
+    expect(() => submitIncidentHypothesis(s, 'SEARCH_SCAN')).toThrow('증거');
+    s = investigateDailyIncident(s, 'logs');
+    const verified = submitIncidentHypothesis(s, 'SEARCH_SCAN');
+    expect(verified.incident?.verifiedHypothesis).toBe('SEARCH_SCAN');
+    expect(verified.verifiedDiagnoses).toBe(1);
+    expect(verified.monthVerifiedDiagnoses).toBe(1);
+    expect(verified.cash).toBe(s.cash);
+    expect(submitIncidentHypothesis(verified, 'SEARCH_SCAN')).toThrow('이미');
+    const standardQuote = quoteDailyRepair(s, 'INDEX');
+    const verifiedQuote = quoteDailyRepair(verified, 'INDEX');
+    expect(verifiedQuote.cost).toBeLessThan(standardQuote.cost);
+    expect(verifiedQuote.minutes).toBe(standardQuote.minutes - 3);
+    const fixed = repairDailyIncident(verified, 'INDEX');
+    expect(fixed.cash).toBe(verified.cash - verifiedQuote.cost);
+    expect(fixed.monthCost).toBe(verified.monthCost + verifiedQuote.cost);
+    expect(fixed.phase).toBe('operating');
+  });
+
+  it('wrong hypotheses consume cash, time and trust without giving repair discounts', () => {
+    let s = startDailyDevelopment(chooseAffordable(createDailyCampaign()), 'SEARCH', 'NORMAL');
+    s = runUntilDecision(s, 30);
+    s = investigateDailyIncident(investigateDailyIncident(s, 'metrics'), 'trace');
+    const noDiscount = quoteDailyRepair(s, 'INDEX');
+    const wrong = submitIncidentHypothesis(s, 'DB_CAPACITY');
+    expect(wrong.incident?.verifiedHypothesis).toBeNull();
+    expect(wrong.incident?.hypotheses).toEqual([{ id: 'DB_CAPACITY', matched: false, evidenceCount: 2 }]);
+    expect(wrong.incorrectDiagnoses).toBe(1);
+    expect(wrong.monthIncorrectDiagnoses).toBe(1);
+    expect(wrong.cash).toBe(s.cash - 20000);
+    expect(wrong.monthOutageMinutes).toBe(s.monthOutageMinutes + 7);
+    expect(wrong.trust).toBeLessThan(s.trust);
+    expect(quoteDailyRepair(wrong, 'INDEX')).toEqual(noDiscount);
+    expect(submitIncidentHypothesis(wrong, 'DB_CAPACITY')).toBe(wrong);
+    const anotherWrong = submitIncidentHypothesis(wrong, 'APP_CAPACITY');
+    expect(() => submitIncidentHypothesis(anotherWrong, 'SEARCH_SCAN')).toThrow('기회');
+    expect(repairDailyIncident(anotherWrong, 'INDEX').phase).toBe('operating');
+  });
+
+  it('the exact same DB utilization is compatible with multiple causes until logs/traces', () => {
+    const snapshot = calculateOperations(['SEARCH', 'ADS'], ['INDEX', 'POOL_TUNING'], 2100, 1.3, 15);
+    const query = incidentEvidence('SEARCH_SCAN', 'metrics', snapshot, 15);
+    const capacity = incidentEvidence('DB_CAPACITY', 'metrics', snapshot, 15);
+    expect(query).toBe(capacity);
+    expect(incidentEvidence('SEARCH_SCAN', 'trace', snapshot, 15))
+      .not.toBe(incidentEvidence('DB_CAPACITY', 'trace', snapshot, 15));
+    expect(incidentEvidence('POOL_EXHAUSTION', 'logs', snapshot, 15))
+      .not.toBe(incidentEvidence('SEARCH_SCAN', 'logs', snapshot, 15));
+    expect(HYPOTHESES).toHaveLength(7);
+    expect(new Set(HYPOTHESES.map((option) => option.id)).size).toBe(7);
+  });
+
+  it('monthly reporting and final scoring include evidence-based deductions', () => {
+    let s = startDailyDevelopment(chooseAffordable(createDailyCampaign()), 'SEARCH', 'NORMAL');
+    s = runUntilDecision(s, 30);
+    s = investigateDailyIncident(investigateDailyIncident(s, 'logs'), 'trace');
+    const correct = submitIncidentHypothesis(s, 'SEARCH_SCAN');
+    const fixed = repairDailyIncident(correct, 'INDEX');
+    let end = fixed;
+    for (let i = 0; i < 30 && end.phase !== 'report'; i++) {
+      end = runUntilDecision(end, 30);
+      if (end.phase === 'incident') end = recover(end);
+    }
+    expect(end.phase).toBe('report');
+    expect(end.reports[0].verifiedDiagnoses).toBe(1);
+    expect(end.reports[0].incorrectDiagnoses).toBe(0);
+    const baseline = { ...end, verifiedDiagnoses: 0 };
+    expect(dailyScore(end)).toBeGreaterThan(dailyScore(baseline));
+    const next = nextDailyMonth(end);
+    expect(next.verifiedDiagnoses).toBe(1);
+    expect(next.monthVerifiedDiagnoses).toBe(0);
   });
 
   it('has robust invalid-action guards and resolves loans only through player actions', () => {
