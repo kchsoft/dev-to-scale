@@ -178,6 +178,7 @@ export function startDailyDevelopment(s: DailyCampaignState, feature: FeatureId,
     currentMonthFeature: feature,
     job: { feature, pace, total: days, remaining: days },
     cash: s.cash - cost, debt,
+    ops: calculateOperations(s.features, s.investments, s.dau, marketPeak(s), debt),
     feedback: FEATURE_CATALOG[feature].name + ' 개발 시작. 예상 ' + days + '일 · 기술 부채 +' + (pace === 'FAST_TRACK' ? 27 : 4),
   };
 }
@@ -237,6 +238,19 @@ function detected(s: DailyCampaignState): DailyCause | null {
     : structural ?? (s.debt >= 55 ? 'DEBT_REGRESSION' : null);
   if (cause === s.suppressedCause) return null;
   return cause;
+}
+
+/**
+ * An incident interrupts the *end* of the recorded calendar day.
+ * Finishing it must never replay that same day and double-charge revenue.
+ */
+function resumeAfterIncident(s: DailyCampaignState): DailyCampaignState {
+  const resumed = { ...s, phase: 'operating' as const, incident: null };
+  if (resumed.cash <= 0 || resumed.trust <= 0) {
+    return { ...resumed, phase: 'complete', feedback: '자금 또는 신뢰가 고갈되었습니다.' };
+  }
+  if (resumed.day % MONTH_LENGTH === 0) return finalizeDailyMonth(resumed);
+  return { ...resumed, day: resumed.day + 1 };
 }
 
 function beginIncident(s: DailyCampaignState, cause: DailyCause): DailyCampaignState {
@@ -386,11 +400,11 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
   if (action === 'THROTTLE') return { ...reassessed, feedback: '트래픽이 감소했지만 근본 원인은 남아 있습니다.' };
   const newCause = detected(reassessed);
   if (!newCause) {
-    return {
-      ...reassessed, phase: 'operating', incident: null,
+    return resumeAfterIncident({
+      ...reassessed,
       feedback: '근본 원인이 제거됐습니다. 남은 기간의 서비스 운영을 재개합니다.',
       journal: [...s.journal, 'D' + s.day + ' ' + s.incident.cause + ' 해결 (' + action + ')'],
-    };
+    });
   }
   if (newCause !== s.incident.cause) {
     const node = newCause === 'DEBT_REGRESSION' ? 'APP' : ROOT_CAUSES[newCause].node;
@@ -409,14 +423,13 @@ export function concedeDailyIncident(s: DailyCampaignState): DailyCampaignState 
   const suppressedCause = s.incident.cause;
   const dau = Math.round(s.dau * 0.78);
   const trust = clip(s.trust - 17, 0, 100);
-  return {
-    ...s, phase: trust <= 0 ? 'complete' : 'operating', incident: null,
-    suppressedCause, dau, trust,
+  return resumeAfterIncident({
+    ...s, suppressedCause, dau, trust,
     monthOutageMinutes: s.monthOutageMinutes + 180,
     ops: calculateOperations(s.features, s.investments, dau, marketPeak(s), s.debt),
     feedback: '일부 서비스를 중단했습니다. 이번 달에는 같은 장애를 다시 발생시키지 않지만 사용자 손실이 큽니다.',
     journal: [...s.journal, 'D' + s.day + ' ' + suppressedCause + ' 대응 포기'],
-  };
+  });
 }
 
 export function nextDailyMonth(s: DailyCampaignState): DailyCampaignState {
