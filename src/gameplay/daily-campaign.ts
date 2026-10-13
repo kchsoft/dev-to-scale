@@ -378,13 +378,14 @@ export function investigateDailyIncident(s: DailyCampaignState, probe: 'metrics'
   const cost = apm ? 3000 : 10000;
   if (s.cash < cost) throw new Error('조사할 현금이 부족합니다.');
   const minutes = apm ? 1 : 3;
-  return {
+  const next: DailyCampaignState = {
     ...s, ...outageImpact(s, minutes),
     cash: s.cash - cost, monthCost: s.monthCost + cost,
     monthOutageMinutes: s.monthOutageMinutes + minutes,
     incident: { ...s.incident, findings: [...s.incident.findings, probe], minutes: s.incident.minutes + minutes },
     feedback: '조사 결과가 공개됐습니다. 현재 증거를 바탕으로 다음 대응을 선택하세요.',
   };
+  return { ...next, ops: simple(next) };
 }
 
 export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice): DailyCampaignState {
