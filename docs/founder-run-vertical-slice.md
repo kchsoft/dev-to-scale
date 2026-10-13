@@ -9,7 +9,7 @@ The former Founder Run remains available as a compact three-decision prototype, 
 3. Feature development consumes `DEVELOPMENT_DAYS[feature] + ceil(techDebt/18)` game days; Fast Track reduces the duration to ~62% at the cost of **27 tech-debt points** instead of 4.
 4. Exactly **one daily simulation record** is generated per day, including while a feature is in development. Users and expenses evolve gradually; day-end capacity checks can interrupt with an incident. An accelerated run is implemented by repeatedly executing the same one-day transition and stopping at launches, outages and month-end.
 5. Each release adds workload. Tech debt adds APP and DB overhead; above a threshold, it can also cause a separate deploy-regression incident. Metrics, diagnosis and corrective actions derive from the active cause.
-6. Incident investigation and repairs cost money and downtime minutes, but do **not** replay a calendar day or duplicate its revenue. The player can opt for emergency throttling (temporary) or a permanent investment/refactor and must get causal validation.
+6. Incident investigations and repairs consume cash and downtime minutes; downtime also causes DAU churn, trust loss and a final-score penalty. They do **not** replay a calendar day or duplicate revenue. The player can opt for emergency throttling (temporary) or a permanent investment/refactor and must get causal validation.
 7. At D30/D60/D90, a report consolidates daily revenue, operating expenses, outages and healthy days. The next market cycle begins only after player acknowledgement.
 8. At the end of 90 day records, evaluate the campaign: three released features, DAU >= 1700, trust >= 50, healthy days >= 72, and positive cash to win; failing to reach the targets while surviving is reported separately from insolvency.
 
@@ -25,6 +25,7 @@ The former Founder Run remains available as a compact three-decision prototype, 
 
 - Demand and cost are game-calibration units. Market options and investigation text are authored.
 - Each campaign includes only one major feature decision per month; day-to-day actions are accelerated through the clock rather than needing 90 clicks.
+- APP / DB capacity expansion is repeatable in tiers; the first tier may not be enough during extreme overload.
 - No employees, financing rounds, networked ranking or replay uploads yet.
 - A prevented incident or permanent infrastructure improvement is more consequential, but the simulator still does not model real thread pools, transactions, database execution plans or request-level queue events.
 - Save state is not cross-device and an incompatible local format would require a new save key or a migration.
