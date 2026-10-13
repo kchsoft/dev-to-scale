@@ -7,11 +7,14 @@ import {
   INVESTMENTS, ROOT_CAUSES, calculateOperations, detectIncidentCause, diagnostics,
   type IncidentCauseId, type InvestmentId, type OperationalSnapshot,
 } from './operational-model';
+import {
+  marketEventForSprint, type MarketDecisionRecord, type MarketEvent, type MarketEventId,
+} from './market-events';
 
 export type FeatureId = 'SEARCH' | 'IMAGES' | 'ADS' | 'NOTIFICATIONS';
 export type ProbeId = 'metrics' | 'logs' | 'trace';
 export type RemedyEffect = 'fix' | 'mitigate' | 'wrong';
-export type FounderPhase = 'planning' | 'incident' | 'debrief' | 'complete';
+export type FounderPhase = 'market' | 'planning' | 'incident' | 'debrief' | 'complete';
 
 export interface FeatureChoice {
   id: FeatureId;
@@ -70,6 +73,7 @@ export interface SprintReport {
 
 export interface FounderState {
   phase: FounderPhase;
+  seed: number;
   sprint: number;
   day: number;
   cash: number;
@@ -83,6 +87,9 @@ export interface FounderState {
   mitigated: boolean;
   investments: readonly InvestmentId[];
   investedThisSprint: boolean;
+  peakTrafficMultiplier: number;
+  marketRevenueBonus: number;
+  marketHistory: readonly MarketDecisionRecord[];
   incidentCause: IncidentCauseId | null;
   operational: OperationalSnapshot;
   incidentsResolved: number;
@@ -91,6 +98,7 @@ export interface FounderState {
 }
 
 export const MAX_SPRINTS = 3;
+export const CAMPAIGN_DAYS = MAX_SPRINTS * 30;
 export const FEATURE_ORDER: readonly FeatureId[] = ['SEARCH', 'IMAGES', 'ADS', 'NOTIFICATIONS'];
 export const FEATURE_CATALOG: Readonly<Record<FeatureId, FeatureChoice>> = {
   SEARCH: { id: 'SEARCH', name: '게시글 검색', pitch: '재방문율을 높이는 검색을 출시합니다.', cost: 180000, users: 460, revenue: 45000, risk: 'DB 읽기 부하 증가' },
@@ -215,21 +223,61 @@ export function investInOperations(state: FounderState, investmentId: Investment
   return {
     ...state, cash: state.cash - selected.cost,
     investments, investedThisSprint: true,
-    operational: calculateOperations(state.completed, investments, state.dau),
+    operational: calculateOperations(state.completed, investments, state.dau, state.peakTrafficMultiplier),
     feedback: selected.name + ' 도입 완료. 앞으로의 출시와 장애에 영향을 줍니다.',
   };
 }
 
-export function createFounderRun(): FounderState {
+export function createFounderRun(seed = 17): FounderState {
+  if (!Number.isSafeInteger(seed)) throw new Error('시드 값은 정수여야 합니다.');
   return {
-    phase: 'planning', sprint: 1, day: 1, cash: 3000000, dau: 650, trust: 80,
+    phase: 'market', seed, sprint: 1, day: 1, cash: 3000000, dau: 650, trust: 80,
     completed: [], activeFeature: null, examined: [], usedRemedies: [],
     downtimeMinutes: 0, mitigated: false,
     investments: [], investedThisSprint: false, incidentCause: null,
+    peakTrafficMultiplier: 1, marketRevenueBonus: 0, marketHistory: [],
     operational: calculateOperations([], [], 650),
     incidentsResolved: 0,
-    feedback: '첫 기능을 선택하세요. 운영을 위한 사전 투자도 한 번 할 수 있습니다.', reports: [],
+    feedback: '시장 상황을 살펴보고 이번 달의 사업 전략을 결정하세요.', reports: [],
   };
+}
+
+export function currentMarketEvent(state: FounderState): MarketEvent | null {
+  return state.phase === 'market' ? marketEventForSprint(state.seed, state.sprint) : null;
+}
+
+/** Resolve a market decision once. Market event selection ignores action RNG order. */
+export function chooseMarketStrategy(state: FounderState, choiceId: string): FounderState {
+  if (state.phase !== 'market') throw new Error('현재 결정할 시장 이벤트가 없습니다.');
+  const event = marketEventForSprint(state.seed, state.sprint);
+  const selected = event.options.find((option) => option.id === choiceId);
+  if (!selected) throw new Error('알 수 없는 시장 대응입니다.');
+  if (state.cash + selected.cashDelta < 0) throw new Error('해당 전략을 실행할 자금이 부족합니다.');
+  const dau = Math.max(0, state.dau + selected.dauDelta);
+  const cash = state.cash + selected.cashDelta;
+  const trust = Math.max(0, Math.min(100, state.trust + selected.trustDelta));
+  const marketHistory: readonly MarketDecisionRecord[] = [...state.marketHistory, {
+    sprint: state.sprint, eventId: event.id, choiceId: selected.id,
+    label: selected.label, dauDelta: selected.dauDelta, cashDelta: selected.cashDelta,
+    trustDelta: selected.trustDelta, trafficMultiplier: selected.trafficMultiplier,
+    revenueBonus: selected.revenueBonus,
+  }];
+  return {
+    ...state, phase: 'planning', cash, dau, trust,
+    marketHistory, peakTrafficMultiplier: selected.trafficMultiplier,
+    marketRevenueBonus: selected.revenueBonus,
+    operational: calculateOperations(state.completed, state.investments, dau, selected.trafficMultiplier),
+    feedback: event.title + ' — ' + selected.label + '. 기술 투자와 기능 출시로 이 전략을 뒷받침하세요.',
+  };
+}
+
+export function campaignOutcome(state: FounderState): 'won' | 'survived' | 'failed' {
+  if (state.cash <= 0 || state.trust <= 0) return 'failed';
+  if (state.phase !== 'complete') return 'survived';
+  return state.reports.length === MAX_SPRINTS
+    && state.reports.every((report) => report.fixed)
+    && state.dau >= 1700 && state.trust >= 50
+    ? 'won' : 'survived';
 }
 
 export function currentIncident(state: FounderState): IncidentCase | null {
@@ -275,7 +323,7 @@ export function launchFeature(state: FounderState, featureId: FeatureId): Founde
   if (feature.cost > state.cash) throw new Error('기능 개발 예산이 부족합니다.');
   const completed = [...state.completed, featureId];
   const dau = state.dau + feature.users;
-  const operational = calculateOperations(completed, state.investments, dau);
+  const operational = calculateOperations(completed, state.investments, dau, state.peakTrafficMultiplier);
   const incidentCause = detectIncidentCause(featureId, state.investments, operational);
   const next: FounderState = {
     ...state, phase: incidentCause ? 'incident' : 'debrief', activeFeature: featureId,
@@ -314,7 +362,7 @@ function settleIncident(state: FounderState): FounderState {
   const trust = Math.max(0, Math.min(100, state.trust - trustLoss));
   const usersLost = Math.min(0.25, penaltyMinutes * 0.003);
   const dau = Math.max(0, Math.round(state.dau * (1 - usersLost)));
-  const revenue = Math.round(dau * 85 + state.completed.reduce((sum, id) => sum + FEATURE_CATALOG[id].revenue, 0));
+  const revenue = Math.max(0, Math.round(dau * 85 + state.completed.reduce((sum, id) => sum + FEATURE_CATALOG[id].revenue, 0) + state.marketRevenueBonus));
   const expenses = 90000 + state.completed.length * 28000;
   const cash = state.cash + revenue - expenses;
   const incident = currentIncident(state);
@@ -362,7 +410,7 @@ export function remediate(state: FounderState, remedyId: string): FounderState {
     if (!installed) throw new Error('실제 시스템에 반영할 해결 기술이 없습니다.');
     const investments = next.investments.includes(installed)
       ? next.investments : [...next.investments, installed];
-    const operational = calculateOperations(next.completed, investments, next.dau);
+    const operational = calculateOperations(next.completed, investments, next.dau, next.peakTrafficMultiplier);
     const nextCause = detectIncidentCause(next.activeFeature!, investments, operational);
     const verified: FounderState = { ...next, investments, operational, incidentCause: nextCause };
     if (nextCause) {
@@ -383,14 +431,20 @@ export function remediate(state: FounderState, remedyId: string): FounderState {
 export function continueFounderRun(state: FounderState): FounderState {
   if (state.phase !== 'debrief') throw new Error('먼저 현재 장애를 해결하세요.');
   if (state.sprint >= MAX_SPRINTS || state.cash <= 0 || state.trust <= 0) {
-    return { ...state, phase: 'complete', feedback: '런이 종료되었습니다. 경영과 복구 결과를 확인하세요.' };
+    return {
+      ...state, phase: 'complete', day: Math.min(CAMPAIGN_DAYS, state.sprint * 30),
+      peakTrafficMultiplier: 1, marketRevenueBonus: 0,
+      feedback: '캠페인이 종료되었습니다. 성장·안정성·재무 성과를 종합 평가합니다.',
+    };
   }
+  const nextSprint = state.sprint + 1;
   return {
-    ...state, phase: 'planning', sprint: state.sprint + 1,
-    day: state.day + 7, activeFeature: null, incidentCause: null,
+    ...state, phase: 'market', sprint: nextSprint,
+    day: (nextSprint - 1) * 30 + 1, activeFeature: null, incidentCause: null,
+    peakTrafficMultiplier: 1, marketRevenueBonus: 0,
     investedThisSprint: false, examined: [], usedRemedies: [],
     downtimeMinutes: 0, mitigated: false,
-    feedback: '다음 스프린트입니다. 사전 투자로 장애를 예방할 수도 있습니다.',
+    feedback: '새로운 달이 시작됐습니다. 시장 이벤트에 대응할 전략을 결정하세요.',
   };
 }
 
