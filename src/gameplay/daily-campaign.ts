@@ -32,6 +32,7 @@ export interface DailyIncident {
   attempted: readonly RepairChoice[];
   minutes: number;
   mitigated: boolean;
+  resumePhase: 'development' | 'operating';
 }
 
 export interface DayRecord {
@@ -245,7 +246,7 @@ function detected(s: DailyCampaignState): DailyCause | null {
  * Finishing it must never replay that same day and double-charge revenue.
  */
 function resumeAfterIncident(s: DailyCampaignState): DailyCampaignState {
-  const resumed = { ...s, phase: 'operating' as const, incident: null };
+  const resumed = { ...s, phase: s.incident?.resumePhase ?? 'operating', incident: null };
   if (resumed.cash <= 0 || resumed.trust <= 0) {
     return { ...resumed, phase: 'complete', feedback: '자금 또는 신뢰가 고갈되었습니다.' };
   }
@@ -257,7 +258,10 @@ function beginIncident(s: DailyCampaignState, cause: DailyCause): DailyCampaignS
   const node = cause === 'DEBT_REGRESSION' ? 'APP' : ROOT_CAUSES[cause].node;
   return {
     ...s, phase: 'incident', monthIncidents: s.monthIncidents + 1,
-    incident: { cause, node, findings: [], attempted: [], minutes: 0, mitigated: false },
+    incident: {
+      cause, node, findings: [], attempted: [], minutes: 0, mitigated: false,
+      resumePhase: s.phase === 'development' ? 'development' : 'operating',
+    },
     feedback: '프로덕션 경고! 메트릭과 로그를 조사한 뒤 대응하세요.',
   };
 }
@@ -351,7 +355,10 @@ export function runUntilDecision(s: DailyCampaignState, maxDays = 30): DailyCamp
   let next = s;
   for (let n = 0; n < maxDays; n++) {
     if (next.phase !== 'development' && next.phase !== 'operating') break;
+    const wasDeveloping = next.phase === 'development';
     next = advanceDailyCampaign(next);
+    // A feature completion is an important player-visible milestone.
+    if (wasDeveloping && next.phase !== 'development') break;
   }
   return next;
 }
@@ -374,6 +381,9 @@ export function investigateDailyIncident(s: DailyCampaignState, probe: 'metrics'
 export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice): DailyCampaignState {
   if (s.phase !== 'incident' || !s.incident) throw new Error('대응 중인 장애가 없습니다.');
   if (s.incident.attempted.includes(action)) return s;
+  if (action !== 'REFACTOR' && action !== 'THROTTLE' && s.investments.includes(action)) {
+    throw new Error('이미 도입한 조치입니다.');
+  }
   const cost = action === 'THROTTLE' ? THROTTLE_COST : action === 'REFACTOR' ? REFACTOR_COST : price(action);
   if (s.cash < cost) throw new Error('복구 비용이 부족합니다.');
   const minutes = action === 'THROTTLE' ? 4 : action === 'REFACTOR' ? 11 : 8;
@@ -410,7 +420,10 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
     const node = newCause === 'DEBT_REGRESSION' ? 'APP' : ROOT_CAUSES[newCause].node;
     return {
       ...reassessed,
-      incident: { cause: newCause, node, findings: [], attempted: [], minutes: 0, mitigated: false },
+      incident: {
+        cause: newCause, node, findings: [], attempted: [], minutes: 0,
+        mitigated: false, resumePhase: s.incident.resumePhase,
+      },
       monthIncidents: s.monthIncidents + 1,
       feedback: '첫 번째 병목은 해결됐지만 새로운 근본 원인이 드러났습니다.',
     };
