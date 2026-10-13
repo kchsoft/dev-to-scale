@@ -11,6 +11,8 @@ import "./living-system-board.css";
 import "./living-system-details.css";
 import "./living-system-command.css";
 import "./living-system-report.css";
+import "./founder-run.css";
+import "./daily-campaign.css";
 
 export const metadata: Metadata = {
   title: "Dev to Scale",

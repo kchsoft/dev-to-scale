@@ -1,0 +1,73 @@
+/* Daily campaign reuses Founder Run tokens while making daily progress legible. */
+.daily-campaign .founder-market-options { margin-top: 18px; }
+.daily-error { max-width: 1440px; margin: 0 auto 16px; padding: 14px 18px; color: #ffd4db; background: #45202b; border: 1px solid #9c5460; border-radius: 10px; font-weight: 600; }
+.daily-development-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.daily-feature-card { min-width: 0; padding: 19px; border: 1px solid #304760; border-radius: 12px; background: #152639; }
+.daily-feature-card > strong { font-size: 19px; }
+.daily-feature-card p { min-height: 37px; font-size: 12px; color: var(--fr-muted); line-height: 1.7; }
+.daily-feature-facts { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: #bbd5ed; margin: 13px 0; }
+.daily-feature-buttons { display: flex; gap: 8px; }
+.daily-feature-buttons button { flex: 1; min-width: 0; padding: 12px 10px; color: #d5eaff; border: 1px solid #477092; background: #1c3a55; border-radius: 8px; font-size: 12px; font-weight: 700; }
+.daily-feature-buttons button:hover:not(:disabled) { border-color: #9ed2ff; background: #265172; }
+.daily-feature-buttons button:last-child { color: #ffdaaf; border-color: #745740; background: #3a2e24; }
+.daily-feature-buttons button:last-child:hover:not(:disabled) { border-color: #ffbf77; }
+.daily-feature-buttons small { display: block; font-size: 11px; font-weight: 500; margin-top: 7px; color: #aac0d6; }
+.daily-skip { margin-top: 18px; width: 100%; }
+.daily-active-job { margin: 20px 0; padding: 24px; background: #193246; border: 1px solid #3e6483; border-radius: 12px; }
+.daily-active-job .founder-choice-head strong { font-size: 20px; }
+.daily-active-job .founder-choice-head span { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--fr-blue); font-weight: 700; }
+.daily-active-job p { color: #9db9cf; font-size: 12px; margin: 12px 0 0; }
+.daily-progress { margin: 16px 0 0; height: 8px; border-radius: 6px; overflow: hidden; background: #395067; }
+.daily-progress span { display: block; background: linear-gradient(90deg, #5ab4f5, #8ce2d2); height: 100%; border-radius: 6px; }
+.daily-actions { display: grid; grid-template-columns: minmax(120px, 1fr) 1fr 1fr; gap: 10px; margin: 22px 0; }
+.daily-actions .founder-ghost, .daily-actions .founder-primary { min-height: 53px; font-size: 13px; }
+.daily-small-title { margin: 28px 0 12px; padding-top: 14px; border-top: 1px solid #344556; }
+.daily-ledger { display: grid; gap: 7px; }
+.daily-ledger-entry { display: flex; align-items: center; gap: 12px; padding: 13px; border: 1px solid #304356; border-radius: 9px; background: #172739; }
+.daily-ledger-entry > .founder-kicker { width: 44px; flex-shrink: 0; }
+.daily-ledger-entry > div { min-width: 0; flex: 1; display: grid; gap: 6px; }
+.daily-ledger-entry strong { font-size: 13px; }
+.daily-ledger-entry small { font-size: 11px; color: #9db7cc; line-height: 1.5; }
+.daily-ok, .daily-warn { flex-shrink: 0; font-size: 10px; font-weight: 800; letter-spacing: .08em; color: var(--fr-green); }
+.daily-warn { color: var(--fr-red); }
+.daily-repair-grid { display: grid; gap: 9px; }
+.daily-report-next { margin-top: 24px; }
+.daily-reset { width: 100%; font-size: 12px; }
+.daily-campaign .founder-sidebar .founder-aside-panel:last-child { border-color: #36516b; }
+.daily-campaign .founder-stat { gap: 6px; }
+@media (max-width: 700px) {
+  .daily-development-options { grid-template-columns: 1fr; }
+  .daily-actions { grid-template-columns: 1fr; }
+  .daily-feature-buttons { flex-direction: column; }
+  .daily-ledger-entry { align-items: flex-start; flex-wrap: wrap; }
+  .daily-ledger-entry .daily-ok, .daily-ledger-entry .daily-warn { margin-left: auto; }
+}
+
+/* Incident investigation should read like a war room, not a multiple-choice quiz. */
+.daily-hypothesis-intro { margin: 15px 0; background: #182a38; border: 1px solid #39546a; border-radius: 11px; padding: 15px 18px; }
+.daily-hypothesis-intro p { font-size: 13px; line-height: 1.75; margin: 0 0 12px; color: #c3d9eb; }
+.daily-hypothesis-progress { display: flex; gap: 9px; flex-wrap: wrap; }
+.daily-hypothesis-progress span { display: inline-flex; align-items: center; gap: 9px; font-size: 11px; padding: 7px 9px; background: #0d2030; border-radius: 6px; color: #b0c9df; }
+.daily-hypothesis-progress b { font-size: 12px; color: #f0f7ff; font-variant-numeric: tabular-nums; }
+.daily-hypothesis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.daily-hypothesis { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; border: 1px solid #354d60; border-radius: 10px; background: #182838; padding: 15px; }
+.daily-hypothesis > strong { font-size: 14px; line-height: 1.45; }
+.daily-hypothesis > small { color: #a1b9cc; font-size: 12px; line-height: 1.65; min-height: 39px; }
+.daily-hypothesis .founder-kicker { font-size: 10px; }
+.daily-hypothesis button { margin-top: auto; border: 1px solid #527b98; border-radius: 7px; color: #e4f2ff; background: #20405b; font-size: 12px; font-weight: 700; padding: 10px 12px; width: 100%; }
+.daily-hypothesis button:hover:not(:disabled) { border-color: #8ed0ff; background: #2a5879; }
+.daily-hypothesis.verified { background: #153932; border-color: #4b9874; }
+.daily-hypothesis.verified button { background: #1d5643; border-color: #357653; color: #9ce8c3; }
+.daily-hypothesis.rejected { border-color: #7c4454; background: #382332; }
+.daily-hypothesis.rejected button { border-color: #7c4454; background: #4d2b3d; color: #ffb2c2; }
+.daily-verified-notice { margin: 14px 0 0; background: #153830; border-left: 3px solid #79dcb1; padding: 13px 16px; border-radius: 6px; color: #a3eac8; font-size: 13px; line-height: 1.7; }
+@media (max-width: 700px) { .daily-hypothesis-grid { grid-template-columns: 1fr; } }
+
+/* Structured postmortems make previous deductions visible after an outage. */
+.daily-postmortem { margin: 22px 0 0; padding-top: 20px; border-top: 1px solid #354d63; display: grid; gap: 9px; }
+.daily-postmortem > .founder-kicker { margin-bottom: 6px; }
+.daily-review-entry { background: #142b35; border: 1px solid #325367; border-radius: 10px; padding: 14px 16px; }
+.daily-review-entry > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; align-items: center; }
+.daily-review-entry strong { font-size: 13px; }
+.daily-review-entry p { color: #adc7d8; margin: 12px 0 0; font-size: 12px; line-height: 1.7; }
+.daily-deduction-summary { margin: 16px 0; color: #abdac9; font-size: 13px; padding: 13px 16px; border-radius: 9px; background: #16362d; border: 1px solid #3e705f; line-height: 1.6; }
