@@ -151,10 +151,10 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
                 {INVESTMENTS.map((item) => (
                   <button className={game.investments.includes(item.id) ? 'founder-investment installed' : 'founder-investment'} type="button"
                     key={item.id}
-                    disabled={game.preparedThisMonth || game.investments.includes(item.id) || game.cash < item.cost}
+                    disabled={game.preparedThisMonth || (game.investments.includes(item.id) && item.id !== 'APP_SCALE' && item.id !== 'DB_SCALE') || game.cash < item.cost}
                     onClick={() => act((s) => prepareDailyOperations(s, item.id))}>
                     <span><strong>{item.name}</strong><small>{item.description}</small></span>
-                    <span className="founder-investment-meta"><b>{game.investments.includes(item.id) ? '도입됨 ✓' : money(item.cost)}</b></span>
+                    <span className="founder-investment-meta"><b>{game.investments.includes(item.id) && item.id !== 'APP_SCALE' && item.id !== 'DB_SCALE' ? '도입됨 ✓' : money(item.cost)}</b></span>
                   </button>
                 ))}
               </div>
@@ -251,7 +251,8 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
               </div>
               <div className="founder-subtitle"><h3>조치 적용</h3><span className="founder-caption">가능한 모든 조치가 현재 장애를 해결하는 것은 아닙니다.</span></div>
               <div className="daily-repair-grid">
-                {INVESTMENTS.filter((item) => item.id !== 'APM' && !game.investments.includes(item.id)).map((item) => (
+                {INVESTMENTS.filter((item) => item.id !== 'APM' &&
+                  (!game.investments.includes(item.id) || item.id === 'DB_SCALE' || item.id === 'APP_SCALE')).map((item) => (
                   <button type="button" className="founder-remedy" key={item.id} disabled={game.cash < item.cost}
                     onClick={() => act((s) => repairDailyIncident(s, item.id))}>
                     <span><strong>{item.name}</strong><small>{item.description}</small></span>
