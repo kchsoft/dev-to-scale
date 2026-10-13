@@ -163,3 +163,27 @@
 @media (max-width: 700px) {
   .founder-investment-grid { grid-template-columns: 1fr; }
 }
+
+/* Month-level market decisions: three visible strategies before infrastructure choices. */
+.founder-market-banner { border: 1px solid #4d6a89; border-radius: 13px; padding: clamp(22px, 3vw, 34px); background: linear-gradient(120deg, #17304a, #102534 86%); }
+.founder-market-banner h2 { margin: 15px 0 12px; max-width: 720px; }
+.founder-market-banner p { margin: 0; max-width: 750px; line-height: 1.8; font-size: 14px; color: #bfdbed; }
+.founder-market-options { display: grid; gap: 10px; }
+.founder-market-option { display: grid; text-align: left; gap: 12px; padding: 20px; border-radius: 12px; color: var(--fr-text); background: #182c3e; border: 1px solid #365772; }
+.founder-market-option:hover:not(:disabled) { border-color: #83c2fd; background: #1c3951; }
+.founder-market-option > strong { display: flex; justify-content: space-between; font-size: 17px; }
+.founder-market-option > strong span { color: var(--fr-blue); }
+.founder-market-effects { display: flex; flex-wrap: wrap; gap: 8px; }
+.founder-market-effects span { font-variant-numeric: tabular-nums; font-size: 12px; padding: 7px 9px; background: #0e2132; color: #e0efff; border: 1px solid #30536d; border-radius: 7px; }
+.founder-market-footnote { margin-top: 20px; font-size: 12px; }
+.founder-campaign-result { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 22px 0; }
+.founder-campaign-result > span { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #152839; padding: 15px; border-radius: 8px; font-size: 12px; color: #a7bbca; }
+.founder-campaign-result strong { font-size: 13px; color: #f5fbff; font-variant-numeric: tabular-nums; text-align: right; }
+.founder-market-history { margin: 18px 0; padding: 18px; background: #142637; border-radius: 10px; }
+.founder-market-history p { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; margin: 13px 0 0; }
+.founder-market-history small { font-size: 11px; color: #93b9d2; }
+.founder-another-seed { display: block; margin: 10px auto 0; width: 100%; }
+@media (max-width: 700px) {
+  .founder-campaign-result { grid-template-columns: 1fr; }
+  .founder-market-history p { flex-direction: column; }
+}
