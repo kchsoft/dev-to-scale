@@ -4,22 +4,31 @@
 
 The original Dev to Scale is a solid technical simulation, but it often asks the player to wait for a roadmap item, click "respond", and watch counters. This slice tests a different loop:
 
-**Choose a product direction → launch → observe a production incident → investigate → mitigate or fix → get a postmortem → reinvest.**
+**React to a market event → invest in prevention → choose a product direction → launch → investigate a possible incident → repair/mitigate → settle the month → repeat through day 90.**
 
 It deliberately runs beside the legacy GameEngine. Do not merge the new rules into the old architecture before playtests show which decisions are fun.
 
-## How to play
+## How to play — 90-day three-act campaign
 
-1. Run `npm install && npm run dev`.
-2. On the existing setup screen, choose **FOUNDER RUN** below "BOOT SERVICE".
-3. Pick one of four features: Search, Images, Ads, Notifications.
-4. A related production incident starts. The **symptoms** are visible immediately, but the **cause** is hidden.
-5. Optionally investigate metrics, logs or traces. Each probe costs **₩10,000 and 3 outage minutes**.
-6. Select a remediation. Actions have distinct cash and downtime costs.
-7. Wrong remedies waste resources. Mitigation reduces the impact of downtime but **does not close** the incident. The causal fix resolves it and opens the postmortem.
-8. Complete three feature→incident sprints to see the final outcome. The replay button restarts from the same initial state.
+1. Run `npm install && npm run dev`; click **FOUNDER RUN** on the existing setup.
+2. At **Day 1**, resolve an external **market event**. Different options alter cash, DAU, trust, one-month revenue and peak traffic load.
+3. Choose up to one preventive investment this month, then release a new feature.
+4. Live workload pressure is calculated with the peak traffic multiplier. An unprepared release may trigger an incident.
+5. Collect metrics, logs or traces (each costs cash and response time) and select a remediation. The causal fix must address the active root cause.
+6. See a month-end settlement and an incident/no-incident postmortem. The next market event starts at **Day 31** and **Day 61**.
+7. At **Day 90**, check the outcome. **Victory** requires 3 successfully launched features, DAU >= 1,700, trust >= 50 and positive cash. **Survival** without the targets is not victory.
+8. Replay with the same seed for a fair strategic comparison, or the next seed for a different event schedule.
 
-If funds are too low for a repair, a **concede** action resolves the soft-lock with major business consequences.
+**Time abstraction:** The current prototype represents each 30-day month as one strategy/feature/incident cycle; it is **not** yet a 90-tick daily simulation. Incident minutes are a distinct downtime metric.
+
+## Market events (v0.3)
+
+- `src/gameplay/market-events.ts` provides six authored business events split into three acts.
+- Each game gets one event per act: Viral/Partner (month 1), Rival/Press (month 2), Enterprise/Cloud Cost (month 3).
+- Three choices per event create measurable tradeoffs (cash, users, trust, peak request pressure, current-period revenue).
+- Event selection is deterministic from `seed + sprint` and **independent of player action order**.
+- Peak traffic is applied to the same `OperationalSnapshot` model that drives causal incident checks; it is removed after the month settles.
+- Cash choices that cannot be afforded are disabled; every event offers an affordable non-premium route.
 
 ## Implemented scope
 
@@ -28,7 +37,7 @@ If funds are too low for a repair, a **concede** action resolves the soft-lock w
 - 3 probes per incident with concrete findings.
 - 3 remediations per incident: causal fix, temporary mitigation, distractor.
 - Cash, DAU, trust, downtime, score, revenue, operating expenses.
-- 3-sprint run and postmortem screen with replay.
+- Three-act / 90-game-day run, per-month postmortems and seed-controlled replay.
 - Responsive standalone incident war room and entry via existing setup.
 - Pure unit tests for transitions, repeatability, costs and failure/concede paths.
 
