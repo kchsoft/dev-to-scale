@@ -62,3 +62,12 @@
 .daily-hypothesis.rejected button { border-color: #7c4454; background: #4d2b3d; color: #ffb2c2; }
 .daily-verified-notice { margin: 14px 0 0; background: #153830; border-left: 3px solid #79dcb1; padding: 13px 16px; border-radius: 6px; color: #a3eac8; font-size: 13px; line-height: 1.7; }
 @media (max-width: 700px) { .daily-hypothesis-grid { grid-template-columns: 1fr; } }
+
+/* Structured postmortems make previous deductions visible after an outage. */
+.daily-postmortem { margin: 22px 0 0; padding-top: 20px; border-top: 1px solid #354d63; display: grid; gap: 9px; }
+.daily-postmortem > .founder-kicker { margin-bottom: 6px; }
+.daily-review-entry { background: #142b35; border: 1px solid #325367; border-radius: 10px; padding: 14px 16px; }
+.daily-review-entry > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; align-items: center; }
+.daily-review-entry strong { font-size: 13px; }
+.daily-review-entry p { color: #adc7d8; margin: 12px 0 0; font-size: 12px; line-height: 1.7; }
+.daily-deduction-summary { margin: 16px 0; color: #abdac9; font-size: 13px; padding: 13px 16px; border-radius: 9px; background: #16362d; border: 1px solid #3e705f; line-height: 1.6; }
