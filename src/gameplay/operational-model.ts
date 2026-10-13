@@ -64,8 +64,10 @@ export function calculateOperations(
   investments: readonly InvestmentId[],
   dau: number,
   trafficMultiplier = 1,
+  techDebt = 0,
 ): OperationalSnapshot {
   if (!Number.isFinite(trafficMultiplier) || trafficMultiplier <= 0) throw new Error('유효하지 않은 트래픽 배율입니다.');
+  if (!Number.isFinite(techDebt) || techDebt < 0 || techDebt > 100) throw new Error('기술 부채는 0~100이어야 합니다.');
   const factor = (1 + Math.max(0, dau - 650) / 5000) * trafficMultiplier;
   const capacity: Record<NodeId, number> = {
     ...CAPACITY,
@@ -85,7 +87,10 @@ export function calculateOperations(
   }
   const nodes = {} as Record<NodeId, NodePressure>;
   for (const id of NODE_ORDER) {
-    const weightedDemand = Math.round(demand[id] * factor * 10) / 10;
+    // Rework, retries and suboptimal application code introduce excess pressure.
+    // Capacity decisions and technical debt now share the same pressure model.
+    const debtLoad = id === 'APP' ? 1 + techDebt * 0.004 : id === 'DB' ? 1 + techDebt * 0.0015 : 1;
+    const weightedDemand = Math.round(demand[id] * factor * debtLoad * 10) / 10;
     const ratio = weightedDemand / capacity[id];
     nodes[id] = {
       id, demand: weightedDemand, capacity: capacity[id], ratio,
