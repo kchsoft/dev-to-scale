@@ -1,0 +1,44 @@
+/* Daily campaign reuses Founder Run tokens while making daily progress legible. */
+.daily-campaign .founder-market-options { margin-top: 18px; }
+.daily-error { max-width: 1440px; margin: 0 auto 16px; padding: 14px 18px; color: #ffd4db; background: #45202b; border: 1px solid #9c5460; border-radius: 10px; font-weight: 600; }
+.daily-development-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.daily-feature-card { min-width: 0; padding: 19px; border: 1px solid #304760; border-radius: 12px; background: #152639; }
+.daily-feature-card > strong { font-size: 19px; }
+.daily-feature-card p { min-height: 37px; font-size: 12px; color: var(--fr-muted); line-height: 1.7; }
+.daily-feature-facts { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: #bbd5ed; margin: 13px 0; }
+.daily-feature-buttons { display: flex; gap: 8px; }
+.daily-feature-buttons button { flex: 1; min-width: 0; padding: 12px 10px; color: #d5eaff; border: 1px solid #477092; background: #1c3a55; border-radius: 8px; font-size: 12px; font-weight: 700; }
+.daily-feature-buttons button:hover:not(:disabled) { border-color: #9ed2ff; background: #265172; }
+.daily-feature-buttons button:last-child { color: #ffdaaf; border-color: #745740; background: #3a2e24; }
+.daily-feature-buttons button:last-child:hover:not(:disabled) { border-color: #ffbf77; }
+.daily-feature-buttons small { display: block; font-size: 11px; font-weight: 500; margin-top: 7px; color: #aac0d6; }
+.daily-skip { margin-top: 18px; width: 100%; }
+.daily-active-job { margin: 20px 0; padding: 24px; background: #193246; border: 1px solid #3e6483; border-radius: 12px; }
+.daily-active-job .founder-choice-head strong { font-size: 20px; }
+.daily-active-job .founder-choice-head span { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--fr-blue); font-weight: 700; }
+.daily-active-job p { color: #9db9cf; font-size: 12px; margin: 12px 0 0; }
+.daily-progress { margin: 16px 0 0; height: 8px; border-radius: 6px; overflow: hidden; background: #395067; }
+.daily-progress span { display: block; background: linear-gradient(90deg, #5ab4f5, #8ce2d2); height: 100%; border-radius: 6px; }
+.daily-actions { display: grid; grid-template-columns: minmax(120px, 1fr) 1fr 1fr; gap: 10px; margin: 22px 0; }
+.daily-actions .founder-ghost, .daily-actions .founder-primary { min-height: 53px; font-size: 13px; }
+.daily-small-title { margin: 28px 0 12px; padding-top: 14px; border-top: 1px solid #344556; }
+.daily-ledger { display: grid; gap: 7px; }
+.daily-ledger-entry { display: flex; align-items: center; gap: 12px; padding: 13px; border: 1px solid #304356; border-radius: 9px; background: #172739; }
+.daily-ledger-entry > .founder-kicker { width: 44px; flex-shrink: 0; }
+.daily-ledger-entry > div { min-width: 0; flex: 1; display: grid; gap: 6px; }
+.daily-ledger-entry strong { font-size: 13px; }
+.daily-ledger-entry small { font-size: 11px; color: #9db7cc; line-height: 1.5; }
+.daily-ok, .daily-warn { flex-shrink: 0; font-size: 10px; font-weight: 800; letter-spacing: .08em; color: var(--fr-green); }
+.daily-warn { color: var(--fr-red); }
+.daily-repair-grid { display: grid; gap: 9px; }
+.daily-report-next { margin-top: 24px; }
+.daily-reset { width: 100%; font-size: 12px; }
+.daily-campaign .founder-sidebar .founder-aside-panel:last-child { border-color: #36516b; }
+.daily-campaign .founder-stat { gap: 6px; }
+@media (max-width: 700px) {
+  .daily-development-options { grid-template-columns: 1fr; }
+  .daily-actions { grid-template-columns: 1fr; }
+  .daily-feature-buttons { flex-direction: column; }
+  .daily-ledger-entry { align-items: flex-start; flex-wrap: wrap; }
+  .daily-ledger-entry .daily-ok, .daily-ledger-entry .daily-warn { margin-left: auto; }
+}
