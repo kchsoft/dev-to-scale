@@ -227,6 +227,8 @@ describe('daily 90-day campaign', () => {
     const verifiedQuote = quoteDailyRepair(verified, 'INDEX');
     expect(verifiedQuote.cost).toBeLessThan(standardQuote.cost);
     expect(verifiedQuote.minutes).toBe(standardQuote.minutes - 3);
+    // A good diagnosis cannot subsidize an unrelated infrastructure change.
+    expect(quoteDailyRepair(verified, 'APP_SCALE')).toEqual(quoteDailyRepair(s, 'APP_SCALE'));
     const fixed = repairDailyIncident(verified, 'INDEX');
     expect(fixed.cash).toBe(verified.cash - verifiedQuote.cost);
     expect(fixed.monthCost).toBe(verified.monthCost + verifiedQuote.cost);
