@@ -378,6 +378,7 @@ function settleIncident(state: FounderState): FounderState {
   };
   return {
     ...state, phase: 'debrief', cash, dau, trust,
+    peakTrafficMultiplier: 1, marketRevenueBonus: 0,
     operational: calculateOperations(state.completed, state.investments, dau),
     incidentsResolved: state.incidentsResolved + (incident ? 1 : 0),
     reports: [...state.reports, report],
@@ -480,6 +481,7 @@ export function abandonIncident(state: FounderState): FounderState {
   };
   return {
     ...state, phase: 'debrief', cash: state.cash - expenses, trust, dau,
+    peakTrafficMultiplier: 1, marketRevenueBonus: 0,
     operational: calculateOperations(state.completed, state.investments, dau),
     reports: [...state.reports, report],
     feedback: '서비스 중단을 선택했습니다. 사용자 신뢰와 성장 기회를 잃었습니다.',
