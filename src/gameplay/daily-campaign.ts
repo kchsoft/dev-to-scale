@@ -445,7 +445,11 @@ export function submitIncidentHypothesis(s: DailyCampaignState, hypothesis: Hypo
 
 export function quoteDailyRepair(s: DailyCampaignState, action: RepairChoice): { cost: number; minutes: number } {
   const baseCost = action === 'THROTTLE' ? THROTTLE_COST : action === 'REFACTOR' ? REFACTOR_COST : price(action);
-  const prepared = action !== 'THROTTLE'
+  // A correct diagnosis only discounts a repair that actually addresses that
+  // diagnosis. Buying an unrelated server must not become artificially cheap.
+  const causalAction = s.incident?.cause === 'DEBT_REGRESSION'
+    ? 'REFACTOR' : s.incident ? ROOT_CAUSES[s.incident.cause].fix : null;
+  const prepared = action === causalAction
     && s.incident !== null && s.incident.verifiedHypothesis === s.incident.cause;
   const baseMinutes = action === 'THROTTLE' ? 4 : action === 'REFACTOR' ? 11 : 8;
   return {
