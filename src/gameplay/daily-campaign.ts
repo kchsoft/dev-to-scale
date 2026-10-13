@@ -158,7 +158,7 @@ export function chooseDailyMarket(s: DailyCampaignState, choiceId: string): Dail
 export function prepareDailyOperations(s: DailyCampaignState, id: InvestmentId): DailyCampaignState {
   if (s.phase !== 'planning') throw new Error('출시 전에만 사전 투자가 가능합니다.');
   if (s.preparedThisMonth) throw new Error('월별 사전 투자는 1회만 가능합니다.');
-  if (s.investments.includes(id)) throw new Error('이미 구축한 기술입니다.');
+  if (!['DB_SCALE', 'APP_SCALE'].includes(id) && s.investments.includes(id)) throw new Error('이미 구축한 기술입니다.');
   if (s.cash < price(id)) throw new Error('투자 예산이 부족합니다.');
   const next = {
     ...s, investments: [...s.investments, id], cash: s.cash - price(id),
@@ -381,7 +381,8 @@ export function investigateDailyIncident(s: DailyCampaignState, probe: 'metrics'
 export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice): DailyCampaignState {
   if (s.phase !== 'incident' || !s.incident) throw new Error('대응 중인 장애가 없습니다.');
   if (s.incident.attempted.includes(action)) return s;
-  if (action !== 'REFACTOR' && action !== 'THROTTLE' && s.investments.includes(action)) {
+  if (action !== 'REFACTOR' && action !== 'THROTTLE'
+      && action !== 'DB_SCALE' && action !== 'APP_SCALE' && s.investments.includes(action)) {
     throw new Error('이미 도입한 조치입니다.');
   }
   const cost = action === 'THROTTLE' ? THROTTLE_COST : action === 'REFACTOR' ? REFACTOR_COST : price(action);
@@ -393,7 +394,9 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
   let peakMultiplier = s.peakMultiplier;
   if (action === 'REFACTOR') debt = Math.max(0, debt - 45);
   else if (action === 'THROTTLE') peakMultiplier = Math.max(1, s.peakMultiplier * 0.70);
-  else if (!investments.includes(action)) investments = [...investments, action];
+  else if (action === 'DB_SCALE' || action === 'APP_SCALE' || !investments.includes(action)) {
+    investments = [...investments, action];
+  }
   const next: DailyCampaignState = {
     ...s, investments, debt, peakMultiplier, cash: s.cash - cost,
     monthCost: s.monthCost + cost,
