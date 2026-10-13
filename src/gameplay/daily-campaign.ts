@@ -38,6 +38,18 @@ export interface DailyIncident {
   resumePhase: 'development' | 'operating';
 }
 
+export interface IncidentReview {
+  day: number;
+  month: number;
+  cause: DailyCause;
+  remedy: RepairChoice | 'CONCEDE';
+  solved: boolean;
+  evidence: readonly EvidenceProbe[];
+  hypotheses: readonly HypothesisAttempt[];
+  verified: boolean;
+  outageMinutes: number;
+}
+
 export interface DayRecord {
   day: number;
   dau: number;
@@ -99,6 +111,7 @@ export interface DailyCampaignState {
   reports: readonly MonthReport[];
   history: readonly DayRecord[];
   journal: readonly string[];
+  reviews: readonly IncidentReview[];
   feedback: string;
 }
 
@@ -141,7 +154,7 @@ export function createDailyCampaign(seed = 17): DailyCampaignState {
     monthHealthyDays: 0, healthyDays: 0,
     verifiedDiagnoses: 0, incorrectDiagnoses: 0,
     monthVerifiedDiagnoses: 0, monthIncorrectDiagnoses: 0,
-    reports: [], history: [], journal: [],
+    reports: [], history: [], journal: [], reviews: [],
     feedback: '1개월 차입니다. 시장 사건에 대응해 사업 방향을 결정하세요.',
   };
 }
@@ -259,6 +272,25 @@ function detected(s: DailyCampaignState): DailyCause | null {
     : structural ?? (s.debt >= 55 ? 'DEBT_REGRESSION' : null);
   if (cause === s.suppressedCause) return null;
   return cause;
+}
+
+function reviewIncident(
+  state: DailyCampaignState,
+  remedy: RepairChoice | 'CONCEDE',
+  solved: boolean,
+  additionalMinutes = 0,
+): IncidentReview {
+  if (!state.incident) throw new Error('장애 리뷰 대상이 없습니다.');
+  return {
+    day: state.day,
+    month: state.month,
+    cause: state.incident.cause,
+    remedy, solved,
+    evidence: [...state.incident.findings],
+    hypotheses: [...state.incident.hypotheses],
+    verified: state.incident.verifiedHypothesis === state.incident.cause,
+    outageMinutes: state.incident.minutes + additionalMinutes,
+  };
 }
 
 /**
@@ -496,6 +528,7 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
   if (!newCause) {
     return resumeAfterIncident({
       ...reassessed,
+      reviews: [...s.reviews, reviewIncident(reassessed, action, true)],
       feedback: '근본 원인이 제거됐습니다. 남은 기간의 서비스 운영을 재개합니다.',
       journal: [...s.journal, 'D' + s.day + ' ' + s.incident.cause + ' 해결 (' + action + ')'],
     });
@@ -504,6 +537,7 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
     const node = newCause === 'DEBT_REGRESSION' ? 'APP' : ROOT_CAUSES[newCause].node;
     return {
       ...reassessed,
+      reviews: [...s.reviews, reviewIncident(reassessed, action, true)],
       incident: {
         cause: newCause, node, findings: [], hypotheses: [], verifiedHypothesis: null,
         attempted: [], minutes: 0,
@@ -523,6 +557,7 @@ export function concedeDailyIncident(s: DailyCampaignState): DailyCampaignState 
   const trust = clip(s.trust - 17, 0, 100);
   return resumeAfterIncident({
     ...s, suppressedCause, dau, trust,
+    reviews: [...s.reviews, reviewIncident(s, 'CONCEDE', false, 180)],
     monthOutageMinutes: s.monthOutageMinutes + 180,
     ops: calculateOperations(s.features, s.investments, dau, marketPeak(s), s.debt),
     feedback: '일부 서비스를 중단했습니다. 이번 달에는 같은 장애를 다시 발생시키지 않지만 사용자 손실이 큽니다.',
