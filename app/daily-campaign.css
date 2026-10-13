@@ -42,3 +42,23 @@
   .daily-ledger-entry { align-items: flex-start; flex-wrap: wrap; }
   .daily-ledger-entry .daily-ok, .daily-ledger-entry .daily-warn { margin-left: auto; }
 }
+
+/* Incident investigation should read like a war room, not a multiple-choice quiz. */
+.daily-hypothesis-intro { margin: 15px 0; background: #182a38; border: 1px solid #39546a; border-radius: 11px; padding: 15px 18px; }
+.daily-hypothesis-intro p { font-size: 13px; line-height: 1.75; margin: 0 0 12px; color: #c3d9eb; }
+.daily-hypothesis-progress { display: flex; gap: 9px; flex-wrap: wrap; }
+.daily-hypothesis-progress span { display: inline-flex; align-items: center; gap: 9px; font-size: 11px; padding: 7px 9px; background: #0d2030; border-radius: 6px; color: #b0c9df; }
+.daily-hypothesis-progress b { font-size: 12px; color: #f0f7ff; font-variant-numeric: tabular-nums; }
+.daily-hypothesis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.daily-hypothesis { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; border: 1px solid #354d60; border-radius: 10px; background: #182838; padding: 15px; }
+.daily-hypothesis > strong { font-size: 14px; line-height: 1.45; }
+.daily-hypothesis > small { color: #a1b9cc; font-size: 12px; line-height: 1.65; min-height: 39px; }
+.daily-hypothesis .founder-kicker { font-size: 10px; }
+.daily-hypothesis button { margin-top: auto; border: 1px solid #527b98; border-radius: 7px; color: #e4f2ff; background: #20405b; font-size: 12px; font-weight: 700; padding: 10px 12px; width: 100%; }
+.daily-hypothesis button:hover:not(:disabled) { border-color: #8ed0ff; background: #2a5879; }
+.daily-hypothesis.verified { background: #153932; border-color: #4b9874; }
+.daily-hypothesis.verified button { background: #1d5643; border-color: #357653; color: #9ce8c3; }
+.daily-hypothesis.rejected { border-color: #7c4454; background: #382332; }
+.daily-hypothesis.rejected button { border-color: #7c4454; background: #4d2b3d; color: #ffb2c2; }
+.daily-verified-notice { margin: 14px 0 0; background: #153830; border-left: 3px solid #79dcb1; padding: 13px 16px; border-radius: 6px; color: #a3eac8; font-size: 13px; line-height: 1.7; }
+@media (max-width: 700px) { .daily-hypothesis-grid { grid-template-columns: 1fr; } }
