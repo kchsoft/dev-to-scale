@@ -1,3 +1,19 @@
+## Incident deduction / War Room (v0.5)
+
+The original incident screen was mostly an implementation-choice quiz. The daily campaign now has an evidence-backed **root-cause hypothesis board** (`src/gameplay/incident-deduction.ts`).
+
+- Seven competing hypotheses: SQL plan, DB saturation, DB connection exhaustion, APP capacity, deployment regression, Storage I/O, Consumer lag. The same general DB CPU/P95 snapshot can support multiple competing explanations.
+- Metrics, logs and trace probes reveal increasingly diagnostic **observations**, derived from live `OperationalSnapshot` values where applicable. A generic metric deliberately does not label the correct root cause. The player still must interpret the observations.
+- At least **two different probes** are required before submitting a hypothesis; no empty-evidence oracle.
+- Correct verification gives an **18% repair cost discount and 3 minutes faster permanent remediation**, plus a small campaign score bonus.
+- Wrong verification consumes **₩20,000, seven minutes of downtime, DAU and trust**, with only two wrong verifications permitted per incident.
+- Repair without submitting a hypothesis is still valid, but does not earn the diagnosis discount. Failure to verify a hypothesis never soft-locks the campaign.
+- Every new root cause in a chained incident resets its hypotheses and evidence, while lifetime correct/incorrect totals remain. Monthly and final reports include diagnosis results.
+- UI estimates derive from the *same quotation function* as the reducer, avoiding misleading button costs.
+- Local saved-state schema key is now `v2`; the older prototype save does not automatically migrate.
+
+**Honest limitation:** scenario text and candidate explanations remain authored. This is a deduction scaffold with measurable consequences, not a full distributed tracing simulator, and it still requires manual playtesting for clarity and fairness.
+
 ## Real daily simulation — new 90-DAY FOUNDER mode (v0.4)
 
 The former Founder Run remains available as a compact three-decision prototype, but the setup screen now also exposes **90-DAY FOUNDER**, backed by a new, genuinely day-stepped `src/gameplay/daily-campaign.ts` engine. The new mode is intended to supersede the three-step prototype after user testing.
