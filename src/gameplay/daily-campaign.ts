@@ -443,6 +443,17 @@ export function submitIncidentHypothesis(s: DailyCampaignState, hypothesis: Hypo
   return { ...next, ops: simple(next) };
 }
 
+export function quoteDailyRepair(s: DailyCampaignState, action: RepairChoice): { cost: number; minutes: number } {
+  const baseCost = action === 'THROTTLE' ? THROTTLE_COST : action === 'REFACTOR' ? REFACTOR_COST : price(action);
+  const prepared = action !== 'THROTTLE'
+    && s.incident !== null && s.incident.verifiedHypothesis === s.incident.cause;
+  const baseMinutes = action === 'THROTTLE' ? 4 : action === 'REFACTOR' ? 11 : 8;
+  return {
+    cost: prepared ? Math.round(baseCost * 0.82) : baseCost,
+    minutes: prepared ? Math.max(2, baseMinutes - 3) : baseMinutes,
+  };
+}
+
 export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice): DailyCampaignState {
   if (s.phase !== 'incident' || !s.incident) throw new Error('대응 중인 장애가 없습니다.');
   // Scaling can be purchased repeatedly until capacity genuinely exceeds demand.
@@ -451,14 +462,8 @@ export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice)
       && action !== 'DB_SCALE' && action !== 'APP_SCALE' && s.investments.includes(action)) {
     throw new Error('이미 도입한 조치입니다.');
   }
-  const baseCost = action === 'THROTTLE' ? THROTTLE_COST : action === 'REFACTOR' ? REFACTOR_COST : price(action);
-  // Correct, evidence-backed diagnosis makes the permanent repair plan cheaper
-  // and reduces time spent applying it. Raw guessing gives no discount.
-  const prepared = action !== 'THROTTLE' && s.incident.verifiedHypothesis === s.incident.cause;
-  const cost = prepared ? Math.round(baseCost * 0.82) : baseCost;
+  const { cost, minutes } = quoteDailyRepair(s, action);
   if (s.cash < cost) throw new Error('복구 비용이 부족합니다.');
-  const baseMinutes = action === 'THROTTLE' ? 4 : action === 'REFACTOR' ? 11 : 8;
-  const minutes = prepared ? Math.max(2, baseMinutes - 3) : baseMinutes;
   const mitigated = action === 'THROTTLE' || s.incident.mitigated;
   let investments = s.investments;
   let debt = s.debt;
