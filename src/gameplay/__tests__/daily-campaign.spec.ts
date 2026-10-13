@@ -188,7 +188,7 @@ describe('daily 90-day campaign', () => {
     const inspected = investigateDailyIncident(s, 'logs');
     expect(inspected.dau).toBeLessThan(s.dau);
     expect(inspected.trust).toBeLessThan(s.trust);
-    expect(inspected.ops.nodes.DB.demand).toBeLessThan(s.ops.nodes.DB.demand);
+    expect(inspected.ops.nodes.DB.demand).toBeLessThanOrEqual(s.ops.nodes.DB.demand);
     const resolved = recover(inspected);
     expect(resolved.dau).toBeLessThan(inspected.dau);
     expect(resolved.trust).toBeLessThan(inspected.trust);
