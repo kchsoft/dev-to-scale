@@ -9,7 +9,7 @@ describe('daily founder mode', () => {
     expect(html).toContain('DAY');
     expect(html).toContain('90');
     expect(html).toContain('사업 전략 결정');
-    expect(html).toContain('스타트업');
+    expect(html).toContain('DEV TO SCALE');
     expect(html).not.toContain('서비스 복구 완료');
   });
 });
