@@ -63,7 +63,8 @@ export function DailyCampaign({ onExit }: { readonly onExit: () => void }) {
 
   const act = (fn: (s: DailyCampaignState) => DailyCampaignState) => {
     try {
-      setGame((s) => fn(s));
+      const next = fn(game);
+      setGame(next);
       setMessage('');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '작업을 처리할 수 없습니다.');
