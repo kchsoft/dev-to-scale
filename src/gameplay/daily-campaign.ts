@@ -380,7 +380,8 @@ export function investigateDailyIncident(s: DailyCampaignState, probe: 'metrics'
 
 export function repairDailyIncident(s: DailyCampaignState, action: RepairChoice): DailyCampaignState {
   if (s.phase !== 'incident' || !s.incident) throw new Error('대응 중인 장애가 없습니다.');
-  if (s.incident.attempted.includes(action)) return s;
+  // Scaling can be purchased repeatedly until capacity genuinely exceeds demand.
+  if (s.incident.attempted.includes(action) && action !== 'DB_SCALE' && action !== 'APP_SCALE') return s;
   if (action !== 'REFACTOR' && action !== 'THROTTLE'
       && action !== 'DB_SCALE' && action !== 'APP_SCALE' && s.investments.includes(action)) {
     throw new Error('이미 도입한 조치입니다.');
