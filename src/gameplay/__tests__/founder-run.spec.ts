@@ -121,10 +121,13 @@ describe('90-day market and operations campaign', () => {
     const viral = chooseMarketStrategy(initial, 'embrace');
     const prepared = investInOperations(viral, 'INDEX');
     const launched = launchFeature(prepared, 'SEARCH');
-    expect(launched.peakTrafficMultiplier).toBe(1.75);
-    expect(launched.operational.nodes.DB.demand).toBeGreaterThan(
-      calculateOperations(launched.completed, launched.investments, launched.dau).nodes.DB.demand,
-    );
+    expect(prepared.peakTrafficMultiplier).toBe(1.75);
+    expect(launched.dau).toBeGreaterThan(prepared.dau);
+    const peak = calculateOperations(launched.completed, launched.investments, launched.dau, prepared.peakTrafficMultiplier);
+    const normal = calculateOperations(launched.completed, launched.investments, launched.dau);
+    expect(peak.nodes.DB.demand).toBeGreaterThan(normal.nodes.DB.demand);
+    // After a clean launch the month settles and peak capacity pressure expires.
+    expect(launched.operational.nodes.DB.demand).toBe(launched.phase === 'debrief' ? normal.nodes.DB.demand : peak.nodes.DB.demand);
     // Root-cause adjudication is driven by peak workload; the specific load
     // may still be below the saturation threshold on a sufficiently optimized stack.
     if (launched.phase === 'incident') {
