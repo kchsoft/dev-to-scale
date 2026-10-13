@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import {
-  FEATURE_CATALOG, FEATURE_ORDER, MAX_SPRINTS,
+  FEATURE_CATALOG, FEATURE_ORDER, MAX_SPRINTS, CAMPAIGN_DAYS,
   createFounderRun, currentIncident, launchFeature, investigate, remediate,
   continueFounderRun, abandonIncident, investInOperations, totalScore,
+  currentMarketEvent, chooseMarketStrategy, campaignOutcome,
   type FeatureId, type FounderState, type ProbeId,
 } from '../gameplay/founder-run';
 import { INVESTMENTS, NODE_ORDER, calculateOperations } from '../gameplay/operational-model';
@@ -15,6 +16,8 @@ const number = (value: number) => Math.round(value).toLocaleString('ko-KR');
 export function FounderRun({ onExit }: { readonly onExit: () => void }) {
   const [game, setGame] = useState<FounderState>(createFounderRun);
   const incident = currentIncident(game);
+  const market = currentMarketEvent(game);
+  const outcome = campaignOutcome(game);
   const currentReport = game.reports[game.reports.length - 1];
 
   const start = (featureId: FeatureId) => setGame((state) => launchFeature(state, featureId));
@@ -33,7 +36,7 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
           </div>
         </div>
         <div className="founder-header-actions">
-          <span className="founder-label">SPRINT {game.sprint} / {MAX_SPRINTS}</span>
+          <span className="founder-label">MONTH {game.sprint} / {MAX_SPRINTS} · D{game.day}–{CAMPAIGN_DAYS}</span>
           <button type="button" className="founder-ghost" onClick={onExit}>← 게임 선택</button>
         </div>
       </header>
@@ -45,7 +48,7 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
       </div>
 
       <section className="founder-status" aria-label="현재 회사 상태">
-        <Status label="GAME DAY" value={'D' + game.day} />
+        <Status label="CAMPAIGN DAY" value={'D' + game.day + ' / ' + CAMPAIGN_DAYS} />
         <Status label="DAILY USERS" value={number(game.dau)} detail="DAU" />
         <Status label="AVAILABLE CASH" value={won(game.cash)} />
         <Status label="USER TRUST" value={String(game.trust) + ' / 100'} tone={game.trust < 45 ? 'danger' : 'good'} />
@@ -54,6 +57,37 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
 
       <section className="founder-layout">
         <div className="founder-main">
+          {game.phase === 'market' && market && (
+            <section className="founder-panel founder-market">
+              <div className="founder-market-banner">
+                <span className="founder-kicker">MONTH {game.sprint} / MARKET EVENT · {market.tag}</span>
+                <h2>{market.title}</h2>
+                <p>{market.story}</p>
+              </div>
+              <div className="founder-subtitle">
+                <div><span className="founder-kicker">BUSINESS DECISION</span><h3>어떻게 대응할까?</h3></div>
+                <span className="founder-caption">선택은 사용자 수와 실제 피크 부하를 바꿉니다.</span>
+              </div>
+              <div className="founder-market-options">
+                {market.options.map((option) => (
+                  <button type="button" key={option.id} className="founder-market-option"
+                    disabled={game.cash + option.cashDelta < 0}
+                    onClick={() => setGame((state) => chooseMarketStrategy(state, option.id))}>
+                    <strong>{option.label} <span aria-hidden="true">↗</span></strong>
+                    <span className="founder-muted">{option.description}</span>
+                    <span className="founder-market-effects">
+                      <span>DAU {option.dauDelta >= 0 ? '+' : ''}{number(option.dauDelta)}</span>
+                      <span>현금 {option.cashDelta >= 0 ? '+' : '−'}{won(Math.abs(option.cashDelta))}</span>
+                      <span>신뢰도 {option.trustDelta >= 0 ? '+' : ''}{option.trustDelta}</span>
+                      <span>피크 부하 ×{option.trafficMultiplier.toFixed(2)}</span>
+                      {option.revenueBonus !== 0 && <span>이번 달 추가 매출 {option.revenueBonus >= 0 ? '+' : '−'}{won(Math.abs(option.revenueBonus))}</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="founder-muted founder-market-footnote">이 선택은 되돌릴 수 없습니다. 다음 단계에서 기술을 투자한 뒤 기능을 출시합니다.</p>
+            </section>
+          )}
           {game.phase === 'planning' && (
             <section className="founder-panel">
               <p className="founder-kicker">01 / PRODUCT STRATEGY</p>
@@ -92,7 +126,7 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
               <div className="founder-choice-grid">
                 {FEATURE_ORDER.filter((id) => !game.completed.includes(id)).map((id) => {
                   const feature = FEATURE_CATALOG[id];
-                  const projection = calculateOperations([...game.completed, id], game.investments, game.dau + feature.users);
+                  const projection = calculateOperations([...game.completed, id], game.investments, game.dau + feature.users, game.peakTrafficMultiplier);
                   const maximumLoad = Math.round(Math.max(...NODE_ORDER.map((node) => projection.nodes[node].ratio)) * 100);
                   return (
                     <button type="button" key={feature.id} className="founder-choice" disabled={feature.cost > game.cash} onClick={() => start(feature.id)}>
@@ -139,7 +173,7 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
                     <div key={probe.id} className={revealed ? 'founder-probe revealed' : 'founder-probe'}>
                       <div className="founder-probe-row">
                         <strong>{probe.name}</strong>
-                        <button type="button" className="founder-small-button" disabled={revealed || game.cash < probe.cost} onClick={() => read(probe.id)}>
+                        <button type="button" className="founder-small-button" disabled={revealed || game.cash < (game.investments.includes('APM') ? 3000 : probe.cost)} onClick={() => read(probe.id)}>
                           {revealed ? '확인 완료 ✓' : '증거 수집 →'}
                         </button>
                       </div>
@@ -204,9 +238,21 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
           {game.phase === 'complete' && (
             <section className="founder-panel founder-finish">
               <span className="founder-kicker">CAMPAIGN COMPLETED</span>
-              <h2>{game.trust > 0 && game.cash > 0 ? '스타트업은 살아남았습니다.' : '스타트업이 멈춰 섰습니다.'}</h2>
+              <h2>{outcome === 'won' ? '90일 성장 목표 달성!' : outcome === 'survived' ? '90일 생존, 목표에는 미달했습니다.' : '스타트업이 멈춰 섰습니다.'}</h2>
               <div className="founder-final-score">{number(totalScore(game))}<small>FINAL SCORE</small></div>
-              <p>총 {game.reports.length}개 기능 출시, {game.incidentsResolved}개 장애 해결. 같은 출발점에서도 어떤 기능을 먼저 선택하고 어떻게 대응했는지에 따라 결과가 달라집니다.</p>
+              <p>총 {game.reports.length}개 기능 출시, {game.incidentsResolved}개 장애 해결. 90일 캠페인 목표는 DAU 1,700명 이상, 신뢰도 50 이상, 파산 없이 모든 월간 기능을 성공적으로 출시하는 것입니다.</p>
+              <div className="founder-campaign-result">
+                <span>최종 DAU <strong>{number(game.dau)} / 1,700</strong></span>
+                <span>고객 신뢰 <strong>{game.trust} / 50</strong></span>
+                <span>최종 현금 <strong>{won(game.cash)}</strong></span>
+                <span>게임 Seed <strong>#{game.seed}</strong></span>
+              </div>
+              <div className="founder-market-history">
+                <span className="founder-kicker">MARKET DECISIONS / 월별 사업 전략</span>
+                {game.marketHistory.map((decision) => (
+                  <p key={decision.sprint}>MONTH {decision.sprint} · {decision.label} <small>피크 ×{decision.trafficMultiplier.toFixed(2)}</small></p>
+                ))}
+              </div>
               <div className="founder-history">
                 {game.reports.map((report) => (
                   <div key={report.sprint}>
@@ -215,7 +261,8 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
                   </div>
                 ))}
               </div>
-              <button type="button" className="founder-primary" onClick={() => setGame(createFounderRun())}>새로운 전략으로 재도전 ↻</button>
+              <button type="button" className="founder-primary" onClick={() => setGame(createFounderRun(game.seed))}>같은 시장 환경에서 다시 도전 ↻</button>
+              <button type="button" className="founder-ghost founder-another-seed" onClick={() => setGame(createFounderRun(game.seed + 1))}>다른 시장 이벤트로 다시 도전 →</button>
             </section>
           )}
         </div>
@@ -261,6 +308,12 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
             )}
           </section>
           <section className="founder-aside-panel">
+            <span className="founder-kicker">MARKET PRESSURE</span>
+            <h3>이번 달 시장 상황</h3>
+            <p className="founder-feedback">현재 피크 트래픽 ×{game.peakTrafficMultiplier.toFixed(2)}</p>
+            <p className="founder-muted">기능 출시의 부하에 더해 시장 이벤트로 인한 순간적인 트래픽 변화를 계산합니다.</p>
+          </section>
+          <section className="founder-aside-panel">
             <span className="founder-kicker">TECH INVESTMENTS</span>
             <h3>구축한 운영 개선</h3>
             {game.investments.length === 0 ? <p className="founder-muted">아직 사전 투자하거나 장애를 근본 해결한 기록이 없습니다.</p> : (
@@ -276,7 +329,7 @@ export function FounderRun({ onExit }: { readonly onExit: () => void }) {
           </section>
         </aside>
       </section>
-      <footer className="founder-footer">FOUNDER RUN · 실험용 3-스프린트 시뮬레이션 · 수치는 게임 밸런싱을 위한 가상값입니다.</footer>
+      <footer className="founder-footer">FOUNDER RUN · 실험용 90일 · 3개월 경영 시뮬레이션 · 수치는 게임 밸런싱을 위한 가상값입니다.</footer>
     </main>
   );
 }
