@@ -9,8 +9,9 @@ The original incident screen was mostly an implementation-choice quiz. The daily
 - Wrong verification consumes **₩20,000, seven minutes of downtime, DAU and trust**, with only two wrong verifications permitted per incident.
 - Repair without submitting a hypothesis is still valid, but does not earn the diagnosis discount. Failure to verify a hypothesis never soft-locks the campaign.
 - Every new root cause in a chained incident resets its hypotheses and evidence, while lifetime correct/incorrect totals remain. Monthly and final reports include diagnosis results.
+- Closed incidents produce a structured postmortem recording the true root cause, remedy used, evidence collected, diagnosis attempts and outage time. These are visible in monthly reports.
 - UI estimates derive from the *same quotation function* as the reducer, avoiding misleading button costs.
-- Local saved-state schema key is now `v2`; the older prototype save does not automatically migrate.
+- The local saved-state schema key is now `v3` (structured incident reviews); earlier prototype saves do not automatically migrate.
 
 **Honest limitation:** scenario text and candidate explanations remain authored. This is a deduction scaffold with measurable consequences, not a full distributed tracing simulator, and it still requires manual playtesting for clarity and fairness.
 
